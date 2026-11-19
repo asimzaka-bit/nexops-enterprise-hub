@@ -117,9 +117,86 @@ export interface GmailRecentMessage {
   threadId: string;
   from: string;
   to: string;
+  cc?: string;
   subject: string;
   date: string;
   snippet: string;
+  labelIds: string[];
+  isUnread: boolean;
+  isStarred: boolean;
+  bodyText?: string;
+}
+
+export interface GmailLabelItem {
+  id: string;
+  name: string;
+  type: 'system' | 'user';
+  messagesUnread?: number;
+}
+
+export type GmailFolderKey = 'inbox' | 'starred' | 'snoozed' | 'sent' | 'drafts' | 'label';
+
+function decodeBase64UrlUtf8(encoded: string): string {
+  try {
+    const normalized = encoded.replace(/-/g, '+').replace(/_/g, '/');
+    const pad = normalized.length % 4;
+    const padded = pad ? normalized + '='.repeat(4 - pad) : normalized;
+    const binary = atob(padded);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return new TextDecoder('utf-8').decode(bytes);
+  } catch {
+    return '';
+  }
+}
+
+function stripHtmlTags(html: string): string {
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n\n')
+    .replace(/<\/div>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+interface GmailMimePart {
+  mimeType?: string;
+  body?: { data?: string };
+  parts?: GmailMimePart[];
+}
+
+function extractGmailBodyText(payload?: GmailMimePart): string {
+  if (!payload) return '';
+  if (payload.mimeType === 'text/plain' && payload.body?.data) {
+    return decodeBase64UrlUtf8(payload.body.data).trim();
+  }
+  if (payload.parts && payload.parts.length > 0) {
+    for (const part of payload.parts) {
+      const plain = extractGmailBodyText(part);
+      if (plain && part.mimeType === 'text/plain') return plain;
+    }
+    for (const part of payload.parts) {
+      const nested = extractGmailBodyText(part);
+      if (nested) return nested;
+    }
+  }
+  if (payload.mimeType === 'text/html' && payload.body?.data) {
+    return stripHtmlTags(decodeBase64UrlUtf8(payload.body.data));
+  }
+  if (payload.body?.data) {
+    return decodeBase64UrlUtf8(payload.body.data).trim();
+  }
+  return '';
 }
 
 export async function sendEmailViaGmailApi(
@@ -163,18 +240,70 @@ export async function sendEmailViaGmailApi(
   return { id: data.id, threadId: data.threadId };
 }
 
+export async function fetchGmailLabels(): Promise<{
+  inboxUnread: number;
+  labels: GmailLabelItem[];
+}> {
+  const token = getGoogleWorkspaceAccessToken();
+  if (!token) {
+    return { inboxUnread: 0, labels: [] };
+  }
+
+  const [listRes, inboxRes] = await Promise.all([
+    fetch('https://gmail.googleapis.com/gmail/v1/users/me/labels', {
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+    fetch('https://gmail.googleapis.com/gmail/v1/users/me/labels/INBOX', {
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+  ]);
+
+  let inboxUnread = 0;
+  if (inboxRes.ok) {
+    const inboxData = (await inboxRes.json()) as { messagesUnread?: number };
+    inboxUnread = inboxData.messagesUnread ?? 0;
+  }
+
+  if (!listRes.ok) {
+    return { inboxUnread, labels: [] };
+  }
+
+  const listData = (await listRes.json()) as {
+    labels?: { id: string; name: string; type?: string }[];
+  };
+
+  const userLabels: GmailLabelItem[] = (listData.labels ?? [])
+    .filter((l) => l.type === 'user')
+    .map((l) => ({
+      id: l.id,
+      name: l.name,
+      type: 'user' as const,
+    }))
+    .slice(0, 10);
+
+  return { inboxUnread, labels: userLabels };
+}
+
 export async function fetchRecentGmailMessages(
-  maxResults = 6,
-  query = 'in:sent OR in:inbox',
+  maxResults = 15,
+  query = 'in:inbox',
+  labelIds?: string[],
 ): Promise<GmailRecentMessage[]> {
   const token = getGoogleWorkspaceAccessToken();
   if (!token) {
     throw new Error('Sign in with Google Workspace to read live Gmail messages.');
   }
 
-  const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=${encodeURIComponent(
-    String(maxResults),
-  )}&q=${encodeURIComponent(query)}`;
+  const params = new URLSearchParams();
+  params.set('maxResults', String(maxResults));
+  if (query.trim()) {
+    params.set('q', query.trim());
+  }
+  if (labelIds && labelIds.length > 0) {
+    labelIds.forEach((lid) => params.append('labelIds', lid));
+  }
+
+  const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?${params.toString()}`;
 
   const listRes = await fetch(listUrl, {
     headers: { Authorization: `Bearer ${token}` },
@@ -191,11 +320,11 @@ export async function fetchRecentGmailMessages(
   if (items.length === 0) return [];
 
   const details = await Promise.all(
-    items.map(async (item) => {
+    items.map(async (item): Promise<GmailRecentMessage | null> => {
       const msgRes = await fetch(
         `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(
           item.id,
-        )}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Date`,
+        )}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Cc&metadataHeaders=Date`,
         {
           headers: { Authorization: `Bearer ${token}` },
         },
@@ -205,9 +334,11 @@ export async function fetchRecentGmailMessages(
         id: string;
         threadId: string;
         snippet?: string;
+        labelIds?: string[];
         payload?: { headers?: { name: string; value: string }[] };
       };
       const headers = msgData.payload?.headers ?? [];
+      const labels = msgData.labelIds ?? [];
       const pick = (name: string) =>
         headers.find((h) => h.name.toLowerCase() === name.toLowerCase())?.value ?? '';
       return {
@@ -215,14 +346,67 @@ export async function fetchRecentGmailMessages(
         threadId: msgData.threadId,
         from: pick('From'),
         to: pick('To'),
+        cc: pick('Cc') || undefined,
         subject: pick('Subject') || '(No Subject)',
         date: pick('Date'),
         snippet: msgData.snippet ?? '',
-      } satisfies GmailRecentMessage;
+        labelIds: labels,
+        isUnread: labels.includes('UNREAD'),
+        isStarred: labels.includes('STARRED'),
+      };
     }),
   );
 
   return details.filter((m): m is GmailRecentMessage => m !== null);
+}
+
+export async function fetchGmailMessageDetail(messageId: string): Promise<GmailRecentMessage> {
+  const token = getGoogleWorkspaceAccessToken();
+  if (!token) {
+    throw new Error('Sign in with Google Workspace to open this email.');
+  }
+
+  const res = await fetch(
+    `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(
+      messageId,
+    )}?format=full`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
+  const data = (await res.json()) as {
+    id: string;
+    threadId: string;
+    snippet?: string;
+    labelIds?: string[];
+    payload?: GmailMimePart & { headers?: { name: string; value: string }[] };
+    error?: { message?: string };
+  };
+  if (!res.ok) {
+    throw new Error(data.error?.message || `Unable to load message detail (${res.status}).`);
+  }
+
+  const headers = data.payload?.headers ?? [];
+  const labels = data.labelIds ?? [];
+  const pick = (name: string) =>
+    headers.find((h) => h.name.toLowerCase() === name.toLowerCase())?.value ?? '';
+
+  const extractedBody = extractGmailBodyText(data.payload) || data.snippet || '';
+
+  return {
+    id: data.id,
+    threadId: data.threadId,
+    from: pick('From'),
+    to: pick('To'),
+    cc: pick('Cc'),
+    subject: pick('Subject') || '(No Subject)',
+    date: pick('Date'),
+    snippet: data.snippet ?? '',
+    labelIds: labels,
+    isUnread: labels.includes('UNREAD'),
+    isStarred: labels.includes('STARRED'),
+    bodyText: extractedBody,
+  };
 }
 
 // ---------------------------------------------------------------------------

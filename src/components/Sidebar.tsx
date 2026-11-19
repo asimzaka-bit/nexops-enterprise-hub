@@ -4,12 +4,9 @@ import {
   CalendarCheck2,
   CalendarClock,
   ClipboardCheck,
-  ClipboardList,
   FileSpreadsheet,
-  FileText,
   FolderKanban,
   LayoutDashboard,
-  Mail,
   Package,
   PanelLeftClose,
   PanelLeftOpen,
@@ -17,6 +14,7 @@ import {
   Users,
   X,
 } from 'lucide-react';
+import type { ReactNode } from 'react';
 import {
   CompanyBrandingConfig,
   NavSection,
@@ -24,6 +22,12 @@ import {
   TeamMember,
   WorkspaceToolType,
 } from '../types/nexops';
+import {
+  GmailColorIcon,
+  GoogleDocsColorIcon,
+  GoogleFormsColorIcon,
+  GoogleSheetsColorIcon,
+} from './GoogleWorkspaceIcons';
 import { NexOpsLogo } from './NexOpsLogo';
 import { UserAvatar } from './UserAvatar';
 
@@ -51,12 +55,24 @@ interface SidebarProps {
 const WORKSPACE_SUB_TOOLS: {
   id: WorkspaceToolType;
   label: string;
-  icon: typeof Mail;
+  renderIcon: (className?: string) => ReactNode;
 }[] = [
-  { id: 'gmail', label: 'Gmail', icon: Mail },
-  { id: 'docs', label: 'Google Docs', icon: FileText },
-  { id: 'sheets', label: 'Google Sheets', icon: FileSpreadsheet },
-  { id: 'forms', label: 'Google Forms', icon: ClipboardList },
+  { id: 'gmail', label: 'Gmail', renderIcon: (cls) => <GmailColorIcon className={cls} /> },
+  {
+    id: 'docs',
+    label: 'Google Docs',
+    renderIcon: (cls) => <GoogleDocsColorIcon className={cls} />,
+  },
+  {
+    id: 'sheets',
+    label: 'Google Sheets',
+    renderIcon: (cls) => <GoogleSheetsColorIcon className={cls} />,
+  },
+  {
+    id: 'forms',
+    label: 'Google Forms',
+    renderIcon: (cls) => <GoogleFormsColorIcon className={cls} />,
+  },
 ];
 
 export function Sidebar({
@@ -352,7 +368,6 @@ export function Sidebar({
           {/* 4 Integrated Workspace Tools Sub-Items */}
           <div className={`mt-1 space-y-0.5 ${isCollapsed ? '' : 'pl-3'}`}>
             {WORKSPACE_SUB_TOOLS.map((tool) => {
-              const ToolIcon = tool.icon;
               const isToolActive =
                 activeSection === 'workspace' && activeWorkspaceTool === tool.id;
               return (
@@ -369,11 +384,9 @@ export function Sidebar({
                       : 'text-slate-400 hover:bg-slate-800/70 hover:text-slate-200'
                   }`}
                 >
-                  <ToolIcon
-                    className={`h-3.5 w-3.5 shrink-0 ${
-                      isToolActive ? 'text-indigo-400' : 'text-slate-500 group-hover:text-slate-300'
-                    }`}
-                  />
+                  <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+                    {tool.renderIcon('h-4 w-4')}
+                  </span>
                   {!isCollapsed && <span className="truncate">{tool.label}</span>}
 
                   {isCollapsed && (
