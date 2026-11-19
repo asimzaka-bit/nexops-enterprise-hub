@@ -9,7 +9,6 @@ import {
   FileText,
   FolderKanban,
   LayoutDashboard,
-  Layers,
   Mail,
   Package,
   PanelLeftClose,
@@ -25,6 +24,7 @@ import {
   TeamMember,
   WorkspaceToolType,
 } from '../types/nexops';
+import { NexOpsLogo } from './NexOpsLogo';
 import { UserAvatar } from './UserAvatar';
 
 interface SidebarProps {
@@ -156,13 +156,20 @@ export function Sidebar({
       {/* Brand Lockup & Collapse Toggle */}
       <div
         className={`flex h-16 shrink-0 items-center border-b border-slate-800 ${
-          isCollapsed ? 'justify-center px-2' : 'justify-between px-4'
+          isCollapsed ? 'justify-center gap-1 px-2' : 'justify-between px-4'
         }`}
       >
-        {!isCollapsed && (
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-600 text-white">
-              <Layers className="h-4 w-4" aria-hidden="true" />
+        {isCollapsed ? (
+          <div
+            className="flex shrink-0 items-center justify-center"
+            title={branding.companyName}
+          >
+            <NexOpsLogo className="h-8 w-8" title={branding.companyName} />
+          </div>
+        ) : (
+          <div className="flex min-w-0 items-center gap-2.5">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center">
+              <NexOpsLogo className="h-9 w-9" title={branding.companyName} />
             </div>
             <div className="min-w-0">
               <span className="block truncate font-display text-sm font-bold tracking-tight text-white">
@@ -175,17 +182,19 @@ export function Sidebar({
           </div>
         )}
 
-        <div className="flex items-center gap-1 shrink-0">
+        <div className="flex shrink-0 items-center gap-1">
           {/* Desktop Collapse / Expand Toggle Button */}
           <button
             type="button"
             onClick={onToggleCollapse}
             title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             aria-label={isCollapsed ? 'Expand navigation sidebar' : 'Collapse navigation sidebar'}
-            className="hidden h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-800 hover:text-white lg:inline-flex"
+            className={`hidden items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-800 hover:text-white lg:inline-flex ${
+              isCollapsed ? 'h-7 w-7' : 'h-8 w-8'
+            }`}
           >
             {isCollapsed ? (
-              <PanelLeftOpen className="h-4 w-4" />
+              <PanelLeftOpen className="h-3.5 w-3.5" />
             ) : (
               <PanelLeftClose className="h-4 w-4" />
             )}

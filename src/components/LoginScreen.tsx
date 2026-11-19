@@ -7,7 +7,6 @@ import {
   Eye,
   EyeOff,
   KeyRound,
-  Layers,
   Lock,
   Mail,
   Shield,
@@ -16,6 +15,7 @@ import {
 import { FormEvent, useEffect, useState } from 'react';
 import { getPersistenceMode } from '../services/dataService';
 import { CompanyBrandingConfig, Department } from '../types/nexops';
+import { NexOpsLogo } from './NexOpsLogo';
 
 export interface InitialAdminPayload {
   fullName: string;
@@ -166,8 +166,8 @@ export function LoginScreen({
       <div className="mx-auto w-full max-w-md">
         {/* Corporate Brand Lockup */}
         <div className="flex flex-col items-center text-center">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-slate-900 text-white shadow-sm">
-            <Layers className="h-6 w-6 text-indigo-400" aria-hidden="true" />
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white p-1.5 shadow-sm ring-1 ring-slate-200/80">
+            <NexOpsLogo className="h-11 w-11" title={branding.companyName} />
           </div>
           <h1 className="mt-4 font-display text-2xl font-bold tracking-tight text-slate-900">
             {branding.companyName}

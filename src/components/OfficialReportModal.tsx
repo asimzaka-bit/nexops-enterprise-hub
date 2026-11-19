@@ -1,6 +1,7 @@
-import { CheckSquare, Layers, Printer, Square, X } from 'lucide-react';
+import { CheckSquare, Printer, Square, X } from 'lucide-react';
 import { useState } from 'react';
 import { CompanyBrandingConfig, OperationalRequest, TeamMember } from '../types/nexops';
+import { NexOpsLogo } from './NexOpsLogo';
 import {
   formatCurrency,
   formatDateTime,
@@ -121,9 +122,7 @@ export function OfficialReportModal({
             {/* Corporate Letterhead */}
             <header className="flex flex-wrap items-start justify-between gap-4 border-b-2 border-slate-900 pb-5">
               <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-900 text-white">
-                  <Layers className="h-5 w-5" aria-hidden="true" />
-                </div>
+                <NexOpsLogo className="h-10 w-10 shrink-0" title={branding.companyName} />
                 <div>
                   <p className="font-display text-lg font-bold tracking-tight text-slate-900">
                     {branding.companyName}
