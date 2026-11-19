@@ -62,6 +62,13 @@ import {
   SYSTEM_STATE_KEYS,
 } from './services/dataService';
 import {
+  disconnectGoogleWorkspace,
+  getCurrentGoogleUser,
+  getGoogleWorkspaceAccessToken,
+  initGoogleWorkspaceAuth,
+  signInWithGoogleWorkspace,
+} from './services/googleWorkspaceService';
+import {
   downloadSystemBackupJson,
   formatCurrency,
   generateNextRequestId,
@@ -124,6 +131,21 @@ export default function App() {
   );
   const realtimeTimerRef = useRef<number | null>(null);
 
+  // Unified Google Workspace OAuth session state shared across Gmail, Docs, Sheets & Forms
+  const [googleToken, setGoogleToken] = useState<string | null>(() =>
+    getGoogleWorkspaceAccessToken(),
+  );
+  const [googleEmail, setGoogleEmail] = useState<string | null>(
+    () => getCurrentGoogleUser()?.email ?? null,
+  );
+  const [googleDisplayName, setGoogleDisplayName] = useState<string | null>(
+    () => getCurrentGoogleUser()?.displayName ?? null,
+  );
+  const [googlePhotoUrl, setGooglePhotoUrl] = useState<string | null>(
+    () => getCurrentGoogleUser()?.photoURL ?? null,
+  );
+  const [googleConnecting, setGoogleConnecting] = useState(false);
+
   useEffect(() => {
     dataService.saveStateSync(state);
   }, [state]);
@@ -139,6 +161,25 @@ export default function App() {
       // Ignore storage quota errors
     }
   }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    const unsubscribe = initGoogleWorkspaceAuth(
+      (user, token) => {
+        setGoogleToken(token);
+        setGoogleEmail(user.email ?? null);
+        setGoogleDisplayName(user.displayName ?? null);
+        setGooglePhotoUrl(user.photoURL ?? null);
+      },
+      () => {
+        const cur = getCurrentGoogleUser();
+        setGoogleToken(getGoogleWorkspaceAccessToken());
+        setGoogleEmail(cur?.email ?? null);
+        setGoogleDisplayName(cur?.displayName ?? null);
+        setGooglePhotoUrl(cur?.photoURL ?? null);
+      },
+    );
+    return unsubscribe;
+  }, []);
 
   const pushToast = useCallback(
     (title: string, description?: string, variant: ToastMessage['variant'] = 'success') => {
@@ -749,6 +790,11 @@ export default function App() {
 
   const handleSignOut = async () => {
     await dataService.auth.signOut();
+    await disconnectGoogleWorkspace().catch(() => {});
+    setGoogleToken(null);
+    setGoogleEmail(null);
+    setGoogleDisplayName(null);
+    setGooglePhotoUrl(null);
     setAuthSession(null);
     setSelectedRequestId(null);
     setCreateModalOpen(false);
@@ -758,6 +804,39 @@ export default function App() {
     setReportModalState({ open: false, requestId: null });
     setMobileMenuOpen(false);
     pushToast('Signed Out', 'Corporate session closed securely.', 'info');
+  };
+
+  const handleGoogleWorkspaceSignIn = async () => {
+    setGoogleConnecting(true);
+    try {
+      const { user, accessToken } = await signInWithGoogleWorkspace();
+      setGoogleToken(accessToken);
+      setGoogleEmail(user.email ?? null);
+      setGoogleDisplayName(user.displayName ?? null);
+      setGooglePhotoUrl(user.photoURL ?? null);
+      pushToast(
+        'Google Workspace Verified',
+        `Connected as ${user.email || 'Google Account'} across Gmail, Docs, Sheets & Forms.`,
+        'success',
+      );
+    } catch (err) {
+      pushToast(
+        'Google Verification Cancelled or Failed',
+        err instanceof Error ? err.message : 'Unable to verify Google account.',
+        'warning',
+      );
+    } finally {
+      setGoogleConnecting(false);
+    }
+  };
+
+  const handleGoogleWorkspaceDisconnect = async () => {
+    await disconnectGoogleWorkspace();
+    setGoogleToken(null);
+    setGoogleEmail(null);
+    setGoogleDisplayName(null);
+    setGooglePhotoUrl(null);
+    pushToast('Google Account Disconnected', 'Cleared active Google Workspace access token.', 'info');
   };
 
   // Global search from TopBar
@@ -3170,6 +3249,13 @@ export default function App() {
                     departments={branding.departments}
                     emails={state.workspaceEmails}
                     links={state.workspaceLinks}
+                    googleToken={googleToken}
+                    googleEmail={googleEmail}
+                    googleDisplayName={googleDisplayName}
+                    googlePhotoUrl={googlePhotoUrl}
+                    googleConnecting={googleConnecting}
+                    onGoogleSignIn={handleGoogleWorkspaceSignIn}
+                    onGoogleDisconnect={handleGoogleWorkspaceDisconnect}
                     onSaveEmailLog={handleSaveEmailLog}
                     onSaveWorkspaceLink={handleSaveWorkspaceLink}
                     onDeleteWorkspaceLink={handleDeleteWorkspaceLink}

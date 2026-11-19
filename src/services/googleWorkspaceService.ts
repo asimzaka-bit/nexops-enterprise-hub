@@ -417,14 +417,14 @@ export function extractGoogleFileId(toolType: WorkspaceDocToolType, rawUrl: stri
   const url = rawUrl.trim();
   if (!url) return null;
   if (toolType === 'docs') {
-    const m = url.match(/docs\.google\.com\/document\/d\/([a-zA-Z0-9_-]+)/i);
+    const m = url.match(/docs\.google\.com\/document\/(?:u\/\d+\/)?d\/([a-zA-Z0-9_-]+)/i);
     return m ? m[1] : null;
   }
   if (toolType === 'sheets') {
-    const m = url.match(/docs\.google\.com\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/i);
+    const m = url.match(/docs\.google\.com\/spreadsheets\/(?:u\/\d+\/)?d\/([a-zA-Z0-9_-]+)/i);
     return m ? m[1] : null;
   }
-  const mEdit = url.match(/docs\.google\.com\/forms\/d\/(?!e\/)([a-zA-Z0-9_-]+)/i);
+  const mEdit = url.match(/docs\.google\.com\/forms\/(?:u\/\d+\/)?d\/(?!e\/)([a-zA-Z0-9_-]+)/i);
   if (mEdit) return mEdit[1];
   return null;
 }
@@ -440,7 +440,7 @@ export function getGoogleEmbedUrl(
   if (toolType === 'docs' && fileId) {
     return mode === 'preview'
       ? `https://docs.google.com/document/d/${fileId}/preview`
-      : `https://docs.google.com/document/d/${fileId}/edit?embedded=true`;
+      : `https://docs.google.com/document/d/${fileId}/edit?rm=minimal`;
   }
   if (toolType === 'sheets' && fileId) {
     return mode === 'preview'
@@ -449,9 +449,11 @@ export function getGoogleEmbedUrl(
   }
   if (toolType === 'forms') {
     if (url.includes('/forms/d/e/')) {
-      return url.includes('embedded=true')
-        ? url
-        : `${url.split('?')[0].replace(/\/$/, '')}?embedded=true`;
+      const cleanBase = url.split('?')[0].replace(/\/(edit|viewform)$/, '');
+      return `${cleanBase}/viewform?embedded=true`.replace(
+        '/viewform/viewform',
+        '/viewform',
+      );
     }
     if (fileId) {
       return mode === 'preview'

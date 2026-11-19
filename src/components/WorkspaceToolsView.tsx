@@ -4,7 +4,6 @@ import {
   Check,
   Clock,
   Copy,
-  ExternalLink,
   FileEdit,
   Forward,
   Inbox,
@@ -25,27 +24,22 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   createGoogleDoc,
   createGoogleForm,
   createGoogleSheet,
-  disconnectGoogleWorkspace,
   extractGoogleFileId,
   fetchGmailLabels,
   fetchGmailMessageDetail,
   fetchGoogleResourceMetadata,
   fetchRecentGmailMessages,
-  getCurrentGoogleUser,
   getGoogleEmbedUrl,
-  getGoogleWorkspaceAccessToken,
   GmailFolderKey,
   GmailLabelItem,
   GmailRecentMessage,
   GoogleResourceMetadata,
-  initGoogleWorkspaceAuth,
   sendEmailViaGmailApi,
-  signInWithGoogleWorkspace,
 } from '../services/googleWorkspaceService';
 import {
   Department,
@@ -72,6 +66,13 @@ interface WorkspaceToolsViewProps {
   departments: string[];
   emails: WorkspaceEmailLog[];
   links: WorkspaceSavedLink[];
+  googleToken: string | null;
+  googleEmail: string | null;
+  googleDisplayName: string | null;
+  googlePhotoUrl: string | null;
+  googleConnecting: boolean;
+  onGoogleSignIn: () => Promise<void>;
+  onGoogleDisconnect: () => Promise<void>;
   onSaveEmailLog: (emailLog: WorkspaceEmailLog) => void;
   onSaveWorkspaceLink: (link: WorkspaceSavedLink) => void;
   onDeleteWorkspaceLink: (linkId: string) => void;
@@ -125,7 +126,7 @@ interface UnifiedMailRow {
 const TOOL_TABS: {
   id: WorkspaceToolType;
   label: string;
-  renderIcon: (className?: string) => React.ReactNode;
+  renderIcon: (className?: string) => ReactNode;
 }[] = [
   {
     id: 'gmail',
@@ -154,18 +155,16 @@ const DOC_TOOL_META: Record<
   {
     singular: string;
     plural: string;
-    newUrl: string;
     placeholderUrl: string;
     primaryBtnClass: string;
     badgeClass: string;
     subtitle: string;
-    renderIcon: (className?: string) => React.ReactNode;
+    renderIcon: (className?: string) => ReactNode;
   }
 > = {
   docs: {
     singular: 'Google Doc',
     plural: 'Google Docs',
-    newUrl: 'https://docs.new',
     placeholderUrl: 'https://docs.google.com/document/d/.../edit',
     primaryBtnClass: 'bg-[#1A73E8] hover:bg-[#1557B0] text-white',
     badgeClass: 'bg-blue-50 text-blue-700 border-blue-200',
@@ -175,7 +174,6 @@ const DOC_TOOL_META: Record<
   sheets: {
     singular: 'Google Sheet',
     plural: 'Google Sheets',
-    newUrl: 'https://sheets.new',
     placeholderUrl: 'https://docs.google.com/spreadsheets/d/.../edit',
     primaryBtnClass: 'bg-[#0F9D58] hover:bg-[#0B8043] text-white',
     badgeClass: 'bg-emerald-50 text-emerald-700 border-emerald-200',
@@ -185,7 +183,6 @@ const DOC_TOOL_META: Record<
   forms: {
     singular: 'Google Form',
     plural: 'Google Forms',
-    newUrl: 'https://forms.new',
     placeholderUrl: 'https://docs.google.com/forms/d/.../edit',
     primaryBtnClass: 'bg-[#7248B9] hover:bg-[#5E35B1] text-white',
     badgeClass: 'bg-violet-50 text-violet-700 border-violet-200',
@@ -259,45 +256,18 @@ export function WorkspaceToolsView({
   departments,
   emails,
   links,
+  googleToken,
+  googleEmail,
+  googleDisplayName,
+  googlePhotoUrl,
+  googleConnecting,
+  onGoogleSignIn,
+  onGoogleDisconnect,
   onSaveEmailLog,
   onSaveWorkspaceLink,
   onDeleteWorkspaceLink,
   onNotify,
 }: WorkspaceToolsViewProps) {
-  // Google Workspace OAuth session state (in-memory token only)
-  const [googleToken, setGoogleToken] = useState<string | null>(() =>
-    getGoogleWorkspaceAccessToken(),
-  );
-  const [googleEmail, setGoogleEmail] = useState<string | null>(
-    () => getCurrentGoogleUser()?.email ?? null,
-  );
-  const [googleDisplayName, setGoogleDisplayName] = useState<string | null>(
-    () => getCurrentGoogleUser()?.displayName ?? null,
-  );
-  const [googlePhotoUrl, setGooglePhotoUrl] = useState<string | null>(
-    () => getCurrentGoogleUser()?.photoURL ?? null,
-  );
-  const [googleConnecting, setGoogleConnecting] = useState(false);
-
-  useEffect(() => {
-    const unsubscribe = initGoogleWorkspaceAuth(
-      (user, token) => {
-        setGoogleToken(token);
-        setGoogleEmail(user.email ?? null);
-        setGoogleDisplayName(user.displayName ?? null);
-        setGooglePhotoUrl(user.photoURL ?? null);
-      },
-      () => {
-        const cur = getCurrentGoogleUser();
-        setGoogleToken(getGoogleWorkspaceAccessToken());
-        setGoogleEmail(cur?.email ?? null);
-        setGoogleDisplayName(cur?.displayName ?? null);
-        setGooglePhotoUrl(cur?.photoURL ?? null);
-      },
-    );
-    return unsubscribe;
-  }, []);
-
   // =========================================================================
   // 1. GMAIL AUTHENTIC CLIENT STATE
   // =========================================================================
@@ -352,6 +322,7 @@ export function WorkspaceToolsView({
 
   const [selectedLinkId, setSelectedLinkId] = useState<string | null>(null);
   const [embedMode, setEmbedMode] = useState<'edit' | 'preview'>('edit');
+  const [viewerFullscreen, setViewerFullscreen] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [liveMetadata, setLiveMetadata] = useState<GoogleResourceMetadata | null>(null);
   const [loadingMetadata, setLoadingMetadata] = useState(false);
@@ -363,7 +334,7 @@ export function WorkspaceToolsView({
 
   const loadMailboxFolder = useCallback(
     async (folder: GmailFolderKey, searchQuery: string, labelId: string | null) => {
-      if (!getGoogleWorkspaceAccessToken()) return;
+      if (!googleToken) return;
       if (folder === 'snoozed') {
         setMailboxError(null);
         return;
@@ -372,7 +343,7 @@ export function WorkspaceToolsView({
       setLoadingMailbox(true);
       setMailboxError(null);
       try {
-        let q = searchQuery.trim();
+        const q = searchQuery.trim();
         let labelIds: string[] | undefined;
 
         if (folder === 'inbox') {
@@ -403,7 +374,7 @@ export function WorkspaceToolsView({
         setLoadingMailbox(false);
       }
     },
-    [],
+    [googleToken],
   );
 
   // Automatically load real Inbox when Google account connects or folder/search changes
@@ -413,42 +384,13 @@ export function WorkspaceToolsView({
     }
   }, [activeTool, googleToken, gmailFolder, gmailSearchSubmitted, selectedLabelId, loadMailboxFolder]);
 
-  const handleGoogleSignIn = async () => {
-    setGoogleConnecting(true);
-    try {
-      const { user, accessToken } = await signInWithGoogleWorkspace();
-      setGoogleToken(accessToken);
-      setGoogleEmail(user.email ?? null);
-      setGoogleDisplayName(user.displayName ?? null);
-      setGooglePhotoUrl(user.photoURL ?? null);
-      onNotify(
-        'Gmail & Google Workspace Verified',
-        `Connected as ${user.email || 'Google Account'}. Real Inbox & live API tools unlocked.`,
-        'success',
-      );
-    } catch (err) {
-      onNotify(
-        'Google Verification Cancelled or Failed',
-        err instanceof Error ? err.message : 'Unable to verify Google account.',
-        'warning',
-      );
-    } finally {
-      setGoogleConnecting(false);
-    }
-  };
-
-  const handleGoogleDisconnect = async () => {
-    await disconnectGoogleWorkspace();
-    setGoogleToken(null);
-    setGoogleEmail(null);
-    setGoogleDisplayName(null);
-    setGooglePhotoUrl(null);
+  const handleDisconnectClick = async () => {
+    await onGoogleDisconnect();
     setGmailMessages([]);
     setGmailLabels([]);
     setInboxUnreadCount(0);
     setOpenedMessage(null);
     setLiveMetadata(null);
-    onNotify('Google Account Disconnected', 'Cleared active Google Workspace access token.', 'info');
   };
 
   // Unified list of rows for active Gmail folder
@@ -695,7 +637,7 @@ export function WorkspaceToolsView({
   };
 
   // =========================================================================
-  // DOCS / SHEETS / FORMS HANDLERS
+  // DOCS / SHEETS / FORMS HANDLERS (100% In-App, No External Tabs)
   // =========================================================================
   const docTool: WorkspaceDocToolType = activeTool === 'gmail' ? 'docs' : activeTool;
   const docMeta = DOC_TOOL_META[docTool];
@@ -730,7 +672,33 @@ export function WorkspaceToolsView({
   useEffect(() => {
     setLiveMetadata(null);
     setMetadataError(null);
+    setViewerFullscreen(false);
   }, [selectedLink?.id, activeTool, adHocActiveUrl]);
+
+  const handleQuickCreateInApp = () => {
+    const dateStamp = new Date().toLocaleDateString([], { month: 'short', day: 'numeric' });
+    const defaultTitle = `NexOps ${docMeta.singular} — ${dateStamp}`;
+
+    if (!googleToken) {
+      // Prompt cleanly in-app to verify Google or paste a link (never open external tab)
+      setActiveDocPanel('create_api');
+      setCreateTitle(defaultTitle);
+      onNotify(
+        'Google Verification Required for Instant Creation',
+        'Verify your Google account above to create a live Google file directly inside NexOps, or save an existing link.',
+        'info',
+      );
+      return;
+    }
+
+    setConfirmation({
+      kind: 'create_google_doc',
+      toolType: docTool,
+      title: createTitle.trim() || defaultTitle,
+      department: currentUser.department || departments[0] || 'Operations',
+      notes: createNotes.trim(),
+    });
+  };
 
   const handleRequestCreateGoogleDoc = (e: FormEvent) => {
     e.preventDefault();
@@ -745,7 +713,7 @@ export function WorkspaceToolsView({
     if (!googleToken) {
       onNotify(
         'Verify Google Account First',
-        'Sign in with Google above to create live Docs, Sheets, and Forms directly via API, or use "+ Create New" to open a blank tab.',
+        'Click "Sign in with Google / Verify Gmail Account" above to create live Docs, Sheets, and Forms inside NexOps.',
         'warning',
       );
       return;
@@ -809,6 +777,11 @@ export function WorkspaceToolsView({
 
   const handleExecuteConfirmedAction = async () => {
     if (!confirmation) return;
+    if (confirmation.kind === 'create_google_doc' && !confirmation.title.trim()) {
+      onNotify('Title Required', 'Provide a title before creating the document.', 'warning');
+      return;
+    }
+
     setExecutingConfirm(true);
     try {
       if (confirmation.kind === 'send_gmail') {
@@ -848,10 +821,10 @@ export function WorkspaceToolsView({
         setCreatingDoc(true);
         const created =
           confirmation.toolType === 'docs'
-            ? await createGoogleDoc(confirmation.title)
+            ? await createGoogleDoc(confirmation.title.trim())
             : confirmation.toolType === 'sheets'
-              ? await createGoogleSheet(confirmation.title)
-              : await createGoogleForm(confirmation.title);
+              ? await createGoogleSheet(confirmation.title.trim())
+              : await createGoogleForm(confirmation.title.trim());
 
         const now = new Date().toISOString();
         const savedLink: WorkspaceSavedLink = {
@@ -869,6 +842,7 @@ export function WorkspaceToolsView({
         onSaveWorkspaceLink(savedLink);
         setAdHocActiveUrl(null);
         setSelectedLinkId(savedLink.id);
+        setEmbedMode('edit');
         setCreateTitle('');
         setCreateNotes('');
         setActiveDocPanel('none');
@@ -929,7 +903,7 @@ export function WorkspaceToolsView({
 
   return (
     <div className="space-y-4">
-      {/* Top Google Workspace Switcher + Account Verification Status */}
+      {/* Top Google Workspace Switcher + Unified Verified Google Account Banner */}
       <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-2xs">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-1.5">
@@ -971,7 +945,10 @@ export function WorkspaceToolsView({
           <div className="flex flex-wrap items-center gap-2">
             {googleToken ? (
               <>
-                <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50/80 py-1 pr-3 pl-1.5 text-xs font-medium text-emerald-900">
+                <div
+                  title="Verified Google session shared across Gmail, Docs, Sheets, and Forms"
+                  className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50/80 py-1 pr-3 pl-1.5 text-xs font-medium text-emerald-900"
+                >
                   {googlePhotoUrl ? (
                     <img
                       src={googlePhotoUrl}
@@ -990,7 +967,7 @@ export function WorkspaceToolsView({
                 </div>
                 <button
                   type="button"
-                  onClick={() => void handleGoogleDisconnect()}
+                  onClick={() => void handleDisconnectClick()}
                   className="inline-flex h-8 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900"
                 >
                   <LogOut className="h-3.5 w-3.5" />
@@ -1000,7 +977,7 @@ export function WorkspaceToolsView({
             ) : (
               <GoogleSignInButton
                 loading={googleConnecting}
-                onClick={() => void handleGoogleSignIn()}
+                onClick={() => void onGoogleSignIn()}
                 label="Sign in with Google / Verify Gmail Account"
                 compact
               />
@@ -1010,13 +987,13 @@ export function WorkspaceToolsView({
       </div>
 
       {/* =================================================================== */}
-      {/* 1. AUTHENTIC GOOGLE GMAIL INTERFACE + REAL OAUTH                    */}
+      {/* 1. AUTHENTIC GOOGLE GMAIL INTERFACE (100% IN-APP)                   */}
       {/* =================================================================== */}
       {activeTool === 'gmail' && (
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-[#F6F8FC] shadow-xs">
           {/* Authentic Gmail Top Header Bar */}
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/80 bg-[#F6F8FC] px-4 py-2.5">
-            <div className="flex items-center gap-2.5 min-w-[130px]">
+            <div className="flex items-center gap-2.5 min-w-[120px]">
               <GmailColorIcon className="h-7 w-7 shrink-0" />
               <span className="font-display text-lg font-medium tracking-tight text-[#444746]">
                 Gmail
@@ -1060,7 +1037,7 @@ export function WorkspaceToolsView({
               )}
             </form>
 
-            {/* Right Actions: Open Full Gmail Window + Status */}
+            {/* Right Status & In-App Refresh */}
             <div className="flex items-center gap-2">
               {googleToken && (
                 <button
@@ -1070,21 +1047,12 @@ export function WorkspaceToolsView({
                   }
                   disabled={loadingMailbox}
                   title="Refresh Gmail messages"
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-full text-[#444746] hover:bg-[#E1E5EA]"
+                  className="inline-flex h-9 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 text-xs font-semibold text-[#444746] hover:bg-slate-50"
                 >
-                  <RefreshCw className={`h-4 w-4 ${loadingMailbox ? 'animate-spin' : ''}`} />
+                  <RefreshCw className={`h-3.5 w-3.5 ${loadingMailbox ? 'animate-spin' : ''}`} />
+                  <span>Refresh</span>
                 </button>
               )}
-
-              <a
-                href="https://mail.google.com/mail/u/0/#inbox"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex h-9 items-center gap-1.5 rounded-full border border-slate-300 bg-white px-3.5 text-xs font-semibold text-[#1F1F1F] hover:bg-slate-50"
-              >
-                <span>Open Full Gmail Window</span>
-                <ExternalLink className="h-3.5 w-3.5 text-[#444746]" />
-              </a>
             </div>
           </div>
 
@@ -1226,14 +1194,13 @@ export function WorkspaceToolsView({
                         Verify Your Google Account to Load Live Gmail Inbox &amp; Send Mail
                       </p>
                       <p className="text-[11px] text-[#444746]">
-                        Each NexOps user signs in with their own Google account cleanly with Gmail
-                        read &amp; send permissions.
+                        Authorizes Gmail, Google Docs, Google Sheets, and Google Forms inside NexOps.
                       </p>
                     </div>
                   </div>
                   <GoogleSignInButton
                     loading={googleConnecting}
-                    onClick={() => void handleGoogleSignIn()}
+                    onClick={() => void onGoogleSignIn()}
                     label="Sign in with Google / Verify Gmail Account"
                     compact
                   />
@@ -1318,17 +1285,6 @@ export function WorkspaceToolsView({
                         <Forward className="h-3.5 w-3.5" />
                         <span>Forward</span>
                       </button>
-                      {openedMessage.threadId && (
-                        <a
-                          href={`https://mail.google.com/mail/u/0/#all/${openedMessage.threadId}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex h-8 items-center gap-1 rounded-full border border-slate-200 px-3 text-xs font-semibold text-[#0B57D0] hover:bg-blue-50"
-                        >
-                          <span>Open in Gmail</span>
-                          <ExternalLink className="h-3.5 w-3.5" />
-                        </a>
-                      )}
                     </div>
                   </div>
 
@@ -1616,7 +1572,7 @@ export function WorkspaceToolsView({
                       : 'bg-amber-50 text-amber-700'
                   }`}
                 >
-                  {googleToken ? 'Gmail API Connected' : 'Mailto Only (Verify Google to API Send)'}
+                  {googleToken ? 'Gmail API Connected' : 'Mailto Fallback (Verify Google to Send)'}
                 </span>
               </div>
 
@@ -1758,9 +1714,8 @@ export function WorkspaceToolsView({
                   <button
                     type="button"
                     onClick={handleMailtoDispatchLog}
-                    className="inline-flex h-9 items-center gap-1 rounded-full border border-slate-200 px-3 text-[11px] font-semibold text-[#444746] hover:bg-slate-50"
+                    className="inline-flex h-9 items-center rounded-full border border-slate-200 px-3 text-[11px] font-semibold text-[#444746] hover:bg-slate-50"
                   >
-                    <ExternalLink className="h-3 w-3" />
                     <span>Mail App</span>
                   </button>
                 </div>
@@ -1786,11 +1741,11 @@ export function WorkspaceToolsView({
       )}
 
       {/* =================================================================== */}
-      {/* 2. LIVE EMBEDDED GOOGLE DOCS, SHEETS & FORMS WORKSPACE              */}
+      {/* 2. LIVE EMBEDDED GOOGLE DOCS, SHEETS & FORMS WORKSPACE (100% IN-APP)*/}
       {/* =================================================================== */}
       {activeTool !== 'gmail' && (
         <div className="space-y-4">
-          {/* Authentic Google Tool Header with Official Colored Icon + "+ Create New" */}
+          {/* Authentic Google Tool Header with Official Colored Icon + In-App "+ Create New" */}
           <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-2xs">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div className="flex items-center gap-3 min-w-0">
@@ -1813,32 +1768,18 @@ export function WorkspaceToolsView({
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
-                <a
-                  href={docMeta.newUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={`inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-xs font-semibold shadow-xs transition-colors ${docMeta.primaryBtnClass}`}
-                >
-                  <Plus className="h-4 w-4" />
-                  <span>+ Create New</span>
-                  <ExternalLink className="h-3 w-3 opacity-80" />
-                </a>
-
                 <button
                   type="button"
-                  onClick={() =>
-                    setActiveDocPanel((prev) =>
-                      prev === 'create_api' ? 'none' : 'create_api',
-                    )
-                  }
-                  className={`inline-flex h-9 items-center gap-1.5 rounded-full border px-3.5 text-xs font-semibold transition-colors ${
-                    activeDocPanel === 'create_api'
-                      ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
-                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                  }`}
+                  onClick={handleQuickCreateInApp}
+                  disabled={creatingDoc}
+                  className={`inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-xs font-semibold shadow-xs transition-colors disabled:opacity-60 ${docMeta.primaryBtnClass}`}
                 >
-                  <Plus className="h-3.5 w-3.5" />
-                  <span>Create via API</span>
+                  {creatingDoc ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Plus className="h-4 w-4" />
+                  )}
+                  <span>+ Create New</span>
                 </button>
 
                 <button
@@ -1858,60 +1799,77 @@ export function WorkspaceToolsView({
               </div>
             </div>
 
-            {/* Expandable Form: Create Direct via Google API */}
+            {/* Expandable In-App Create Panel (when not verified yet or customizing details) */}
             {activeDocPanel === 'create_api' && (
-              <form
-                onSubmit={handleRequestCreateGoogleDoc}
-                className="mt-4 grid grid-cols-1 gap-3 border-t border-slate-100 pt-4 sm:grid-cols-12"
-              >
-                <div className="sm:col-span-5">
-                  <input
-                    type="text"
-                    required
-                    value={createTitle}
-                    onChange={(e) => setCreateTitle(e.target.value)}
-                    placeholder={`New ${docMeta.singular} Title...`}
-                    className="h-9 w-full rounded-lg border border-slate-200 px-3 text-xs text-slate-900 focus:border-[#0B57D0] focus:outline-none"
-                  />
-                </div>
-                <div className="sm:col-span-2">
-                  <select
-                    aria-label="Department"
-                    value={createDept}
-                    onChange={(e) => setCreateDept(e.target.value)}
-                    className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-800 focus:border-[#0B57D0] focus:outline-none"
-                  >
-                    {departments.map((d) => (
-                      <option key={d} value={d}>
-                        {d}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="sm:col-span-3">
-                  <input
-                    type="text"
-                    value={createNotes}
-                    onChange={(e) => setCreateNotes(e.target.value)}
-                    placeholder="Purpose / collaboration note..."
-                    className="h-9 w-full rounded-lg border border-slate-200 px-3 text-xs text-slate-900 focus:border-[#0B57D0] focus:outline-none"
-                  />
-                </div>
-                <div className="flex items-center justify-end gap-2 sm:col-span-2">
-                  <button
-                    type="submit"
-                    disabled={creatingDoc}
-                    className={`inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-lg px-3 text-xs font-semibold ${docMeta.primaryBtnClass}`}
-                  >
-                    {creatingDoc ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Plus className="h-3.5 w-3.5" />
-                    )}
-                    <span>Create</span>
-                  </button>
-                </div>
-              </form>
+              <div className="mt-4 border-t border-slate-100 pt-4 space-y-3">
+                {!googleToken && (
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-blue-100 bg-[#EDF2FA] px-4 py-3">
+                    <p className="text-xs font-medium text-[#001D35]">
+                      Verify your Google account to automatically create a live{' '}
+                      <strong>{docMeta.singular}</strong> and open it directly inside NexOps.
+                    </p>
+                    <GoogleSignInButton
+                      loading={googleConnecting}
+                      onClick={() => void onGoogleSignIn()}
+                      label="Sign in with Google / Verify Gmail Account"
+                      compact
+                    />
+                  </div>
+                )}
+
+                <form
+                  onSubmit={handleRequestCreateGoogleDoc}
+                  className="grid grid-cols-1 gap-3 sm:grid-cols-12"
+                >
+                  <div className="sm:col-span-5">
+                    <input
+                      type="text"
+                      required
+                      value={createTitle}
+                      onChange={(e) => setCreateTitle(e.target.value)}
+                      placeholder={`New ${docMeta.singular} Title...`}
+                      className="h-9 w-full rounded-lg border border-slate-200 px-3 text-xs text-slate-900 focus:border-[#0B57D0] focus:outline-none"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <select
+                      aria-label="Department"
+                      value={createDept}
+                      onChange={(e) => setCreateDept(e.target.value)}
+                      className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-800 focus:border-[#0B57D0] focus:outline-none"
+                    >
+                      {departments.map((d) => (
+                        <option key={d} value={d}>
+                          {d}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="sm:col-span-3">
+                    <input
+                      type="text"
+                      value={createNotes}
+                      onChange={(e) => setCreateNotes(e.target.value)}
+                      placeholder="Purpose / collaboration note..."
+                      className="h-9 w-full rounded-lg border border-slate-200 px-3 text-xs text-slate-900 focus:border-[#0B57D0] focus:outline-none"
+                    />
+                  </div>
+                  <div className="flex items-center justify-end gap-2 sm:col-span-2">
+                    <button
+                      type="submit"
+                      disabled={creatingDoc}
+                      className={`inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-lg px-3 text-xs font-semibold ${docMeta.primaryBtnClass}`}
+                    >
+                      {creatingDoc ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Plus className="h-3.5 w-3.5" />
+                      )}
+                      <span>Create In-App</span>
+                    </button>
+                  </div>
+                </form>
+              </div>
             )}
 
             {/* Expandable Form: Save Existing Link to Team Directory */}
@@ -1993,7 +1951,7 @@ export function WorkspaceToolsView({
 
                 {filteredLinks.length === 0 ? (
                   <span className="text-xs text-slate-500">
-                    No saved team {docMeta.plural} yet — paste a URL on the right or click Create.
+                    No saved team {docMeta.plural} yet — click + Create New or paste any Google URL.
                   </span>
                 ) : (
                   <div className="flex flex-wrap items-center gap-1.5">
@@ -2047,8 +2005,14 @@ export function WorkspaceToolsView({
             </div>
           </div>
 
-          {/* Full-Height Live Embedded Document Viewer */}
-          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs flex flex-col">
+          {/* Full-Height Live Embedded Document Viewer (100% Inside NexOps) */}
+          <div
+            className={
+              viewerFullscreen
+                ? 'fixed inset-0 z-50 flex flex-col bg-white'
+                : 'flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs'
+            }
+          >
             {!activeDocumentUrl ? (
               <div className="flex min-h-[580px] flex-col items-center justify-center px-6 py-16 text-center">
                 {docMeta.renderIcon('h-12 w-12')}
@@ -2056,20 +2020,20 @@ export function WorkspaceToolsView({
                   Live Embedded {docMeta.singular} Workspace
                 </h3>
                 <p className="mt-1.5 max-w-md text-xs leading-relaxed text-slate-500">
-                  Select a saved company {docMeta.singular} from the switcher bar above, paste any{' '}
-                  {docMeta.singular} URL to open it right here inside NexOps, or create a new file
-                  with 1 click.
+                  Create a new {docMeta.singular} directly inside NexOps, select a saved company
+                  document from the switcher bar above, or paste any Google {docMeta.singular} URL
+                  to open its embedded editor here.
                 </p>
                 <div className="mt-5 flex flex-wrap items-center justify-center gap-2.5">
-                  <a
-                    href={docMeta.newUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                  <button
+                    type="button"
+                    onClick={handleQuickCreateInApp}
+                    disabled={creatingDoc}
                     className={`inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-xs font-semibold ${docMeta.primaryBtnClass}`}
                   >
                     <Plus className="h-4 w-4" />
-                    <span>+ Create New ({docMeta.newUrl.replace('https://', '')})</span>
-                  </a>
+                    <span>+ Create New {docMeta.singular}</span>
+                  </button>
                   <button
                     type="button"
                     onClick={() => setActiveDocPanel('add_link')}
@@ -2182,15 +2146,18 @@ export function WorkspaceToolsView({
                         </button>
                       )}
 
-                    <a
-                      href={activeDocumentUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                    <button
+                      type="button"
+                      onClick={() => setViewerFullscreen((prev) => !prev)}
                       className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-slate-900 px-3 text-xs font-semibold text-white hover:bg-slate-800"
                     >
-                      <span>Open Full Screen</span>
-                      <ExternalLink className="h-3.5 w-3.5" />
-                    </a>
+                      {viewerFullscreen ? (
+                        <Minimize2 className="h-3.5 w-3.5" />
+                      ) : (
+                        <Maximize2 className="h-3.5 w-3.5" />
+                      )}
+                      <span>{viewerFullscreen ? 'Exit Fullscreen' : 'Expand Workspace'}</span>
+                    </button>
                   </div>
                 </div>
 
@@ -2227,18 +2194,25 @@ export function WorkspaceToolsView({
                     key={`${activeDocumentUrl}-${embedMode}`}
                     src={getGoogleEmbedUrl(docTool, activeDocumentUrl, embedMode)}
                     title={activeDocumentTitle}
-                    className="h-[calc(100vh-300px)] min-h-[620px] w-full border-0 bg-white"
+                    className={
+                      viewerFullscreen
+                        ? 'h-full min-h-[calc(100vh-92px)] w-full border-0 bg-white'
+                        : 'h-[calc(100vh-300px)] min-h-[620px] w-full border-0 bg-white'
+                    }
                     allow="clipboard-read; clipboard-write"
                   />
                 </div>
 
                 <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-slate-50 px-4 py-2 text-[11px] text-slate-500">
                   <span>
-                    Mode: <strong className="text-slate-700">{embedMode === 'edit' ? 'Live Edit (/edit)' : docTool === 'forms' ? 'Live Form Fill (/viewform)' : 'Clean Preview (/preview)'}</strong>
+                    Embed URL:{' '}
+                    <code className="font-mono text-slate-700">
+                      {getGoogleEmbedUrl(docTool, activeDocumentUrl, embedMode)}
+                    </code>
                   </span>
                   <span>
-                    If a restricted corporate file blocks embedded access, ensure Google sharing
-                    allows link access or click <strong className="text-slate-700">Open Full Screen</strong>.
+                    Ensure Google file sharing allows link access if an embedded document prompts for
+                    permissions.
                   </span>
                 </div>
               </>
@@ -2269,14 +2243,14 @@ export function WorkspaceToolsView({
                 >
                   {confirmation.kind === 'send_gmail' && 'Confirm Sending Email via Gmail'}
                   {confirmation.kind === 'create_google_doc' &&
-                    `Create New ${DOC_TOOL_META[confirmation.toolType].singular}?`}
+                    `Create New ${DOC_TOOL_META[confirmation.toolType].singular} In-App`}
                   {confirmation.kind === 'delete_link' && 'Remove Shared Workspace Link?'}
                 </h3>
                 <p className="mt-1 text-xs leading-relaxed text-slate-600">
                   {confirmation.kind === 'send_gmail' &&
                     `You are about to send an email from ${confirmation.fromEmail} using your verified Gmail account.`}
                   {confirmation.kind === 'create_google_doc' &&
-                    `This will create "${confirmation.title}" in your connected Google Workspace account (${googleEmail || currentUser.email}) and share it with your NexOps team.`}
+                    `This will create a live ${DOC_TOOL_META[confirmation.toolType].singular} in your connected Google Workspace (${googleEmail || currentUser.email}) and embed it directly inside NexOps.`}
                   {confirmation.kind === 'delete_link' &&
                     `Remove "${confirmation.link.title}" from the shared NexOps Workspace switcher? (Your underlying Google file is preserved.)`}
                 </p>
@@ -2295,6 +2269,50 @@ export function WorkspaceToolsView({
                       <span className="font-semibold text-slate-700">Subject:</span>{' '}
                       {confirmation.subject}
                     </p>
+                  </div>
+                )}
+
+                {confirmation.kind === 'create_google_doc' && (
+                  <div className="mt-3 space-y-2.5">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-700">
+                        Document Title *
+                      </label>
+                      <input
+                        type="text"
+                        value={confirmation.title}
+                        onChange={(e) =>
+                          setConfirmation((prev) =>
+                            prev && prev.kind === 'create_google_doc'
+                              ? { ...prev, title: e.target.value }
+                              : prev,
+                          )
+                        }
+                        className="mt-1 h-9 w-full rounded-lg border border-slate-200 px-3 text-xs text-slate-900 focus:border-[#0B57D0] focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-700">
+                        Department
+                      </label>
+                      <select
+                        value={confirmation.department}
+                        onChange={(e) =>
+                          setConfirmation((prev) =>
+                            prev && prev.kind === 'create_google_doc'
+                              ? { ...prev, department: e.target.value }
+                              : prev,
+                          )
+                        }
+                        className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-800 focus:border-[#0B57D0] focus:outline-none"
+                      >
+                        {departments.map((d) => (
+                          <option key={d} value={d}>
+                            {d}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                 )}
               </div>
