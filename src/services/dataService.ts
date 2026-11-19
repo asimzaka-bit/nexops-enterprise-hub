@@ -136,7 +136,59 @@
  *   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
  * );
  *
- * -- 8. Key-Value System State Table (Branding, Custom Lists, Permission Matrix, Circulars, Shared Metadata)
+ * -- 8. User Profiles & Avatars Table + Storage Bucket
+ * CREATE TABLE IF NOT EXISTS public.profiles (
+ *   id TEXT PRIMARY KEY,
+ *   email TEXT,
+ *   full_name TEXT,
+ *   employee_id TEXT,
+ *   role TEXT,
+ *   department TEXT,
+ *   title TEXT,
+ *   sign_off_title TEXT,
+ *   avatar_url TEXT,
+ *   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+ * );
+ *
+ * INSERT INTO storage.buckets (id, name, public)
+ * VALUES ('avatars', 'avatars', true)
+ * ON CONFLICT (id) DO NOTHING;
+ *
+ * CREATE POLICY "Public Avatar Read" ON storage.objects FOR SELECT USING (bucket_id = 'avatars');
+ * CREATE POLICY "Allow Avatar Upload" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'avatars');
+ * CREATE POLICY "Allow Avatar Update" ON storage.objects FOR UPDATE USING (bucket_id = 'avatars');
+ * CREATE POLICY "Allow Avatar Delete" ON storage.objects FOR DELETE USING (bucket_id = 'avatars');
+ *
+ * -- 9. Workspace Tools — Gmail Sent History Table
+ * CREATE TABLE IF NOT EXISTS public.nexops_workspace_emails (
+ *   id TEXT PRIMARY KEY,
+ *   sender_email TEXT NOT NULL,
+ *   sender_name TEXT NOT NULL,
+ *   to_recipients TEXT NOT NULL,
+ *   cc_recipients TEXT NOT NULL DEFAULT '',
+ *   subject TEXT NOT NULL,
+ *   body TEXT NOT NULL,
+ *   delivery_method TEXT NOT NULL,
+ *   gmail_message_id TEXT,
+ *   status TEXT NOT NULL,
+ *   sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+ * );
+ *
+ * -- 10. Workspace Tools — Shared Google Docs, Sheets & Forms Links Table
+ * CREATE TABLE IF NOT EXISTS public.nexops_workspace_links (
+ *   id TEXT PRIMARY KEY,
+ *   tool_type TEXT NOT NULL CHECK (tool_type IN ('docs', 'sheets', 'forms')),
+ *   title TEXT NOT NULL,
+ *   url TEXT NOT NULL,
+ *   google_file_id TEXT,
+ *   department TEXT NOT NULL,
+ *   notes TEXT NOT NULL DEFAULT '',
+ *   added_by TEXT NOT NULL,
+ *   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+ *   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+ * );
+ *
+ * -- 11. Key-Value System State Table (Branding, Custom Lists, Permission Matrix, Circulars, Shared Metadata)
  * CREATE TABLE IF NOT EXISTS public.nexops_system_state (
  *   state_key TEXT PRIMARY KEY,
  *   payload JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -147,7 +199,7 @@
  * CREATE INDEX IF NOT EXISTS idx_nexops_audit_request_id ON public.nexops_audit_logs(request_id);
  * CREATE INDEX IF NOT EXISTS idx_nexops_audit_created_at ON public.nexops_audit_logs(created_at DESC);
  *
- * -- Enable Row-Level Security (RLS) & Policies for Client Access across all 8 tables
+ * -- Enable Row-Level Security (RLS) & Policies for Client Access across all 11 tables
  * ALTER TABLE public.nexops_requests ENABLE ROW LEVEL SECURITY;
  * ALTER TABLE public.nexops_audit_logs ENABLE ROW LEVEL SECURITY;
  * ALTER TABLE public.nexops_projects ENABLE ROW LEVEL SECURITY;
@@ -155,6 +207,9 @@
  * ALTER TABLE public.nexops_sops ENABLE ROW LEVEL SECURITY;
  * ALTER TABLE public.nexops_leaves ENABLE ROW LEVEL SECURITY;
  * ALTER TABLE public.nexops_moms ENABLE ROW LEVEL SECURITY;
+ * ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ * ALTER TABLE public.nexops_workspace_emails ENABLE ROW LEVEL SECURITY;
+ * ALTER TABLE public.nexops_workspace_links ENABLE ROW LEVEL SECURITY;
  * ALTER TABLE public.nexops_system_state ENABLE ROW LEVEL SECURITY;
  *
  * CREATE POLICY "Allow all nexops_requests" ON public.nexops_requests FOR ALL USING (true) WITH CHECK (true);
@@ -164,9 +219,12 @@
  * CREATE POLICY "Allow all nexops_sops" ON public.nexops_sops FOR ALL USING (true) WITH CHECK (true);
  * CREATE POLICY "Allow all nexops_leaves" ON public.nexops_leaves FOR ALL USING (true) WITH CHECK (true);
  * CREATE POLICY "Allow all nexops_moms" ON public.nexops_moms FOR ALL USING (true) WITH CHECK (true);
+ * CREATE POLICY "Allow all profiles" ON public.profiles FOR ALL USING (true) WITH CHECK (true);
+ * CREATE POLICY "Allow all nexops_workspace_emails" ON public.nexops_workspace_emails FOR ALL USING (true) WITH CHECK (true);
+ * CREATE POLICY "Allow all nexops_workspace_links" ON public.nexops_workspace_links FOR ALL USING (true) WITH CHECK (true);
  * CREATE POLICY "Allow all nexops_system_state" ON public.nexops_system_state FOR ALL USING (true) WITH CHECK (true);
  *
- * -- Enable Supabase Realtime replication across all 8 tables for live cross-device sync
+ * -- Enable Supabase Realtime replication across all tables for live cross-device sync
  * ALTER PUBLICATION supabase_realtime ADD TABLE
  *   public.nexops_requests,
  *   public.nexops_audit_logs,
@@ -175,6 +233,9 @@
  *   public.nexops_sops,
  *   public.nexops_leaves,
  *   public.nexops_moms,
+ *   public.profiles,
+ *   public.nexops_workspace_emails,
+ *   public.nexops_workspace_links,
  *   public.nexops_system_state;
  * ============================================================================
  */
@@ -227,6 +288,9 @@ import {
   SupabaseTableKey,
   TableSyncStatus,
   TeamMember,
+  WorkspaceDocToolType,
+  WorkspaceEmailLog,
+  WorkspaceSavedLink,
 } from '../types/nexops';
 import { normalizePermissionMatrix } from '../utils/storage';
 
@@ -370,6 +434,8 @@ function readWorkspaceState(): NexOpsState {
       leaves: normalizedLeaves,
       announcements: normalizedAnnouncements,
       meetings: normalizedMeetings,
+      workspaceEmails: Array.isArray(parsed.workspaceEmails) ? parsed.workspaceEmails : [],
+      workspaceLinks: Array.isArray(parsed.workspaceLinks) ? parsed.workspaceLinks : [],
       teamMembers: normalizedMembers,
       permissionMatrix: normalizePermissionMatrix(parsed.permissionMatrix),
     };
@@ -600,6 +666,10 @@ export function buildMemberFromSupabaseUser(
     (typeof meta.employee_id === 'string' && meta.employee_id.trim()) ||
     existing?.employeeId ||
     deriveEmployeeCode(user.id || email);
+  const avatarUrl =
+    (typeof meta.avatar_url === 'string' && meta.avatar_url.trim()) ||
+    existing?.avatarUrl ||
+    undefined;
 
   return {
     id: user.id,
@@ -610,8 +680,12 @@ export function buildMemberFromSupabaseUser(
     department,
     title,
     signOffTitle,
+    avatarUrl,
     active: existing?.active ?? true,
     lastActive: new Date().toISOString(),
+    outOfOffice: existing?.outOfOffice,
+    delegateApproverId: existing?.delegateApproverId,
+    delegateApproverName: existing?.delegateApproverName,
   };
 }
 
@@ -725,6 +799,46 @@ interface NexOpsMomDbRow {
   summary: string;
   decisions: string[] | string | null;
   action_items: MeetingActionItem[] | string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface NexOpsProfileDbRow {
+  id: string;
+  email?: string | null;
+  full_name?: string | null;
+  employee_id?: string | null;
+  role?: string | null;
+  department?: string | null;
+  title?: string | null;
+  sign_off_title?: string | null;
+  avatar_url?: string | null;
+  updated_at?: string;
+}
+
+interface NexOpsWorkspaceEmailDbRow {
+  id: string;
+  sender_email: string;
+  sender_name: string;
+  to_recipients: string;
+  cc_recipients: string;
+  subject: string;
+  body: string;
+  delivery_method: WorkspaceEmailLog['deliveryMethod'];
+  gmail_message_id?: string | null;
+  status: WorkspaceEmailLog['status'];
+  sent_at: string;
+}
+
+interface NexOpsWorkspaceLinkDbRow {
+  id: string;
+  tool_type: WorkspaceDocToolType;
+  title: string;
+  url: string;
+  google_file_id?: string | null;
+  department: Department;
+  notes: string;
+  added_by: string;
   created_at: string;
   updated_at: string;
 }
@@ -960,6 +1074,68 @@ function toMomDbRow(meeting: MeetingMinute): NexOpsMomDbRow {
   };
 }
 
+function mapDbWorkspaceEmail(row: NexOpsWorkspaceEmailDbRow): WorkspaceEmailLog {
+  return {
+    id: row.id,
+    senderEmail: row.sender_email,
+    senderName: row.sender_name,
+    toRecipients: row.to_recipients,
+    ccRecipients: row.cc_recipients ?? '',
+    subject: row.subject,
+    body: row.body,
+    deliveryMethod: row.delivery_method,
+    gmailMessageId: row.gmail_message_id ?? undefined,
+    status: row.status,
+    sentAt: row.sent_at,
+  };
+}
+
+function toWorkspaceEmailDbRow(email: WorkspaceEmailLog): NexOpsWorkspaceEmailDbRow {
+  return {
+    id: email.id,
+    sender_email: email.senderEmail,
+    sender_name: email.senderName,
+    to_recipients: email.toRecipients,
+    cc_recipients: email.ccRecipients ?? '',
+    subject: email.subject,
+    body: email.body,
+    delivery_method: email.deliveryMethod,
+    gmail_message_id: email.gmailMessageId ?? null,
+    status: email.status,
+    sent_at: email.sentAt,
+  };
+}
+
+function mapDbWorkspaceLink(row: NexOpsWorkspaceLinkDbRow): WorkspaceSavedLink {
+  return {
+    id: row.id,
+    toolType: row.tool_type,
+    title: row.title,
+    url: row.url,
+    googleFileId: row.google_file_id ?? undefined,
+    department: row.department,
+    notes: row.notes ?? '',
+    addedBy: row.added_by,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function toWorkspaceLinkDbRow(link: WorkspaceSavedLink): NexOpsWorkspaceLinkDbRow {
+  return {
+    id: link.id,
+    tool_type: link.toolType,
+    title: link.title,
+    url: link.url,
+    google_file_id: link.googleFileId ?? null,
+    department: link.department,
+    notes: link.notes ?? '',
+    added_by: link.addedBy,
+    created_at: link.createdAt,
+    updated_at: link.updatedAt,
+  };
+}
+
 function mapDbRequest(
   row: NexOpsRequestDbRow,
   audits: AuditEvent[],
@@ -1192,6 +1368,17 @@ export const SUPABASE_TABLE_REGISTRY: {
   { tableKey: 'sops', tableName: 'nexops_sops', moduleName: 'SOP & Policy Vault' },
   { tableKey: 'leaves', tableName: 'nexops_leaves', moduleName: 'Leaves & Time-Off' },
   { tableKey: 'moms', tableName: 'nexops_moms', moduleName: 'Meetings & MoM Tracker' },
+  { tableKey: 'profiles', tableName: 'profiles', moduleName: 'User Profiles & Avatars' },
+  {
+    tableKey: 'workspace_emails',
+    tableName: 'nexops_workspace_emails',
+    moduleName: 'Workspace Gmail Sent Log',
+  },
+  {
+    tableKey: 'workspace_links',
+    tableName: 'nexops_workspace_links',
+    moduleName: 'Workspace Docs, Sheets & Forms',
+  },
   {
     tableKey: 'system_state',
     tableName: 'nexops_system_state',
@@ -1205,6 +1392,7 @@ export const SYSTEM_STATE_KEYS = {
   ANNOUNCEMENTS: 'announcements',
   TEAM_DIRECTORY: 'team_directory',
   REQUEST_META: 'request_meta',
+  WORKSPACE_GMAIL_PREFS: 'workspace_gmail_prefs',
 } as const;
 
 interface SyncedRequestMetaBundle {
@@ -1223,6 +1411,9 @@ function buildOfflineDiagnostics(state: NexOpsState): TableSyncStatus[] {
     sops: state.sops.length,
     leaves: state.leaves.length,
     moms: state.meetings.length,
+    profiles: state.teamMembers.length,
+    workspace_emails: state.workspaceEmails.length,
+    workspace_links: state.workspaceLinks.length,
     system_state: 5,
   };
   return SUPABASE_TABLE_REGISTRY.map((entry) => ({
@@ -1379,17 +1570,31 @@ export const dataService = {
     }
 
     const checkedAt = new Date().toISOString();
-    const [reqRes, auditRes, projRes, assetRes, sopRes, leaveRes, momRes, sysRes] =
-      await Promise.all([
-        supabase.from('nexops_requests').select('*').order('created_at', { ascending: false }),
-        supabase.from('nexops_audit_logs').select('*').order('created_at', { ascending: false }),
-        supabase.from('nexops_projects').select('*').order('updated_at', { ascending: false }),
-        supabase.from('nexops_assets').select('*').order('updated_at', { ascending: false }),
-        supabase.from('nexops_sops').select('*').order('updated_at', { ascending: false }),
-        supabase.from('nexops_leaves').select('*').order('created_at', { ascending: false }),
-        supabase.from('nexops_moms').select('*').order('meeting_date', { ascending: false }),
-        supabase.from('nexops_system_state').select('*'),
-      ]);
+    const [
+      reqRes,
+      auditRes,
+      projRes,
+      assetRes,
+      sopRes,
+      leaveRes,
+      momRes,
+      profileRes,
+      emailRes,
+      linkRes,
+      sysRes,
+    ] = await Promise.all([
+      supabase.from('nexops_requests').select('*').order('created_at', { ascending: false }),
+      supabase.from('nexops_audit_logs').select('*').order('created_at', { ascending: false }),
+      supabase.from('nexops_projects').select('*').order('updated_at', { ascending: false }),
+      supabase.from('nexops_assets').select('*').order('updated_at', { ascending: false }),
+      supabase.from('nexops_sops').select('*').order('updated_at', { ascending: false }),
+      supabase.from('nexops_leaves').select('*').order('created_at', { ascending: false }),
+      supabase.from('nexops_moms').select('*').order('meeting_date', { ascending: false }),
+      supabase.from('profiles').select('*'),
+      supabase.from('nexops_workspace_emails').select('*').order('sent_at', { ascending: false }),
+      supabase.from('nexops_workspace_links').select('*').order('updated_at', { ascending: false }),
+      supabase.from('nexops_system_state').select('*'),
+    ]);
 
     // Extract system_state rows if available
     const sysRows = !sysRes.error ? ((sysRes.data ?? []) as NexOpsSystemStateDbRow[]) : [];
@@ -1414,11 +1619,33 @@ export const dataService = {
         ? (annRow.payload as CompanyAnnouncement[])
         : localSnapshot.announcements;
 
-    const teamRow = sysMap.get(SYSTEM_STATE_KEYS.TEAM_DIRECTORY);
-    const teamMembers: TeamMember[] =
-      teamRow && Array.isArray(teamRow.payload) && teamRow.payload.length > 0
-        ? (teamRow.payload as TeamMember[]).filter((m) => !isLegacyDemoAdmin(m))
+    const baseMembers: TeamMember[] =
+      sysMap.get(SYSTEM_STATE_KEYS.TEAM_DIRECTORY) &&
+      Array.isArray(sysMap.get(SYSTEM_STATE_KEYS.TEAM_DIRECTORY)?.payload) &&
+      (sysMap.get(SYSTEM_STATE_KEYS.TEAM_DIRECTORY)?.payload as TeamMember[]).length > 0
+        ? (sysMap.get(SYSTEM_STATE_KEYS.TEAM_DIRECTORY)?.payload as TeamMember[]).filter(
+            (m) => !isLegacyDemoAdmin(m),
+          )
         : localSnapshot.teamMembers;
+
+    // Merge avatar_url and profile fields from `profiles` table
+    const profileRows = !profileRes.error ? ((profileRes.data ?? []) as NexOpsProfileDbRow[]) : [];
+    const teamMembers: TeamMember[] = baseMembers.map((member) => {
+      const matchedProfile = profileRows.find(
+        (p) =>
+          p.id === member.id ||
+          (p.email && p.email.trim().toLowerCase() === member.email.trim().toLowerCase()),
+      );
+      if (!matchedProfile) return member;
+      return {
+        ...member,
+        avatarUrl:
+          matchedProfile.avatar_url === null
+            ? undefined
+            : matchedProfile.avatar_url || member.avatarUrl,
+        signOffTitle: matchedProfile.sign_off_title || member.signOffTitle,
+      };
+    });
 
     const metaBundleRow = sysMap.get(SYSTEM_STATE_KEYS.REQUEST_META);
     if (metaBundleRow && metaBundleRow.payload && typeof metaBundleRow.payload === 'object') {
@@ -1444,6 +1671,14 @@ export const dataService = {
     const meetings: MeetingMinute[] = !momRes.error
       ? ((momRes.data ?? []) as NexOpsMomDbRow[]).map(mapDbMom)
       : localSnapshot.meetings;
+
+    const workspaceEmails: WorkspaceEmailLog[] = !emailRes.error
+      ? ((emailRes.data ?? []) as NexOpsWorkspaceEmailDbRow[]).map(mapDbWorkspaceEmail)
+      : localSnapshot.workspaceEmails;
+
+    const workspaceLinks: WorkspaceSavedLink[] = !linkRes.error
+      ? ((linkRes.data ?? []) as NexOpsWorkspaceLinkDbRow[]).map(mapDbWorkspaceLink)
+      : localSnapshot.workspaceLinks;
 
     const globalAuditLogs: AuditEvent[] = !auditRes.error
       ? ((auditRes.data ?? []) as NexOpsAuditDbRow[]).map((row) => mapDbAudit(row, teamMembers))
@@ -1522,6 +1757,27 @@ export const dataService = {
       },
       {
         ...SUPABASE_TABLE_REGISTRY[7],
+        status: profileRes.error ? 'error' : 'connected',
+        rowCount: profileRes.error ? localSnapshot.teamMembers.length : (profileRes.data ?? []).length,
+        lastCheckedAt: checkedAt,
+        errorMessage: profileRes.error?.message,
+      },
+      {
+        ...SUPABASE_TABLE_REGISTRY[8],
+        status: emailRes.error ? 'error' : 'connected',
+        rowCount: emailRes.error ? localSnapshot.workspaceEmails.length : (emailRes.data ?? []).length,
+        lastCheckedAt: checkedAt,
+        errorMessage: emailRes.error?.message,
+      },
+      {
+        ...SUPABASE_TABLE_REGISTRY[9],
+        status: linkRes.error ? 'error' : 'connected',
+        rowCount: linkRes.error ? localSnapshot.workspaceLinks.length : (linkRes.data ?? []).length,
+        lastCheckedAt: checkedAt,
+        errorMessage: linkRes.error?.message,
+      },
+      {
+        ...SUPABASE_TABLE_REGISTRY[10],
         status: sysRes.error ? 'error' : 'connected',
         rowCount: sysRes.error ? 0 : (sysRes.data ?? []).length,
         lastCheckedAt: checkedAt,
@@ -1543,6 +1799,8 @@ export const dataService = {
       leaves,
       announcements,
       meetings,
+      workspaceEmails,
+      workspaceLinks,
       teamMembers,
       globalAuditLogs,
       notifications: localSnapshot.notifications,
@@ -1637,6 +1895,18 @@ export const dataService = {
           .from('nexops_moms')
           .upsert(nextState.meetings.map(toMomDbRow), { onConflict: 'id' });
         if (momErr) throw momErr;
+      }
+      if (nextState.workspaceEmails.length > 0) {
+        const { error: emlErr } = await supabase
+          .from('nexops_workspace_emails')
+          .upsert(nextState.workspaceEmails.map(toWorkspaceEmailDbRow), { onConflict: 'id' });
+        if (emlErr) throw emlErr;
+      }
+      if (nextState.workspaceLinks.length > 0) {
+        const { error: lnkErr } = await supabase
+          .from('nexops_workspace_links')
+          .upsert(nextState.workspaceLinks.map(toWorkspaceLinkDbRow), { onConflict: 'id' });
+        if (lnkErr) throw lnkErr;
       }
 
       const now = new Date().toISOString();
@@ -2485,7 +2755,186 @@ export const dataService = {
   },
 
   // -------------------------------------------------------------------------
-  // 11. Team Directory & Notifications (synced via `nexops_system_state` + audit logs)
+  // 11. User Profiles & Supabase Storage Avatars (`profiles` + `avatars` bucket)
+  // -------------------------------------------------------------------------
+  profile: {
+    async uploadAvatar(
+      user: TeamMember,
+      file: File,
+      nextDirectoryBuilder?: (avatarUrl: string) => TeamMember[],
+    ): Promise<string> {
+      const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+      if (!allowedTypes.includes(file.type)) {
+        throw new Error('Please upload a JPG, PNG, WebP, or GIF image file.');
+      }
+      if (file.size > 3 * 1024 * 1024) {
+        throw new Error('Profile picture must be 3 MB or smaller.');
+      }
+
+      if (!supabase) {
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            if (typeof reader.result === 'string') resolve(reader.result);
+            else reject(new Error('Failed to read image file.'));
+          };
+          reader.onerror = () => reject(new Error('Failed to read image file.'));
+          reader.readAsDataURL(file);
+        });
+        return dataUrl;
+      }
+
+      const ext = file.name.split('.').pop()?.toLowerCase().replace(/[^a-z0-9]/g, '') || 'png';
+      const safeUserId = user.id.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const filePath = `${safeUserId}/avatar-${Date.now()}.${ext}`;
+
+      const { error: uploadErr } = await supabase.storage.from('avatars').upload(filePath, file, {
+        cacheControl: '3600',
+        upsert: true,
+        contentType: file.type,
+      });
+      if (uploadErr) {
+        throw new Error(`Avatar upload failed (${uploadErr.message}). Ensure the public "avatars" storage bucket exists in Supabase.`);
+      }
+
+      const { data: pubData } = supabase.storage.from('avatars').getPublicUrl(filePath);
+      const publicUrl = pubData?.publicUrl;
+      if (!publicUrl) {
+        throw new Error('Uploaded image to avatars bucket but could not resolve public URL.');
+      }
+
+      const now = new Date().toISOString();
+      const { error: profileErr } = await supabase.from('profiles').upsert(
+        {
+          id: user.id,
+          email: user.email,
+          full_name: user.name,
+          employee_id: user.employeeId,
+          role: user.role,
+          department: user.department,
+          title: user.title,
+          sign_off_title: user.signOffTitle,
+          avatar_url: publicUrl,
+          updated_at: now,
+        },
+        { onConflict: 'id' },
+      );
+      if (profileErr) {
+        throw new Error(`Uploaded image, but failed saving avatar_url to profiles table: ${profileErr.message}`);
+      }
+
+      try {
+        const { data: sessionRes } = await supabase.auth.getSession();
+        if (sessionRes.session) {
+          await supabase.auth.updateUser({ data: { avatar_url: publicUrl } });
+        }
+      } catch {
+        // Non-blocking auth metadata update
+      }
+
+      if (nextDirectoryBuilder) {
+        await dataService.systemState.upsertKey(
+          SYSTEM_STATE_KEYS.TEAM_DIRECTORY,
+          nextDirectoryBuilder(publicUrl),
+          user.name,
+        );
+      }
+
+      return publicUrl;
+    },
+
+    async removeAvatar(user: TeamMember, nextDirectory?: TeamMember[]): Promise<void> {
+      if (!supabase) return;
+
+      const currentUrl = user.avatarUrl || '';
+      const marker = '/storage/v1/object/public/avatars/';
+      const idx = currentUrl.indexOf(marker);
+      if (idx !== -1) {
+        const objectPath = decodeURIComponent(currentUrl.slice(idx + marker.length).split('?')[0]);
+        if (objectPath) {
+          await supabase.storage.from('avatars').remove([objectPath]).catch(() => {});
+        }
+      }
+
+      const now = new Date().toISOString();
+      const { error: profileErr } = await supabase.from('profiles').upsert(
+        {
+          id: user.id,
+          email: user.email,
+          full_name: user.name,
+          employee_id: user.employeeId,
+          role: user.role,
+          department: user.department,
+          title: user.title,
+          sign_off_title: user.signOffTitle,
+          avatar_url: null,
+          updated_at: now,
+        },
+        { onConflict: 'id' },
+      );
+      if (profileErr) {
+        throw new Error(`Failed clearing avatar_url in profiles table: ${profileErr.message}`);
+      }
+
+      try {
+        const { data: sessionRes } = await supabase.auth.getSession();
+        if (sessionRes.session) {
+          await supabase.auth.updateUser({ data: { avatar_url: null } });
+        }
+      } catch {
+        // Non-blocking auth metadata clear
+      }
+
+      if (nextDirectory) {
+        await dataService.systemState.upsertKey(
+          SYSTEM_STATE_KEYS.TEAM_DIRECTORY,
+          nextDirectory,
+          user.name,
+        );
+      }
+    },
+  },
+
+  // -------------------------------------------------------------------------
+  // 12. Workspace Tools — Gmail Sent Logs (`nexops_workspace_emails`)
+  // -------------------------------------------------------------------------
+  workspaceEmails: {
+    async append(emailLog: WorkspaceEmailLog, auditEntry?: AuditEvent): Promise<void> {
+      if (!supabase) return;
+      const { error } = await supabase
+        .from('nexops_workspace_emails')
+        .upsert(toWorkspaceEmailDbRow(emailLog), { onConflict: 'id' });
+      if (error) throw error;
+      if (auditEntry) await dataService.auditLogs.append(auditEntry);
+    },
+  },
+
+  // -------------------------------------------------------------------------
+  // 13. Workspace Tools — Shared Google Docs, Sheets & Forms (`nexops_workspace_links`)
+  // -------------------------------------------------------------------------
+  workspaceLinks: {
+    async upsert(link: WorkspaceSavedLink, auditEntry?: AuditEvent): Promise<void> {
+      if (!supabase) return;
+      const { error } = await supabase
+        .from('nexops_workspace_links')
+        .upsert(toWorkspaceLinkDbRow(link), { onConflict: 'id' });
+      if (error) throw error;
+      if (auditEntry) await dataService.auditLogs.append(auditEntry);
+    },
+
+    async remove(linkId: string, auditEntry?: AuditEvent): Promise<void> {
+      if (!supabase) return;
+      const { error } = await supabase
+        .from('nexops_workspace_links')
+        .delete()
+        .eq('id', linkId);
+      if (error) throw error;
+      if (auditEntry) await dataService.auditLogs.append(auditEntry);
+    },
+  },
+
+  // -------------------------------------------------------------------------
+  // 14. Team Directory & Notifications (synced via `nexops_system_state` + audit logs)
   // -------------------------------------------------------------------------
   team: {
     async updateMember(
@@ -2497,6 +2946,7 @@ export const dataService = {
           | 'department'
           | 'active'
           | 'signOffTitle'
+          | 'avatarUrl'
           | 'outOfOffice'
           | 'delegateApproverId'
           | 'delegateApproverName'
@@ -2520,12 +2970,34 @@ export const dataService = {
     },
 
     async createMember(
-      _member: TeamMember,
+      member: TeamMember,
       auditEntry: AuditEvent,
       nextDirectory?: TeamMember[],
     ): Promise<void> {
       if (!supabase) return;
-      const tasks: Promise<void>[] = [dataService.auditLogs.append(auditEntry)];
+      const tasks: Promise<void>[] = [
+        dataService.auditLogs.append(auditEntry),
+        (async () => {
+          const { error } = await supabase.from('profiles').upsert(
+            {
+              id: member.id,
+              email: member.email,
+              full_name: member.name,
+              employee_id: member.employeeId,
+              role: member.role,
+              department: member.department,
+              title: member.title,
+              sign_off_title: member.signOffTitle,
+              avatar_url: member.avatarUrl ?? null,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: 'id' },
+          );
+          if (error) {
+            // Non-blocking if profiles table hasn't been created yet
+          }
+        })(),
+      ];
       if (nextDirectory) {
         tasks.push(
           dataService.systemState.upsertKey(

@@ -3,6 +3,7 @@ import {
   ArrowUpRight,
   Bell,
   Building2,
+  Camera,
   CheckCheck,
   CheckCircle2,
   ChevronDown,
@@ -34,6 +35,7 @@ import {
   TeamMember,
 } from '../types/nexops';
 import { formatDateTime } from '../utils/storage';
+import { UserAvatar } from './UserAvatar';
 
 interface TopBarProps {
   activeSection: NavSection;
@@ -87,6 +89,10 @@ const SECTION_TITLES: Record<NavSection, { title: string; subtitle: string }> = 
   meetings: {
     title: 'Meetings & Action Items (MoM)',
     subtitle: 'Executive summaries, recorded decisions & 1-click request conversion',
+  },
+  workspace: {
+    title: 'Workspace Tools',
+    subtitle: 'Integrated Gmail corporate client, Google Docs, Google Sheets & Google Forms',
   },
   audit: {
     title: 'Audit Logs & Compliance Center',
@@ -686,14 +692,13 @@ export function TopBar({
               aria-label="Open user profile menu"
               className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white pr-2 pl-1.5 text-left transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-indigo-600"
             >
-              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-slate-900 font-display text-xs font-bold text-white">
-                {currentUser.name
-                  .split(/\s+/)
-                  .filter(Boolean)
-                  .slice(0, 2)
-                  .map((n) => n[0].toUpperCase())
-                  .join('') || 'U'}
-              </span>
+              <UserAvatar
+                name={currentUser.name}
+                avatarUrl={currentUser.avatarUrl}
+                sizeClass="h-6 w-6"
+                textClass="text-xs"
+                roundedClass="rounded-md"
+              />
               <span className="hidden max-w-[136px] flex-col leading-tight sm:flex">
                 <span className="truncate text-[11px] font-semibold text-slate-900">
                   {currentUser.name}
@@ -707,20 +712,29 @@ export function TopBar({
 
             {profileOpen && (
               <div className="absolute right-0 mt-2 w-72 rounded-xl border border-slate-200 bg-white p-3 shadow-lg">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-slate-900">
-                      {currentUser.name}
-                    </p>
-                    <p className="truncate text-xs text-slate-500">
-                      {currentUser.signOffTitle || currentUser.title}
-                    </p>
+                <div className="flex items-start justify-between gap-2.5">
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <UserAvatar
+                      name={currentUser.name}
+                      avatarUrl={currentUser.avatarUrl}
+                      sizeClass="h-9 w-9"
+                      textClass="text-xs"
+                      roundedClass="rounded-lg"
+                    />
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-slate-900">
+                        {currentUser.name}
+                      </p>
+                      <p className="truncate text-xs text-slate-500">
+                        {currentUser.signOffTitle || currentUser.title}
+                      </p>
+                    </div>
                   </div>
                   <span className="shrink-0 rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-slate-600 tabular-nums">
                     {currentUser.employeeId}
                   </span>
                 </div>
-                <p className="mt-1 truncate font-mono text-[11px] text-slate-400">
+                <p className="mt-1.5 truncate font-mono text-[11px] text-slate-400">
                   {currentUser.email}
                 </p>
                 <div className="mt-2.5 border-t border-slate-100 pt-2.5">
@@ -738,6 +752,17 @@ export function TopBar({
                 </div>
 
                 <div className="mt-3 space-y-1 border-t border-slate-100 pt-2.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setProfileOpen(false);
+                      onOpenProfile();
+                    }}
+                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 hover:text-slate-900"
+                  >
+                    <Camera className="h-3.5 w-3.5 text-indigo-600 shrink-0" />
+                    <span>Upload / Manage Profile Photo</span>
+                  </button>
                   <button
                     type="button"
                     onClick={() => {

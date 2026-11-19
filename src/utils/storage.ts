@@ -695,6 +695,8 @@ export function parseSystemBackupJson(rawText: string): NexOpsState {
     meetings: Array.isArray(rawState.meetings)
       ? rawState.meetings
       : structuredClone(INITIAL_MEETINGS),
+    workspaceEmails: Array.isArray(rawState.workspaceEmails) ? rawState.workspaceEmails : [],
+    workspaceLinks: Array.isArray(rawState.workspaceLinks) ? rawState.workspaceLinks : [],
     teamMembers: normalizedMembers,
     globalAuditLogs: Array.isArray(rawState.globalAuditLogs)
       ? rawState.globalAuditLogs

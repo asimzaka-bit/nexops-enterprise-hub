@@ -2,22 +2,29 @@ import {
   BadgeCheck,
   Building2,
   CalendarOff,
+  Camera,
   CheckCircle2,
   IdCard,
   KeyRound,
+  Loader2,
   PenTool,
+  Trash2,
+  Upload,
   UserCheck,
   X,
 } from 'lucide-react';
-import { FormEvent, useMemo, useState } from 'react';
+import { ChangeEvent, FormEvent, useMemo, useRef, useState } from 'react';
 import { TeamMember } from '../types/nexops';
 import { RoleBadge } from './StatusIndicator';
+import { UserAvatar } from './UserAvatar';
 
 interface UserProfileModalProps {
   user: TeamMember;
   teamMembers: TeamMember[];
   pendingAssignedCount: number;
   onClose: () => void;
+  onUploadAvatar: (file: File) => Promise<void>;
+  onRemoveAvatar: () => Promise<void>;
   onSaveSignOffTitle: (userId: string, signOffTitle: string) => void;
   onSaveDelegation: (
     userId: string,
@@ -32,10 +39,16 @@ export function UserProfileModal({
   teamMembers,
   pendingAssignedCount,
   onClose,
+  onUploadAvatar,
+  onRemoveAvatar,
   onSaveSignOffTitle,
   onSaveDelegation,
   onUpdatePassword,
 }: UserProfileModalProps) {
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+  const [avatarBusy, setAvatarBusy] = useState(false);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
+
   const [signOffTitle, setSignOffTitle] = useState(user.signOffTitle || user.title);
   const [signOffError, setSignOffError] = useState<string | null>(null);
 
@@ -65,6 +78,33 @@ export function UserProfileModal({
     message: string;
   } | null>(null);
   const [updatingPassword, setUpdatingPassword] = useState(false);
+
+  const handleAvatarFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setAvatarError(null);
+    setAvatarBusy(true);
+    try {
+      await onUploadAvatar(file);
+    } catch (err) {
+      setAvatarError(err instanceof Error ? err.message : 'Unable to upload profile picture.');
+    } finally {
+      setAvatarBusy(false);
+    }
+  };
+
+  const handleRemovePhoto = async () => {
+    setAvatarError(null);
+    setAvatarBusy(true);
+    try {
+      await onRemoveAvatar();
+    } catch (err) {
+      setAvatarError(err instanceof Error ? err.message : 'Unable to remove profile picture.');
+    } finally {
+      setAvatarBusy(false);
+    }
+  };
 
   const handleSaveSignature = (e: FormEvent) => {
     e.preventDefault();
@@ -140,12 +180,13 @@ export function UserProfileModal({
         {/* Modal Header */}
         <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50/70 px-6 py-4">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-900 font-display text-sm font-bold text-white">
-              {user.name
-                .split(' ')
-                .map((p) => p[0])
-                .join('')}
-            </div>
+            <UserAvatar
+              name={user.name}
+              avatarUrl={user.avatarUrl}
+              sizeClass="h-10 w-10"
+              textClass="text-sm"
+              roundedClass="rounded-xl"
+            />
             <div>
               <h2
                 id="profile-modal-title"
@@ -168,6 +209,72 @@ export function UserProfileModal({
 
         {/* Scrollable Content */}
         <div className="flex-1 space-y-6 overflow-y-auto p-6">
+          {/* Profile Picture Upload & Management */}
+          <section className="rounded-xl border border-slate-200 bg-white p-5">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-4">
+                <UserAvatar
+                  name={user.name}
+                  avatarUrl={user.avatarUrl}
+                  sizeClass="h-16 w-16"
+                  textClass="text-lg"
+                  roundedClass="rounded-2xl"
+                />
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <Camera className="h-4 w-4 text-indigo-600" />
+                    <h3 className="font-display text-sm font-bold text-slate-900">
+                      Profile Picture
+                    </h3>
+                  </div>
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    Stored in Supabase <span className="font-mono">avatars</span> bucket &amp;
+                    synced across the hub. Max 3 MB (JPG, PNG, WebP, GIF).
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  ref={avatarInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/gif"
+                  onChange={(e) => void handleAvatarFileChange(e)}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  disabled={avatarBusy}
+                  onClick={() => avatarInputRef.current?.click()}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-indigo-700 disabled:opacity-60"
+                >
+                  {avatarBusy ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Upload className="h-3.5 w-3.5" />
+                  )}
+                  <span>{user.avatarUrl ? 'Update Photo' : 'Upload Photo'}</span>
+                </button>
+                {user.avatarUrl && (
+                  <button
+                    type="button"
+                    disabled={avatarBusy}
+                    onClick={() => void handleRemovePhoto()}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 transition-colors hover:bg-rose-100 disabled:opacity-60"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    <span>Remove</span>
+                  </button>
+                )}
+              </div>
+            </div>
+            {avatarError && (
+              <p className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700">
+                {avatarError}
+              </p>
+            )}
+          </section>
+
           {/* Identity Summary Grid */}
           <section className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

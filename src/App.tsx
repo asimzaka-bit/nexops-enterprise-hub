@@ -19,6 +19,7 @@ import { ToastContainer } from './components/ToastContainer';
 import { TopBar } from './components/TopBar';
 import { UserProfileModal } from './components/UserProfileModal';
 import { WorkspaceSkeleton } from './components/WorkspaceSkeleton';
+import { WorkspaceToolsView } from './components/WorkspaceToolsView';
 import {
   AnnouncementSeverity,
   AppNotification,
@@ -49,6 +50,9 @@ import {
   TableSyncStatus,
   TeamMember,
   ToastMessage,
+  WorkspaceEmailLog,
+  WorkspaceSavedLink,
+  WorkspaceToolType,
 } from './types/nexops';
 import {
   buildMemberFromSupabaseUser,
@@ -76,6 +80,14 @@ export default function App() {
     dataService.auth.loadSessionSync(),
   );
   const [activeSection, setActiveSection] = useState<NavSection>('dashboard');
+  const [activeWorkspaceTool, setActiveWorkspaceTool] = useState<WorkspaceToolType>('gmail');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('nexops_sidebar_collapsed_v1') === 'true';
+    } catch {
+      return false;
+    }
+  });
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Queue filters & search
@@ -119,6 +131,14 @@ export default function App() {
   useEffect(() => {
     document.title = `${branding.companyName} — ${branding.tagline}`;
   }, [branding.companyName, branding.tagline]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('nexops_sidebar_collapsed_v1', String(sidebarCollapsed));
+    } catch {
+      // Ignore storage quota errors
+    }
+  }, [sidebarCollapsed]);
 
   const pushToast = useCallback(
     (title: string, description?: string, variant: ToastMessage['variant'] = 'success') => {
@@ -186,6 +206,7 @@ export default function App() {
         userRole: member.role,
         userDepartment: member.department,
         userTitle: member.title,
+        avatarUrl: member.avatarUrl,
       };
       dataService.auth.saveSessionSync(nextSession);
       setAuthSession(nextSession);
@@ -337,6 +358,7 @@ export default function App() {
         title: authSession.userTitle || authSession.userRole || 'Staff / Contributor',
         signOffTitle:
           authSession.userTitle || authSession.userRole || 'Staff / Contributor',
+        avatarUrl: authSession.avatarUrl,
         active: true,
         lastActive: authSession.signedInAt,
       };
@@ -461,6 +483,27 @@ export default function App() {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'nexops_system_state' },
+        () => {
+          scheduleRealtimeRefresh();
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'profiles' },
+        () => {
+          scheduleRealtimeRefresh();
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'nexops_workspace_emails' },
+        () => {
+          scheduleRealtimeRefresh();
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'nexops_workspace_links' },
         () => {
           scheduleRealtimeRefresh();
         },
@@ -2401,8 +2444,178 @@ export default function App() {
       ...prev,
       globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
     }));
-    void dataService.auditLogs.append(auditEntry).catch(handleCloudWriteError);
+    await dataService.auditLogs.append(auditEntry).catch(handleCloudWriteError);
     pushToast('Password Updated', 'Corporate credentials updated securely.', 'success');
+  };
+
+  // Profile Picture Upload & Removal (Supabase Storage `avatars` + `profiles.avatar_url`)
+  const handleUploadAvatar = async (file: File) => {
+    const publicUrl = await dataService.profile.uploadAvatar(
+      currentUser,
+      file,
+      (resolvedUrl) =>
+        state.teamMembers.map((m) =>
+          m.id === currentUser.id ||
+          (currentUser.email &&
+            m.email.toLowerCase() === currentUser.email.toLowerCase())
+            ? { ...m, avatarUrl: resolvedUrl }
+            : m,
+        ),
+    );
+
+    const auditEntry = createAuditEvent(
+      'PROFILE-AVATAR',
+      'Team Updated',
+      `Updated corporate profile picture for ${currentUser.name} (${currentUser.employeeId}).`,
+    );
+
+    setState((prev) => ({
+      ...prev,
+      teamMembers: prev.teamMembers.map((m) =>
+        m.id === currentUser.id ||
+        (currentUser.email &&
+          m.email.toLowerCase() === currentUser.email.toLowerCase())
+          ? { ...m, avatarUrl: publicUrl }
+          : m,
+      ),
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+    }));
+
+    setAuthSession((prev) => {
+      if (!prev) return prev;
+      const updated = { ...prev, avatarUrl: publicUrl };
+      dataService.auth.saveSessionSync(updated);
+      return updated;
+    });
+
+    void dataService.auditLogs.append(auditEntry).catch(handleCloudWriteError);
+    if (dataService.isSupabaseConfigured()) setDbConnected(true);
+    pushToast('Profile Picture Updated', 'Synced across header, sidebar, and team directory.', 'success');
+  };
+
+  const handleRemoveAvatar = async () => {
+    const nextMembers = state.teamMembers.map((m) =>
+      m.id === currentUser.id ||
+      (currentUser.email &&
+        m.email.toLowerCase() === currentUser.email.toLowerCase())
+        ? { ...m, avatarUrl: undefined }
+        : m,
+    );
+
+    await dataService.profile.removeAvatar(currentUser, nextMembers);
+
+    const auditEntry = createAuditEvent(
+      'PROFILE-AVATAR',
+      'Team Updated',
+      `Removed profile picture for ${currentUser.name} (${currentUser.employeeId}).`,
+    );
+
+    setState((prev) => ({
+      ...prev,
+      teamMembers: prev.teamMembers.map((m) =>
+        m.id === currentUser.id ||
+        (currentUser.email &&
+          m.email.toLowerCase() === currentUser.email.toLowerCase())
+          ? { ...m, avatarUrl: undefined }
+          : m,
+      ),
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+    }));
+
+    setAuthSession((prev) => {
+      if (!prev) return prev;
+      const updated = { ...prev, avatarUrl: undefined };
+      dataService.auth.saveSessionSync(updated);
+      return updated;
+    });
+
+    void dataService.auditLogs.append(auditEntry).catch(handleCloudWriteError);
+    pushToast('Profile Picture Removed', 'Reverted to corporate initials badge.', 'info');
+  };
+
+  // Workspace Tools Handlers (Gmail, Google Docs, Google Sheets, Google Forms)
+  const handleSaveEmailLog = (emailLog: WorkspaceEmailLog) => {
+    const auditEntry = createAuditEvent(
+      'WORKSPACE-GMAIL',
+      'Team Updated',
+      `Sent corporate email via ${emailLog.deliveryMethod} to ${emailLog.toRecipients} ("${emailLog.subject}").`,
+    );
+
+    setState((prev) => ({
+      ...prev,
+      workspaceEmails: [emailLog, ...prev.workspaceEmails],
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+    }));
+
+    void dataService.workspaceEmails
+      .append(emailLog, auditEntry)
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      })
+      .catch(handleCloudWriteError);
+
+    pushToast(
+      'Corporate Email Recorded',
+      `${emailLog.subject} → ${emailLog.toRecipients}`,
+      'success',
+    );
+  };
+
+  const handleSaveWorkspaceLink = (link: WorkspaceSavedLink) => {
+    const toolLabel =
+      link.toolType === 'docs'
+        ? 'Google Docs'
+        : link.toolType === 'sheets'
+          ? 'Google Sheets'
+          : 'Google Forms';
+    const auditEntry = createAuditEvent(
+      `WORKSPACE-${link.toolType.toUpperCase()}`,
+      'Team Updated',
+      `Added ${toolLabel} link "${link.title}" (${link.department}) to Workspace Tools.`,
+    );
+
+    setState((prev) => ({
+      ...prev,
+      workspaceLinks: [
+        link,
+        ...prev.workspaceLinks.filter((existing) => existing.id !== link.id),
+      ],
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+    }));
+
+    void dataService.workspaceLinks
+      .upsert(link, auditEntry)
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      })
+      .catch(handleCloudWriteError);
+
+    pushToast(`${toolLabel} Linked`, link.title, 'success');
+  };
+
+  const handleDeleteWorkspaceLink = (linkId: string) => {
+    const target = state.workspaceLinks.find((l) => l.id === linkId);
+    if (!target) return;
+    const auditEntry = createAuditEvent(
+      `WORKSPACE-${target.toolType.toUpperCase()}`,
+      'Team Updated',
+      `Removed shared link "${target.title}" from Workspace Tools.`,
+    );
+
+    setState((prev) => ({
+      ...prev,
+      workspaceLinks: prev.workspaceLinks.filter((l) => l.id !== linkId),
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+    }));
+
+    void dataService.workspaceLinks
+      .remove(linkId, auditEntry)
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      })
+      .catch(handleCloudWriteError);
+
+    pushToast('Workspace Link Removed', target.title, 'info');
   };
 
   const handleMarkAllRead = () => {
@@ -2737,6 +2950,11 @@ export default function App() {
           branding={branding}
           activeSection={activeSection}
           onSelectSection={setActiveSection}
+          activeWorkspaceTool={activeWorkspaceTool}
+          onSelectWorkspaceTool={(tool) => {
+            setActiveWorkspaceTool(tool);
+            setActiveSection('workspace');
+          }}
           activeRole={currentUser.role}
           currentUser={currentUser}
           pendingQueueCount={pendingQueueCount}
@@ -2745,12 +2963,19 @@ export default function App() {
           pendingSopsCount={pendingSopsCount}
           pendingLeavesCount={pendingLeavesCount}
           openActionItemsCount={openActionItemsCount}
+          workspaceLinksCount={state.workspaceLinks.length}
+          collapsed={sidebarCollapsed}
+          onToggleCollapse={() => setSidebarCollapsed((prev) => !prev)}
           mobileOpen={mobileMenuOpen}
           onCloseMobile={() => setMobileMenuOpen(false)}
         />
 
         {/* Main Content Shell */}
-        <div className="flex min-h-screen flex-col lg:pl-64">
+        <div
+          className={`flex min-h-screen flex-col transition-all duration-200 ease-in-out ${
+            sidebarCollapsed ? 'lg:pl-20' : 'lg:pl-64'
+          }`}
+        >
           <TopBar
             activeSection={activeSection}
             activeRole={currentUser.role}
@@ -2936,6 +3161,22 @@ export default function App() {
                   />
                 )}
 
+                {activeSection === 'workspace' && (
+                  <WorkspaceToolsView
+                    activeTool={activeWorkspaceTool}
+                    onSelectTool={setActiveWorkspaceTool}
+                    currentUser={currentUser}
+                    teamMembers={state.teamMembers}
+                    departments={branding.departments}
+                    emails={state.workspaceEmails}
+                    links={state.workspaceLinks}
+                    onSaveEmailLog={handleSaveEmailLog}
+                    onSaveWorkspaceLink={handleSaveWorkspaceLink}
+                    onDeleteWorkspaceLink={handleDeleteWorkspaceLink}
+                    onNotify={pushToast}
+                  />
+                )}
+
                 {activeSection === 'settings' && (
                   <TeamSettingsView
                     activeRole={currentUser.role}
@@ -3001,6 +3242,8 @@ export default function App() {
             teamMembers={state.teamMembers}
             pendingAssignedCount={pendingAssignedCount}
             onClose={() => setProfileModalOpen(false)}
+            onUploadAvatar={handleUploadAvatar}
+            onRemoveAvatar={handleRemoveAvatar}
             onSaveSignOffTitle={handleSaveSignOffTitle}
             onSaveDelegation={handleSaveDelegation}
             onUpdatePassword={handleUpdatePassword}

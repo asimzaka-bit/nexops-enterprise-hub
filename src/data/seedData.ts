@@ -1343,6 +1343,8 @@ export function createSeedState(): NexOpsState {
     leaves: structuredClone(INITIAL_LEAVES),
     announcements: structuredClone(INITIAL_ANNOUNCEMENTS),
     meetings: structuredClone(INITIAL_MEETINGS),
+    workspaceEmails: [],
+    workspaceLinks: [],
     teamMembers: structuredClone(INITIAL_TEAM_MEMBERS),
     globalAuditLogs: buildInitialAuditLogs(requests),
     notifications: structuredClone(INITIAL_NOTIFICATIONS),

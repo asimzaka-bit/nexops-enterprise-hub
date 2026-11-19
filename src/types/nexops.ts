@@ -234,6 +234,9 @@ export type SupabaseTableKey =
   | 'sops'
   | 'leaves'
   | 'moms'
+  | 'profiles'
+  | 'workspace_emails'
+  | 'workspace_links'
   | 'system_state';
 
 export type TableConnectionHealth = 'connected' | 'error' | 'offline';
@@ -248,6 +251,36 @@ export interface TableSyncStatus {
   errorMessage?: string;
 }
 
+export type WorkspaceToolType = 'gmail' | 'docs' | 'sheets' | 'forms';
+export type WorkspaceDocToolType = 'docs' | 'sheets' | 'forms';
+
+export interface WorkspaceEmailLog {
+  id: string;
+  senderEmail: string;
+  senderName: string;
+  toRecipients: string;
+  ccRecipients: string;
+  subject: string;
+  body: string;
+  deliveryMethod: 'Gmail API' | 'Mail Client (mailto)';
+  gmailMessageId?: string;
+  status: 'Sent' | 'Dispatched via Mail Client';
+  sentAt: string;
+}
+
+export interface WorkspaceSavedLink {
+  id: string;
+  toolType: WorkspaceDocToolType;
+  title: string;
+  url: string;
+  googleFileId?: string;
+  department: Department;
+  notes: string;
+  addedBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type NavSection =
   | 'dashboard'
   | 'requests'
@@ -256,6 +289,7 @@ export type NavSection =
   | 'sops'
   | 'leaves'
   | 'meetings'
+  | 'workspace'
   | 'audit'
   | 'settings';
 
@@ -330,6 +364,7 @@ export interface TeamMember {
   department: Department;
   title: string;
   signOffTitle: string;
+  avatarUrl?: string;
   active: boolean;
   lastActive: string;
   outOfOffice?: boolean;
@@ -349,6 +384,7 @@ export interface AuthSession {
   userRole?: Role;
   userDepartment?: Department;
   userTitle?: string;
+  avatarUrl?: string;
 }
 
 export interface AppNotification {
@@ -377,6 +413,8 @@ export interface NexOpsState {
   leaves: LeaveRequest[];
   announcements: CompanyAnnouncement[];
   meetings: MeetingMinute[];
+  workspaceEmails: WorkspaceEmailLog[];
+  workspaceLinks: WorkspaceSavedLink[];
   teamMembers: TeamMember[];
   globalAuditLogs: AuditEvent[];
   notifications: AppNotification[];

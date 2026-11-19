@@ -38,6 +38,7 @@ import {
   TeamMember,
 } from '../types/nexops';
 import { formatDateTime, parseSystemBackupJson } from '../utils/storage';
+import { UserAvatar } from './UserAvatar';
 
 interface TeamSettingsViewProps {
   activeRole: Role;
@@ -823,17 +824,28 @@ export function TeamSettingsView({
                     {member.employeeId}
                   </td>
                   <td className="px-3 py-3.5">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <p className="text-xs font-semibold text-slate-900">{member.name}</p>
-                      {member.outOfOffice && member.delegateApproverName && (
-                        <span className="rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
-                          OOO → {member.delegateApproverName}
-                        </span>
-                      )}
+                    <div className="flex items-center gap-2.5">
+                      <UserAvatar
+                        name={member.name}
+                        avatarUrl={member.avatarUrl}
+                        sizeClass="h-8 w-8"
+                        textClass="text-[11px]"
+                        roundedClass="rounded-lg"
+                      />
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <p className="text-xs font-semibold text-slate-900">{member.name}</p>
+                          {member.outOfOffice && member.delegateApproverName && (
+                            <span className="rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
+                              OOO → {member.delegateApproverName}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-slate-500">
+                          {member.title} · <span className="font-mono">{member.email}</span>
+                        </p>
+                      </div>
                     </div>
-                    <p className="text-[11px] text-slate-500">
-                      {member.title} · <span className="font-mono">{member.email}</span>
-                    </p>
                   </td>
                   <td className="px-3 py-3.5">
                     {isAdmin ? (

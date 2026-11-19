@@ -13,8 +13,10 @@
 - **Corporate SOP & Knowledge Vault:** Publish company SOPs, QA guidelines, and HR policies with employee digital compliance sign-off tracking.
 - **Leave & Time-Off Approvals:** Submit leave applications with backup handover coverage and Manager/Admin approval routing.
 - **Meetings & Action Items (MoM):** Record executive meeting minutes, decisions, and convert action items into tracked operational requests with 1 click.
+- **Workspace Tools (Gmail, Google Docs, Google Sheets, Google Forms):** Connect a Google Workspace account via OAuth to compose/send/read emails via Gmail API (with Sent History persisted in Supabase), create new Docs/Sheets/Forms directly, and collaborate inside saved company documents & embedded editors.
+- **User Profile Pictures & Collapsible Sidebar:** Upload, update, or remove profile photos via the Supabase `avatars` Storage bucket & `profiles.avatar_url` column across the TopBar, Sidebar, and Team Directory, plus smoothly collapse/expand the left sidebar with hover tooltips.
 - **Command Search (`Ctrl+K` / `Cmd+K`):** Instant search across Request IDs, Titles, Departments, and Audit Logs.
-- **Company Branding, Permission Matrix & Cloud Health Diagnostics:** Admins can customize white-label branding, custom Departments & Categories, Role Permission Matrix, provision employee accounts, monitor live row counts across all 8 Supabase tables, and export/restore `.json` system backups.
+- **Company Branding, Permission Matrix & Cloud Health Diagnostics:** Admins can customize white-label branding, custom Departments & Categories, Role Permission Matrix, provision employee accounts, monitor live row counts across all 11 Supabase tables, and export/restore `.json` system backups.
 - **Production Authentication & OOO Delegation:** Official Supabase Email/Password sign-in, password reset links, First-Time Admin Setup Guard, and Out-of-Office backup approver delegation.
 
 ---
@@ -52,10 +54,10 @@ npm run build
 
 ---
 
-## Connecting Supabase (8-Table Cloud Persistence, Auth & Live Realtime Sync)
+## Connecting Supabase (11-Table Cloud Persistence, Avatar Storage, Auth & Live Realtime Sync)
 
 1. Create a project at [supabase.com](https://supabase.com).
-2. Open the **SQL Editor** in your Supabase dashboard and execute the full 8-table PostgreSQL schema below (creates all module tables, RLS policies, and enables `supabase_realtime` cross-device replication):
+2. Open the **SQL Editor** in your Supabase dashboard and execute the full 11-table + Storage bucket PostgreSQL schema below (creates all module tables, `avatars` bucket, RLS policies, and enables `supabase_realtime` cross-device replication):
 
 ```sql
 -- 1. Operational Requests Table
@@ -175,7 +177,59 @@ CREATE TABLE IF NOT EXISTS public.nexops_moms (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- 8. Key-Value System State Table (Branding, Departments/Categories, Permission Matrix, Circulars)
+-- 8. User Profiles & Avatars Table + Storage Bucket
+CREATE TABLE IF NOT EXISTS public.profiles (
+  id TEXT PRIMARY KEY,
+  email TEXT,
+  full_name TEXT,
+  employee_id TEXT,
+  role TEXT,
+  department TEXT,
+  title TEXT,
+  sign_off_title TEXT,
+  avatar_url TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('avatars', 'avatars', true)
+ON CONFLICT (id) DO NOTHING;
+
+CREATE POLICY "Public Avatar Read" ON storage.objects FOR SELECT USING (bucket_id = 'avatars');
+CREATE POLICY "Allow Avatar Upload" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'avatars');
+CREATE POLICY "Allow Avatar Update" ON storage.objects FOR UPDATE USING (bucket_id = 'avatars');
+CREATE POLICY "Allow Avatar Delete" ON storage.objects FOR DELETE USING (bucket_id = 'avatars');
+
+-- 9. Workspace Tools — Gmail Sent History Table
+CREATE TABLE IF NOT EXISTS public.nexops_workspace_emails (
+  id TEXT PRIMARY KEY,
+  sender_email TEXT NOT NULL,
+  sender_name TEXT NOT NULL,
+  to_recipients TEXT NOT NULL,
+  cc_recipients TEXT NOT NULL DEFAULT '',
+  subject TEXT NOT NULL,
+  body TEXT NOT NULL,
+  delivery_method TEXT NOT NULL,
+  gmail_message_id TEXT,
+  status TEXT NOT NULL,
+  sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 10. Workspace Tools — Shared Google Docs, Sheets & Forms Links Table
+CREATE TABLE IF NOT EXISTS public.nexops_workspace_links (
+  id TEXT PRIMARY KEY,
+  tool_type TEXT NOT NULL CHECK (tool_type IN ('docs', 'sheets', 'forms')),
+  title TEXT NOT NULL,
+  url TEXT NOT NULL,
+  google_file_id TEXT,
+  department TEXT NOT NULL,
+  notes TEXT NOT NULL DEFAULT '',
+  added_by TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 11. Key-Value System State Table (Branding, Departments/Categories, Permission Matrix, Circulars)
 CREATE TABLE IF NOT EXISTS public.nexops_system_state (
   state_key TEXT PRIMARY KEY,
   payload JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -194,6 +248,9 @@ ALTER TABLE public.nexops_assets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.nexops_sops ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.nexops_leaves ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.nexops_moms ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.nexops_workspace_emails ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.nexops_workspace_links ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.nexops_system_state ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Allow all nexops_requests" ON public.nexops_requests FOR ALL USING (true) WITH CHECK (true);
@@ -203,9 +260,12 @@ CREATE POLICY "Allow all nexops_assets" ON public.nexops_assets FOR ALL USING (t
 CREATE POLICY "Allow all nexops_sops" ON public.nexops_sops FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all nexops_leaves" ON public.nexops_leaves FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all nexops_moms" ON public.nexops_moms FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all profiles" ON public.profiles FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all nexops_workspace_emails" ON public.nexops_workspace_emails FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all nexops_workspace_links" ON public.nexops_workspace_links FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all nexops_system_state" ON public.nexops_system_state FOR ALL USING (true) WITH CHECK (true);
 
--- Enable Live Cross-Device Realtime Updates across all 8 tables
+-- Enable Live Cross-Device Realtime Updates across all 11 tables
 ALTER PUBLICATION supabase_realtime ADD TABLE
   public.nexops_requests,
   public.nexops_audit_logs,
@@ -214,6 +274,9 @@ ALTER PUBLICATION supabase_realtime ADD TABLE
   public.nexops_sops,
   public.nexops_leaves,
   public.nexops_moms,
+  public.profiles,
+  public.nexops_workspace_emails,
+  public.nexops_workspace_links,
   public.nexops_system_state;
 ```
 
@@ -222,7 +285,7 @@ ALTER PUBLICATION supabase_realtime ADD TABLE
    VITE_SUPABASE_URL="https://YOUR_PROJECT_ID.supabase.co"
    VITE_SUPABASE_ANON_KEY="YOUR_SUPABASE_ANON_KEY"
    ```
-4. Restart the dev server (`npm run dev`). The top bar badge switches to **Cloud Connected: Supabase**, and **Team & Settings → Cloud Health Diagnostics** displays live row counts and connection health for all 8 Supabase tables (`requests`, `audit_logs`, `projects`, `assets`, `sops`, `leaves`, `moms`, `system_state`).
+4. Restart the dev server (`npm run dev`). The top bar badge switches to **Cloud Connected: Supabase**, and **Team & Settings → Cloud Health Diagnostics** displays live row counts and connection health for all 11 Supabase tables (`requests`, `audit_logs`, `projects`, `assets`, `sops`, `leaves`, `moms`, `profiles`, `workspace_emails`, `workspace_links`, `system_state`).
 
 ### Optional: Server-Side Gemini AI Briefs
 To enable live Gemini synthesis for the **Generate AI Review Brief** panel (while keeping your API key strictly server-side in `server.ts`), set:
