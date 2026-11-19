@@ -1,16 +1,10 @@
+import { DEFAULT_PERMISSION_MATRIX } from '../data/seedData';
 import {
-  DEFAULT_PERMISSION_MATRIX,
-  INITIAL_ANNOUNCEMENTS,
-  INITIAL_ASSETS,
-  INITIAL_LEAVES,
-  INITIAL_MEETINGS,
-  INITIAL_PROJECTS,
-  INITIAL_SOPS,
-} from '../data/seedData';
-import {
+  ApprovalStatus,
   AuditEvent,
   CompanyAsset,
   CurrencyCode,
+  DbAccessRole,
   NexOpsState,
   OperationalRequest,
   PermissionKey,
@@ -19,6 +13,61 @@ import {
   Role,
   TeamMember,
 } from '../types/nexops';
+
+export const SUPER_ADMIN_EMAIL = 'asim.zaka@mmpakistan.com';
+
+export function isSuperAdminEmail(email?: string | null): boolean {
+  return (email ?? '').trim().toLowerCase() === SUPER_ADMIN_EMAIL;
+}
+
+export function normalizeRole(raw: unknown): Role {
+  if (typeof raw !== 'string') return 'Viewer';
+  const cleaned = raw.trim().toLowerCase();
+  if (cleaned === 'admin' || cleaned === 'super admin' || cleaned === 'super_admin') {
+    return 'Admin';
+  }
+  if (
+    cleaned === 'editor' ||
+    cleaned === 'manager / qa reviewer' ||
+    cleaned === 'manager' ||
+    cleaned === 'qa reviewer'
+  ) {
+    return 'Editor';
+  }
+  if (
+    cleaned === 'viewer' ||
+    cleaned === 'staff / contributor' ||
+    cleaned === 'staff' ||
+    cleaned === 'contributor'
+  ) {
+    return 'Viewer';
+  }
+  return 'Viewer';
+}
+
+export function toDbRole(role: Role): DbAccessRole {
+  switch (role) {
+    case 'Admin':
+      return 'admin';
+    case 'Editor':
+      return 'editor';
+    default:
+      return 'viewer';
+  }
+}
+
+export function fromDbRole(raw: unknown): Role {
+  return normalizeRole(raw);
+}
+
+export function normalizeApprovalStatus(raw: unknown, email?: string | null): ApprovalStatus {
+  if (isSuperAdminEmail(email)) return 'approved';
+  if (typeof raw !== 'string') return 'pending';
+  const cleaned = raw.trim().toLowerCase();
+  if (cleaned === 'approved') return 'approved';
+  if (cleaned === 'rejected' || cleaned === 'declined') return 'rejected';
+  return 'pending';
+}
 
 export function generateNextRequestId(requests: OperationalRequest[]): string {
   const year = 2026;
@@ -202,21 +251,23 @@ export function resolveEffectiveReviewer(
   members: TeamMember[],
 ): { assignedReviewer: string; delegatedFromReviewer?: string } {
   const cleanIntended = intendedName.trim();
+  const isApprovedMember = (m: TeamMember) =>
+    m.active && (isSuperAdminEmail(m.email) || (m.approvalStatus ?? 'approved') === 'approved');
   const target = members.find(
-    (m) => m.name.toLowerCase() === cleanIntended.toLowerCase() && m.active,
+    (m) => m.name.toLowerCase() === cleanIntended.toLowerCase() && isApprovedMember(m),
   );
   if (!target) {
-    // Fallback to first active non-OOO Manager/Admin if intended reviewer isn't found
+    // Fallback to first active approved non-OOO Editor/Admin if intended reviewer isn't found
     const fallback =
       members.find(
         (m) =>
-          m.active &&
-          (m.role === 'Manager / QA Reviewer' || m.role === 'Admin') &&
+          isApprovedMember(m) &&
+          (m.role === 'Editor' || m.role === 'Admin') &&
           !m.outOfOffice,
       ) ??
-      members.find((m) => m.active && (m.role === 'Manager / QA Reviewer' || m.role === 'Admin'));
+      members.find((m) => isApprovedMember(m) && (m.role === 'Editor' || m.role === 'Admin'));
     return {
-      assignedReviewer: fallback?.name || cleanIntended || 'QA Reviewer',
+      assignedReviewer: fallback?.name || cleanIntended || 'Operations Reviewer',
     };
   }
 
@@ -474,28 +525,28 @@ export function downloadSampleRequestsCsvTemplate(): void {
 
   const sampleRows = [
     [
-      'Q4 Cloud IAM Key Rotation Verification',
-      'Security Compliance',
+      'Cloud IAM Key Rotation Verification',
+      'Security & Infrastructure',
       'Engineering',
       'High',
       'Submitted',
       '2026-12-05',
-      'Nadia Patel',
-      'Marcus Vance',
-      'https://intra.nexops.example/sec/iam-rotation-q4',
+      'Operations Staff',
+      'Operations Reviewer',
+      'https://intranet.company.example/sec/iam-rotation',
       'Validate automated KMS and IAM service credential rotation across production clusters with zero service disruption.',
       'Confirm zero hardcoded secrets;Verify dual-region replication;Attach automated penetration test report',
     ],
     [
       'Vendor SLA Renewal Audit Package',
-      'Vendor Risk Review',
+      'Compliance & Audit',
       'Operations',
       'Medium',
       'Draft',
       '2026-12-12',
-      'David Kim',
-      'Marcus Vance',
-      'https://intra.nexops.example/ops/vendor-sla-2026',
+      'Operations Staff',
+      'Operations Reviewer',
+      'https://intranet.company.example/ops/vendor-sla',
       'Annual vendor SLA compliance and uptime guarantee verification prior to finance sign-off.',
       'Confirm 99.95% uptime SLA clause;Verify SOC 2 Type II attestation',
     ],
@@ -600,7 +651,7 @@ export function downloadSystemBackupJson(state: NexOpsState, exportedBy: string)
   URL.revokeObjectURL(url);
 }
 
-const VALID_ROLES: Role[] = ['Admin', 'Manager / QA Reviewer', 'Staff / Contributor'];
+const VALID_ROLES: Role[] = ['Admin', 'Editor', 'Viewer'];
 
 const PERMISSION_KEYS: PermissionKey[] = [
   'create_requests',
@@ -617,19 +668,34 @@ const PERMISSION_KEYS: PermissionKey[] = [
 export function normalizePermissionMatrix(raw: unknown): PermissionMatrix {
   const base = structuredClone(DEFAULT_PERMISSION_MATRIX);
   if (!raw || typeof raw !== 'object') return base;
-  const candidate = raw as Partial<Record<Role, Partial<Record<PermissionKey, unknown>>>>;
-  for (const role of VALID_ROLES) {
-    const roleEntry = candidate[role];
-    if (roleEntry && typeof roleEntry === 'object') {
-      for (const key of PERMISSION_KEYS) {
-        if (typeof roleEntry[key] === 'boolean') {
-          base[role][key] = roleEntry[key] as boolean;
-        }
+  const candidate = raw as Record<string, Partial<Record<PermissionKey, unknown>> | undefined>;
+
+  const adminEntry = candidate.Admin ?? candidate.admin;
+  if (adminEntry && typeof adminEntry === 'object') {
+    for (const key of PERMISSION_KEYS) {
+      if (typeof adminEntry[key] === 'boolean') {
+        base.Admin[key] = adminEntry[key] as boolean;
       }
     }
   }
-  // Ensure Admin always retains system administration access
+
+  const editorEntry = candidate.Editor ?? candidate.editor ?? candidate['Manager / QA Reviewer'];
+  if (editorEntry && typeof editorEntry === 'object') {
+    for (const key of PERMISSION_KEYS) {
+      if (typeof editorEntry[key] === 'boolean') {
+        base.Editor[key] = editorEntry[key] as boolean;
+      }
+    }
+  }
+
+  // Enforce strict boundaries: Admin always has full Admin controls; Editor never manages Admin settings or announcements; Viewer is strict read-only.
   base.Admin.manage_admin_settings = true;
+  base.Editor.manage_admin_settings = false;
+  base.Editor.publish_announcements = false;
+  for (const key of PERMISSION_KEYS) {
+    base.Viewer[key] = false;
+  }
+
   return base;
 }
 
@@ -659,47 +725,60 @@ export function parseSystemBackupJson(rawText: string): NexOpsState {
     throw new Error('Backup file must include valid "requests" and "teamMembers" arrays.');
   }
 
-  const activeRole: Role = VALID_ROLES.includes(rawState.activeRole as Role)
-    ? (rawState.activeRole as Role)
-    : 'Admin';
+  const normalizedRole = normalizeRole(rawState.activeRole);
+  const activeRole: Role = VALID_ROLES.includes(normalizedRole) ? normalizedRole : 'Viewer';
 
-  const normalizedMembers = rawState.teamMembers.map((m, idx) => ({
-    ...m,
-    employeeId: m.employeeId || `NX-EMP-${String(1001 + idx * 4)}`,
-    signOffTitle: m.signOffTitle || m.title || m.role,
-  }));
+  const normalizedMembers = rawState.teamMembers.map((m, idx) => {
+    const role = isSuperAdminEmail(m.email) ? 'Admin' : normalizeRole(m.role);
+    return {
+      ...m,
+      role,
+      approvalStatus: normalizeApprovalStatus(m.approvalStatus ?? 'approved', m.email),
+      isSuperAdmin: isSuperAdminEmail(m.email) || Boolean(m.isSuperAdmin),
+      active: isSuperAdminEmail(m.email) ? true : m.active !== false,
+      employeeId: m.employeeId || `NX-EMP-${String(1001 + idx * 4)}`,
+      signOffTitle: m.signOffTitle || m.title || role,
+    };
+  });
 
   return {
     activeRole,
-    requests: rawState.requests,
+    requests: rawState.requests.map((r) => ({
+      ...r,
+      auditTrail: Array.isArray(r.auditTrail)
+        ? r.auditTrail.map((a) => ({ ...a, actorRole: normalizeRole(a.actorRole) }))
+        : [],
+    })),
     projects: Array.isArray(rawState.projects)
       ? rawState.projects.map((p) => ({
           ...p,
           currency: p.currency ?? 'USD',
-          estimatedBudget: typeof p.estimatedBudget === 'number' ? p.estimatedBudget : 25000,
+          estimatedBudget: typeof p.estimatedBudget === 'number' ? p.estimatedBudget : 0,
           actualSpend: typeof p.actualSpend === 'number' ? p.actualSpend : 0,
         }))
-      : structuredClone(INITIAL_PROJECTS),
-    assets: Array.isArray(rawState.assets)
-      ? rawState.assets
-      : structuredClone(INITIAL_ASSETS),
+      : [],
+    assets: Array.isArray(rawState.assets) ? rawState.assets : [],
     sops: Array.isArray(rawState.sops)
-      ? rawState.sops
-      : structuredClone(INITIAL_SOPS),
-    leaves: Array.isArray(rawState.leaves)
-      ? rawState.leaves
-      : structuredClone(INITIAL_LEAVES),
+      ? rawState.sops.map((s) => ({
+          ...s,
+          acknowledgments: Array.isArray(s.acknowledgments)
+            ? s.acknowledgments.map((ack) => ({ ...ack, role: normalizeRole(ack.role) }))
+            : [],
+        }))
+      : [],
+    leaves: Array.isArray(rawState.leaves) ? rawState.leaves : [],
     announcements: Array.isArray(rawState.announcements)
-      ? rawState.announcements
-      : structuredClone(INITIAL_ANNOUNCEMENTS),
-    meetings: Array.isArray(rawState.meetings)
-      ? rawState.meetings
-      : structuredClone(INITIAL_MEETINGS),
+      ? rawState.announcements.map((a) => ({
+          ...a,
+          publishedByRole: normalizeRole(a.publishedByRole),
+        }))
+      : [],
+    meetings: Array.isArray(rawState.meetings) ? rawState.meetings : [],
     workspaceEmails: Array.isArray(rawState.workspaceEmails) ? rawState.workspaceEmails : [],
     workspaceLinks: Array.isArray(rawState.workspaceLinks) ? rawState.workspaceLinks : [],
     teamMembers: normalizedMembers,
     globalAuditLogs: Array.isArray(rawState.globalAuditLogs)
-      ? rawState.globalAuditLogs
+      ? rawState.globalAuditLogs.map((a) => ({ ...a, actorRole: normalizeRole(a.actorRole) }))
       : [],
     notifications: Array.isArray(rawState.notifications) ? rawState.notifications : [],
     permissionMatrix: normalizePermissionMatrix(rawState.permissionMatrix),

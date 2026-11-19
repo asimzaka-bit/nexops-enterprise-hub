@@ -79,26 +79,31 @@ export function generateRuleBasedReviewBrief(
       'No further workflow action required; archive or export the Official Approval Dossier for compliance records.';
   } else if (request.status === 'Rejected') {
     recommendedAction =
-      'Request is closed as Rejected. If remediation is planned, clone this record via "Duplicate as Template" to initiate a fresh review cycle.';
+      activeRole === 'Viewer'
+        ? 'Request is closed as Rejected. Contact an Editor or Administrator if remediation is required.'
+        : 'Request is closed as Rejected. If remediation is planned, clone this record via "Duplicate as Template" to initiate a fresh review cycle.';
   } else if (request.status === 'Draft') {
-    recommendedAction = hasDeliverable
-      ? 'Finalize scope validation and click "Submit for QA Review" to enter the active governance queue.'
-      : 'Attach a valid deliverable reference URL and submit the draft for QA verification.';
+    recommendedAction =
+      activeRole === 'Viewer'
+        ? 'Draft is currently in preparation by an Editor or Administrator.'
+        : hasDeliverable
+          ? 'Finalize scope validation and click "Submit for QA Review" to enter the active governance queue.'
+          : 'Attach a valid deliverable reference URL and submit the draft for QA verification.';
   } else if (request.status === 'Revision Required') {
     recommendedAction =
-      activeRole === 'Staff / Contributor'
-        ? `Address reviewer remarks (${request.revisionReason || 'see audit trail'}) and click "Resubmit for QA Review"${overdue ? ' immediately to clear the SLA breach' : ''}.`
-        : `Follow up with ${request.submittedBy} on the requested revision${overdue ? ` (${overdueDays}d overdue)` : ''} before resuming QA verification.`;
+      activeRole === 'Viewer'
+        ? `Awaiting revision remediation from ${request.submittedBy} (${request.revisionReason || 'see audit trail'}).`
+        : `Follow up with ${request.submittedBy} or address remarks (${request.revisionReason || 'see audit trail'}) and click "Resubmit for QA Review"${overdue ? ` (${overdueDays}d overdue)` : ''}.`;
   } else if (unverifiedMandatory.length > 0) {
     recommendedAction =
-      activeRole === 'Staff / Contributor'
-        ? `Coordinate with ${request.assignedReviewer} to verify the remaining ${unverifiedMandatory.length} mandatory QA gate${unverifiedMandatory.length > 1 ? 's' : ''}.`
+      activeRole === 'Viewer'
+        ? `Read-only summary: ${unverifiedMandatory.length} mandatory QA gate${unverifiedMandatory.length > 1 ? 's remain' : ' remains'} pending verification by ${request.assignedReviewer}.`
         : `Verify the remaining ${unverifiedMandatory.length} mandatory QA checklist gate${unverifiedMandatory.length > 1 ? 's' : ''} (${unverifiedMandatory[0].label}) before approving${overdue ? ' — prioritize due to SLA overdue status' : ''}.`;
   } else {
     recommendedAction =
-      activeRole === 'Staff / Contributor'
+      activeRole === 'Viewer'
         ? `All mandatory QA checks are complete; awaiting final sign-off from ${request.assignedReviewer}.`
-        : 'All mandatory QA gates and audit evidence are verified — proceed with "Approve Request" to close out SLA.';
+        : 'All mandatory QA gates and audit evidence are verified — proceed with approval sign-off to close out SLA.';
   }
 
   return {

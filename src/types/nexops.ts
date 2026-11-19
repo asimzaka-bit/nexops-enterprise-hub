@@ -1,4 +1,14 @@
-export type Role = 'Admin' | 'Manager / QA Reviewer' | 'Staff / Contributor';
+export type Role = 'Admin' | 'Editor' | 'Viewer';
+export type DbAccessRole = 'admin' | 'editor' | 'viewer';
+export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
+
+export interface MasterKeyConfig {
+  keyHash: string;
+  keyHint: string;
+  requireForSensitiveActions: boolean;
+  updatedAt: string;
+  updatedBy: string;
+}
 
 export type RequestStatus =
   | 'Draft'
@@ -361,6 +371,10 @@ export interface TeamMember {
   name: string;
   email: string;
   role: Role;
+  approvalStatus?: ApprovalStatus;
+  isSuperAdmin?: boolean;
+  approvedBy?: string;
+  approvedAt?: string;
   department: Department;
   title: string;
   signOffTitle: string;
@@ -382,6 +396,8 @@ export interface AuthSession {
   userName?: string;
   userEmail?: string;
   userRole?: Role;
+  approvalStatus?: ApprovalStatus;
+  isSuperAdmin?: boolean;
   userDepartment?: Department;
   userTitle?: string;
   avatarUrl?: string;

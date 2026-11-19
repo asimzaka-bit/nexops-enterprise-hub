@@ -6,6 +6,7 @@ import {
   ArrowUp,
   CheckCircle2,
   Clock,
+  Eye,
   FileEdit,
   Flame,
   FolderKanban,
@@ -14,7 +15,6 @@ import {
   Send,
   Shield,
   ShieldCheck,
-  User,
   UserCheck,
   XCircle,
 } from 'lucide-react';
@@ -115,21 +115,22 @@ export function RoleBadge({ role }: { role: Role }) {
       classes: 'bg-indigo-50 text-indigo-700 border-indigo-200',
       icon: Shield,
     },
-    'Manager / QA Reviewer': {
+    Editor: {
       classes: 'bg-emerald-50 text-emerald-700 border-emerald-200',
       icon: ShieldCheck,
     },
-    'Staff / Contributor': {
+    Viewer: {
       classes: 'bg-slate-100 text-slate-700 border-slate-200',
-      icon: User,
+      icon: Eye,
     },
   };
 
-  const { classes, icon: Icon } = config[role];
+  const entry = config[role] ?? config.Viewer;
+  const Icon = entry.icon;
 
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-medium whitespace-nowrap shrink-0 ${classes}`}
+      className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-medium whitespace-nowrap shrink-0 ${entry.classes}`}
     >
       <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
       <span>{role}</span>
