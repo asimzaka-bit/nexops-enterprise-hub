@@ -1,0 +1,6 @@
+{
+  "name": "NexOps Enterprise Hub",
+  "description": "Unified Operations, QA & Approval Management System for enterprise workflow governance, verification checklists, and compliance auditing.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
