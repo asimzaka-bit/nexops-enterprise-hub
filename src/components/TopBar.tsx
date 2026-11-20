@@ -2,6 +2,7 @@ import {
   AlertTriangle,
   ArrowUpRight,
   Bell,
+  Briefcase,
   Building2,
   Camera,
   CheckCheck,
@@ -20,11 +21,12 @@ import {
   Search,
   Shield,
   ShieldCheck,
+  Trash2,
   User,
   X,
   XCircle,
 } from 'lucide-react';
-import { KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { KeyboardEvent, ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AppNotification,
   AuditEvent,
@@ -33,8 +35,15 @@ import {
   OperationalRequest,
   Role,
   TeamMember,
+  WorkspaceToolType,
 } from '../types/nexops';
 import { formatDateTime } from '../utils/storage';
+import {
+  GmailColorIcon,
+  GoogleDocsColorIcon,
+  GoogleFormsColorIcon,
+  GoogleSheetsColorIcon,
+} from './GoogleWorkspaceIcons';
 import { UserAvatar } from './UserAvatar';
 
 interface TopBarProps {
@@ -54,12 +63,47 @@ interface TopBarProps {
   onSelectAuditMatch: (audit: AuditEvent) => void;
   notifications: AppNotification[];
   onMarkAllRead: () => void;
-  onSelectNotificationRequest: (requestId: string, notificationId: string) => void;
+  onClearNotifications: () => void;
+  onSelectNotification: (notification: AppNotification) => void;
   onOpenMobileMenu: () => void;
   onOpenCreateModal: () => void;
   onOpenProfile: () => void;
   onSignOut: () => void;
+  activeWorkspaceTool?: WorkspaceToolType;
+  onSelectWorkspaceTool?: (tool: WorkspaceToolType) => void;
 }
+
+const WORKSPACE_LAUNCHER_ITEMS: {
+  id: WorkspaceToolType;
+  label: string;
+  description: string;
+  renderIcon: (className?: string) => ReactNode;
+}[] = [
+  {
+    id: 'gmail',
+    label: 'Gmail',
+    description: 'Corporate inbox, attachments & compose',
+    renderIcon: (cls) => <GmailColorIcon className={cls} />,
+  },
+  {
+    id: 'docs',
+    label: 'Google Docs',
+    description: 'Word studio & embedded documents',
+    renderIcon: (cls) => <GoogleDocsColorIcon className={cls} />,
+  },
+  {
+    id: 'sheets',
+    label: 'Google Sheets',
+    description: 'Spreadsheets, formulas & CSV studio',
+    renderIcon: (cls) => <GoogleSheetsColorIcon className={cls} />,
+  },
+  {
+    id: 'forms',
+    label: 'Google Forms',
+    description: 'Surveys, intake forms & responses',
+    renderIcon: (cls) => <GoogleFormsColorIcon className={cls} />,
+  },
+];
 
 const SECTION_TITLES: Record<NavSection, { title: string; subtitle: string }> = {
   dashboard: {
@@ -82,9 +126,13 @@ const SECTION_TITLES: Record<NavSection, { title: string; subtitle: string }> = 
     title: 'Corporate SOP & Knowledge Vault',
     subtitle: 'Standard operating procedures, QA guidelines, HR policies & compliance sign-off',
   },
+  vault: {
+    title: 'Department Document Vault',
+    subtitle: 'Centralized repository for HR policies, SOPs, finance files & client contracts',
+  },
   leaves: {
-    title: 'Leave & Time-Off Approvals',
-    subtitle: 'Employee absence scheduling, backup coverage & manager approval routing',
+    title: 'Staff Attendance & Leave Management',
+    subtitle: 'Daily clock-in/clock-out attendance logs, shift hours & leave approvals',
   },
   meetings: {
     title: 'Meetings & Action Items (MoM)',
@@ -95,8 +143,8 @@ const SECTION_TITLES: Record<NavSection, { title: string; subtitle: string }> = 
     subtitle: 'Integrated Gmail corporate client, Google Docs, Google Sheets & Google Forms',
   },
   audit: {
-    title: 'Audit Logs & Compliance Center',
-    subtitle: 'Immutable ledger of operational actions & CSV reporting',
+    title: 'Activity Audit Trail & Security Logs',
+    subtitle: 'Admin-only ledger of user actions, security changes & CSV compliance exports',
   },
   settings: {
     title: 'Team & Department Settings',
@@ -126,14 +174,18 @@ export function TopBar({
   onSelectAuditMatch,
   notifications,
   onMarkAllRead,
-  onSelectNotificationRequest,
+  onClearNotifications,
+  onSelectNotification,
   onOpenMobileMenu,
   onOpenCreateModal,
   onOpenProfile,
   onSignOut,
+  activeWorkspaceTool = 'gmail',
+  onSelectWorkspaceTool,
 }: TopBarProps) {
   const [notifOpen, setNotifOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
 
   const [searchOpen, setSearchOpen] = useState(false);
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
@@ -142,6 +194,7 @@ export function TopBar({
 
   const notifRef = useRef<HTMLDivElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
+  const workspaceMenuRef = useRef<HTMLDivElement>(null);
   const searchContainerRef = useRef<HTMLDivElement>(null);
   const desktopSearchInputRef = useRef<HTMLInputElement>(null);
   const mobileSearchInputRef = useRef<HTMLInputElement>(null);
@@ -157,6 +210,9 @@ export function TopBar({
       }
       if (profileRef.current && !profileRef.current.contains(e.target as Node)) {
         setProfileOpen(false);
+      }
+      if (workspaceMenuRef.current && !workspaceMenuRef.current.contains(e.target as Node)) {
+        setWorkspaceMenuOpen(false);
       }
       if (
         searchContainerRef.current &&
@@ -194,7 +250,20 @@ export function TopBar({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  const unreadCount = notifications.filter((n) => !n.read).length;
+  const visibleNotifications = useMemo(() => {
+    const userEmail = currentUser.email.trim().toLowerCase();
+    return notifications.filter((n) => {
+      if (n.recipientEmail) {
+        return n.recipientEmail.trim().toLowerCase() === userEmail;
+      }
+      if (n.recipientRole && n.recipientRole !== 'all') {
+        return n.recipientRole === activeRole;
+      }
+      return true;
+    });
+  }, [notifications, currentUser.email, activeRole]);
+
+  const unreadCount = visibleNotifications.filter((n) => !n.read).length;
   const sectionMeta = SECTION_TITLES[activeSection];
 
   const commandResults = useMemo(() => {
@@ -222,18 +291,21 @@ export function TopBar({
       count: requests.filter((r) => r.department === department).length,
     }));
 
-    const matchedAudits = (
-      q
-        ? auditLogs.filter(
-            (a) =>
-              a.requestId.toLowerCase().includes(q) ||
-              a.actorName.toLowerCase().includes(q) ||
-              a.actorRole.toLowerCase().includes(q) ||
-              a.actionType.toLowerCase().includes(q) ||
-              a.details.toLowerCase().includes(q),
-          )
-        : auditLogs
-    ).slice(0, 4);
+    const matchedAudits =
+      activeRole === 'Admin'
+        ? (q
+            ? auditLogs.filter(
+                (a) =>
+                  a.requestId.toLowerCase().includes(q) ||
+                  a.actorName.toLowerCase().includes(q) ||
+                  (a.actorEmail ?? '').toLowerCase().includes(q) ||
+                  a.actorRole.toLowerCase().includes(q) ||
+                  a.actionType.toLowerCase().includes(q) ||
+                  a.details.toLowerCase().includes(q),
+              )
+            : auditLogs
+          ).slice(0, 4)
+        : [];
 
     const flatItems: CommandItem[] = [
       ...matchedRequests.map((request) => ({ kind: 'request' as const, request })),
@@ -246,7 +318,7 @@ export function TopBar({
     ];
 
     return { matchedRequests, matchedDepartments, matchedAudits, flatItems };
-  }, [commandQuery, requests, auditLogs]);
+  }, [commandQuery, requests, departments, auditLogs, activeRole]);
 
   useEffect(() => {
     setHighlightedIdx(0);
@@ -557,19 +629,84 @@ export function TopBar({
             <Search className="h-4 w-4" />
           </button>
 
+          {/* Unified Workspace Launcher (Gmail, Google Docs, Google Sheets, Google Forms) */}
+          {onSelectWorkspaceTool && (
+            <div className="relative" ref={workspaceMenuRef}>
+              <button
+                type="button"
+                onClick={() => setWorkspaceMenuOpen((prev) => !prev)}
+                aria-expanded={workspaceMenuOpen}
+                aria-label="Open Workspace Suite (Gmail, Docs, Sheets, Forms)"
+                className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold transition-colors whitespace-nowrap ${
+                  activeSection === 'workspace' || workspaceMenuOpen
+                    ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
+                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 hover:text-slate-900'
+                }`}
+              >
+                <Briefcase className="h-3.5 w-3.5 text-indigo-600 shrink-0" />
+                <span className="hidden sm:inline">Workspace</span>
+                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+              </button>
+
+              {workspaceMenuOpen && (
+                <div className="absolute right-0 z-30 mt-2 w-72 overflow-hidden rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
+                  <div className="border-b border-slate-100 px-2.5 py-2">
+                    <p className="text-xs font-bold text-slate-900">Google Workspace Suite</p>
+                    <p className="text-[11px] text-slate-500">
+                      Open directly inside NexOps Enterprise Hub
+                    </p>
+                  </div>
+                  <div className="mt-1.5 space-y-1">
+                    {WORKSPACE_LAUNCHER_ITEMS.map((item) => {
+                      const isToolSelected =
+                        activeSection === 'workspace' && activeWorkspaceTool === item.id;
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => {
+                            setWorkspaceMenuOpen(false);
+                            onSelectWorkspaceTool(item.id);
+                          }}
+                          className={`flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors ${
+                            isToolSelected
+                              ? 'bg-indigo-50 text-indigo-900'
+                              : 'hover:bg-slate-50 text-slate-800'
+                          }`}
+                        >
+                          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white">
+                            {item.renderIcon('h-5 w-5')}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-xs font-bold text-slate-900">
+                              {item.label}
+                            </span>
+                            <span className="block truncate text-[11px] text-slate-500">
+                              {item.description}
+                            </span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Read-Only Authenticated Role Pill (Strictly from Profile) */}
           <div
             title="Permission role assigned by your corporate profile"
             className="hidden h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-xs font-medium text-slate-800 sm:inline-flex"
           >
             {getRoleIcon(activeRole)}
-            <span className="max-w-[150px] truncate font-semibold text-slate-900 whitespace-nowrap">
-              {activeRole}
+            <span className="max-w-[160px] truncate font-semibold text-slate-900 whitespace-nowrap">
+              {activeRole === 'Admin' ? 'Admin' : 'Viewer (Read-Only)'}
             </span>
           </div>
 
-          {/* Primary Create Action (hidden for read-only Viewer role) */}
-          {activeRole !== 'Viewer' && (
+          {/* Primary Create Action (strictly Admin only) */}
+          {activeRole === 'Admin' && (
             <button
               type="button"
               onClick={onOpenCreateModal}
@@ -600,31 +737,44 @@ export function TopBar({
 
             {notifOpen && (
               <div className="absolute right-0 mt-2 w-80 rounded-xl border border-slate-200 bg-white shadow-lg sm:w-96">
-                <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+                <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-4 py-3">
                   <div>
                     <p className="text-sm font-semibold text-slate-900">Notifications</p>
                     <p className="text-xs text-slate-500 tabular-nums">
-                      {unreadCount} unread operational alerts
+                      {unreadCount} unread alerts
                     </p>
                   </div>
-                  {unreadCount > 0 && (
-                    <button
-                      type="button"
-                      onClick={onMarkAllRead}
-                      className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50"
-                    >
-                      <CheckCheck className="h-3.5 w-3.5" />
-                      Mark all read
-                    </button>
-                  )}
+                  <div className="flex items-center gap-1">
+                    {unreadCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={onMarkAllRead}
+                        className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50"
+                      >
+                        <CheckCheck className="h-3.5 w-3.5" />
+                        Mark all read
+                      </button>
+                    )}
+                    {visibleNotifications.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={onClearNotifications}
+                        title="Clear all notifications"
+                        className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-rose-700"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Clear
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <div className="max-h-80 divide-y divide-slate-100 overflow-y-auto">
-                  {notifications.length === 0 ? (
+                  {visibleNotifications.length === 0 ? (
                     <div className="px-4 py-8 text-center text-xs text-slate-500">
-                      No operational notifications yet.
+                      No notifications in your feed yet.
                     </div>
                   ) : (
-                    notifications.map((notif) => {
+                    visibleNotifications.map((notif) => {
                       const severityIcon =
                         notif.severity === 'success' ? (
                           <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" />
@@ -641,10 +791,8 @@ export function TopBar({
                           key={notif.id}
                           type="button"
                           onClick={() => {
-                            if (notif.requestId) {
-                              onSelectNotificationRequest(notif.requestId, notif.id);
-                              setNotifOpen(false);
-                            }
+                            onSelectNotification(notif);
+                            setNotifOpen(false);
                           }}
                           className={`flex w-full items-start gap-2.5 px-4 py-3 text-left transition-colors hover:bg-slate-50 ${
                             !notif.read ? 'bg-indigo-50/40' : 'bg-white'
@@ -669,9 +817,9 @@ export function TopBar({
                               <span className="font-mono text-[11px] text-slate-400 tabular-nums">
                                 {formatDateTime(notif.timestamp)}
                               </span>
-                              {notif.requestId && (
+                              {(notif.requestId || notif.targetSection) && (
                                 <span className="font-mono text-[10px] font-semibold text-indigo-600">
-                                  Open {notif.requestId} →
+                                  {notif.requestId ? `Open ${notif.requestId} →` : 'View →'}
                                 </span>
                               )}
                             </div>

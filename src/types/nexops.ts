@@ -152,18 +152,34 @@ export type AuditActionType =
   | 'Status Changed'
   | 'Checklist Updated'
   | 'Comment Added'
-  | 'Team Updated';
+  | 'Team Updated'
+  | 'Task Deleted'
+  | 'Leave Submitted'
+  | 'Leave Approved'
+  | 'Leave Rejected'
+  | 'Attendance Logged'
+  | 'Role Changed'
+  | 'Notice Posted'
+  | 'Notice Updated'
+  | 'Notice Deleted'
+  | 'Vault Updated'
+  | 'Subtask Updated';
 
 export type AnnouncementSeverity = 'info' | 'warning' | 'urgent';
+export type AnnouncementPriorityTag = 'Urgent' | 'General' | 'HR';
 
 export interface CompanyAnnouncement {
   id: string;
   title: string;
   message: string;
   severity: AnnouncementSeverity;
+  priorityTag: AnnouncementPriorityTag;
+  pinned: boolean;
   publishedBy: string;
+  publishedByEmail?: string;
   publishedByRole: Role;
   publishedAt: string;
+  updatedAt?: string;
   archived: boolean;
 }
 
@@ -196,6 +212,9 @@ export interface MeetingMinute {
 }
 
 export type LeaveType =
+  | 'Casual'
+  | 'Sick'
+  | 'Annual'
   | 'Annual Leave'
   | 'Sick Leave'
   | 'Casual / Personal'
@@ -207,6 +226,7 @@ export interface LeaveRequest {
   id: string;
   code: string;
   employeeId: string;
+  employeeEmail?: string;
   employeeName: string;
   department: Department;
   leaveType: LeaveType;
@@ -218,6 +238,81 @@ export interface LeaveRequest {
   backupDelegateName?: string;
   reviewerName?: string;
   reviewerNotes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type AttendanceStatus = 'Present' | 'Late' | 'Completed';
+
+export interface AttendanceLog {
+  id: string;
+  userId: string;
+  employeeId: string;
+  userName: string;
+  userEmail: string;
+  department: Department;
+  attendanceDate: string; // YYYY-MM-DD
+  checkInTime: string; // ISO string
+  checkOutTime?: string; // ISO string
+  totalHours?: number;
+  status: AttendanceStatus;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TaskSubtask {
+  id: string;
+  requestId: string;
+  title: string;
+  completed: boolean;
+  completedBy?: string;
+  completedAt?: string;
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface TaskComment {
+  id: string;
+  requestId: string;
+  authorId: string;
+  authorName: string;
+  authorEmail: string;
+  authorRole: Role;
+  body: string;
+  mentions: string[];
+  createdAt: string;
+}
+
+export type DocumentVaultFolder =
+  | 'HR & Policies'
+  | 'Operations & SOPs'
+  | 'Accounts & Finance'
+  | 'Client Contracts';
+
+export type DocumentVaultAccessTag =
+  | 'All Staff'
+  | 'Department Only'
+  | 'Editors & Admins'
+  | 'Admin Restricted';
+
+export type DocumentVaultSourceType = 'google_drive' | 'external_link' | 'uploaded_file';
+
+export interface DocumentVaultItem {
+  id: string;
+  title: string;
+  folder: DocumentVaultFolder;
+  department: Department;
+  description: string;
+  accessTag: DocumentVaultAccessTag;
+  sourceType: DocumentVaultSourceType;
+  url?: string;
+  fileName?: string;
+  fileSize?: number;
+  mimeType?: string;
+  fileDataUrl?: string;
+  uploadedBy: string;
+  uploadedByEmail: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -247,7 +342,14 @@ export type SupabaseTableKey =
   | 'profiles'
   | 'workspace_emails'
   | 'workspace_links'
-  | 'system_state';
+  | 'system_state'
+  | 'notifications'
+  | 'attendance_logs'
+  | 'leave_requests'
+  | 'announcements'
+  | 'task_comments'
+  | 'subtasks'
+  | 'document_vault';
 
 export type TableConnectionHealth = 'connected' | 'error' | 'offline';
 
@@ -377,6 +479,7 @@ export type NavSection =
   | 'projects'
   | 'assets'
   | 'sops'
+  | 'vault'
   | 'leaves'
   | 'meetings'
   | 'workspace'
@@ -397,6 +500,7 @@ export interface AuditEvent {
   requestId: string;
   timestamp: string;
   actorName: string;
+  actorEmail?: string;
   actorRole: Role;
   actorSignOffTitle?: string;
   actionType: AuditActionType;
@@ -490,6 +594,11 @@ export interface AppNotification {
   timestamp: string;
   read: boolean;
   requestId?: string;
+  targetSection?: NavSection;
+  recipientEmail?: string;
+  recipientRole?: Role | 'all';
+  actorEmail?: string;
+  category?: 'user_approval' | 'task' | 'leave' | 'mention' | 'system';
   severity: 'info' | 'warning' | 'success' | 'danger';
 }
 
@@ -507,6 +616,7 @@ export interface NexOpsState {
   assets: CompanyAsset[];
   sops: SopDocument[];
   leaves: LeaveRequest[];
+  attendanceLogs: AttendanceLog[];
   announcements: CompanyAnnouncement[];
   meetings: MeetingMinute[];
   workspaceEmails: WorkspaceEmailLog[];
@@ -514,5 +624,8 @@ export interface NexOpsState {
   teamMembers: TeamMember[];
   globalAuditLogs: AuditEvent[];
   notifications: AppNotification[];
+  subtasks: TaskSubtask[];
+  taskComments: TaskComment[];
+  vaultDocuments: DocumentVaultItem[];
   permissionMatrix: PermissionMatrix;
 }

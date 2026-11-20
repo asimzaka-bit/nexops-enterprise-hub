@@ -1,6 +1,7 @@
 import {
   AlertCircle,
   AlertTriangle,
+  AtSign,
   Bot,
   CalendarClock,
   Check,
@@ -10,18 +11,29 @@ import {
   FileOutput,
   GitBranch,
   History,
+  ListChecks,
   Loader2,
   Lock,
+  MessageSquare,
   MessageSquarePlus,
+  Plus,
   Send,
   ShieldAlert,
   ShieldCheck,
+  Trash2,
   Wallet,
   X,
   XCircle,
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
-import { OperationalRequest, RequestStatus, Role } from '../types/nexops';
+import { FormEvent, Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  OperationalRequest,
+  RequestStatus,
+  Role,
+  TaskComment,
+  TaskSubtask,
+  TeamMember,
+} from '../types/nexops';
 import {
   BriefRiskLevel,
   generateRuleBasedReviewBrief,
@@ -53,6 +65,9 @@ interface RequestDetailDrawerProps {
   request: OperationalRequest;
   activeRole: Role;
   approvalBudgetThresholdUsd?: number;
+  subtasks: TaskSubtask[];
+  taskComments: TaskComment[];
+  teamMembers: TeamMember[];
   onClose: () => void;
   onToggleChecklistItem: (requestId: string, itemId: string) => void;
   onTransitionStatus: (
@@ -63,6 +78,11 @@ interface RequestDetailDrawerProps {
   onStage1Approve?: (requestId: string, comment?: string) => void;
   onUpdateRequestFinancials?: (requestId: string, actualSpend: number) => void;
   onAddComment: (requestId: string, comment: string) => void;
+  onDeleteRequest: (requestId: string) => void;
+  onAddSubtask: (requestId: string, title: string) => void;
+  onToggleSubtask: (subtaskId: string) => void;
+  onDeleteSubtask: (subtaskId: string) => void;
+  onAddTaskComment: (requestId: string, body: string, mentions: string[]) => void;
   onExportReport: (requestId: string) => void;
   onDuplicateRequest: (request: OperationalRequest) => void;
   onEscalateRequest: (requestId: string) => void;
@@ -72,12 +92,20 @@ export function RequestDetailDrawer({
   request,
   activeRole,
   approvalBudgetThresholdUsd = 5000,
+  subtasks,
+  taskComments,
+  teamMembers,
   onClose,
   onToggleChecklistItem,
   onTransitionStatus,
   onStage1Approve,
   onUpdateRequestFinancials,
   onAddComment,
+  onDeleteRequest,
+  onAddSubtask,
+  onToggleSubtask,
+  onDeleteSubtask,
+  onAddTaskComment,
   onExportReport,
   onDuplicateRequest,
   onEscalateRequest,
@@ -92,6 +120,16 @@ export function RequestDetailDrawer({
   const [actualSpendInput, setActualSpendInput] = useState(() =>
     String(request.actualSpend ?? 0),
   );
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+
+  // Sub-tasks checklist state
+  const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
+
+  // Threaded team comments & @mention autocomplete state
+  const [commentBody, setCommentBody] = useState('');
+  const [selectedMentions, setSelectedMentions] = useState<string[]>([]);
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const commentTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNowMs(Date.now()), 60000);
@@ -103,6 +141,11 @@ export function RequestDetailDrawer({
     setGeminiError(null);
     setValidationError(null);
     setActualSpendInput(String(request.actualSpend ?? 0));
+    setConfirmDeleteOpen(false);
+    setNewSubtaskTitle('');
+    setCommentBody('');
+    setSelectedMentions([]);
+    setMentionQuery(null);
   }, [request.id, request.actualSpend]);
 
   useEffect(() => {
@@ -138,14 +181,110 @@ export function RequestDetailDrawer({
   const stage2Done = Boolean(request.stage2Approval) || request.status === 'Approved';
 
   const isAdmin = activeRole === 'Admin';
-  const isEditor = activeRole === 'Editor';
-  const isViewer = activeRole === 'Viewer';
+  const isViewer = !isAdmin;
 
-  const canVerifyChecklist = isAdmin || isEditor;
-  const isReviewer = isAdmin || isEditor;
+  const canVerifyChecklist = isAdmin;
+  const isReviewer = isAdmin;
+
+  const requestSubtasks = useMemo(
+    () => subtasks.filter((st) => st.requestId === request.id),
+    [subtasks, request.id],
+  );
+  const subtasksCompleted = requestSubtasks.filter((st) => st.completed).length;
+  const subtasksTotal = requestSubtasks.length;
+  const subtasksPct =
+    subtasksTotal > 0 ? Math.round((subtasksCompleted / subtasksTotal) * 100) : 0;
+
+  const requestComments = useMemo(
+    () =>
+      taskComments
+        .filter((c) => c.requestId === request.id)
+        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()),
+    [taskComments, request.id],
+  );
+
+  const mentionCandidates = useMemo(() => {
+    if (mentionQuery === null) return [];
+    const q = mentionQuery.trim().toLowerCase();
+    return teamMembers
+      .filter((m) => m.active && (m.approvalStatus ?? 'approved') === 'approved')
+      .filter(
+        (m) =>
+          !q ||
+          m.name.toLowerCase().includes(q) ||
+          m.email.toLowerCase().includes(q) ||
+          m.department.toLowerCase().includes(q),
+      )
+      .slice(0, 6);
+  }, [mentionQuery, teamMembers]);
+
+  const handleCommentInputChange = (value: string) => {
+    setCommentBody(value);
+    const match = value.match(/(?:^|\s)@([a-zA-Z0-9._\s-]{0,32})$/);
+    if (match) {
+      setMentionQuery(match[1]);
+    } else {
+      setMentionQuery(null);
+    }
+  };
+
+  const handleInsertMention = (member: TeamMember) => {
+    const replaced = commentBody.replace(/(?:^|\s)@([a-zA-Z0-9._\s-]{0,32})$/, (full) => {
+      const leadingSpace = full.startsWith(' ') ? ' ' : '';
+      return `${leadingSpace}@${member.name} `;
+    });
+    setCommentBody(replaced);
+    setSelectedMentions((prev) =>
+      prev.includes(member.email) ? prev : [...prev, member.email],
+    );
+    setMentionQuery(null);
+    commentTextareaRef.current?.focus();
+  };
+
+  const handleCreateSubtaskSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    if (isViewer || !newSubtaskTitle.trim()) return;
+    onAddSubtask(request.id, newSubtaskTitle.trim());
+    setNewSubtaskTitle('');
+  };
+
+  const handleSubmitThreadedComment = (e: FormEvent) => {
+    e.preventDefault();
+    if (isViewer || !commentBody.trim()) return;
+    const textLower = commentBody.toLowerCase();
+    const detectedFromText = teamMembers
+      .filter(
+        (m) =>
+          textLower.includes(`@${m.name.toLowerCase()}`) ||
+          textLower.includes(`@${m.email.toLowerCase()}`),
+      )
+      .map((m) => m.email);
+    const allMentions = Array.from(new Set([...selectedMentions, ...detectedFromText]));
+    onAddTaskComment(request.id, commentBody.trim(), allMentions);
+    setCommentBody('');
+    setSelectedMentions([]);
+    setMentionQuery(null);
+  };
+
+  const renderCommentWithMentions = (body: string) => {
+    const parts = body.split(/(@[A-Za-z0-9._-]+(?:\s+[A-Za-z0-9._-]+)?)/g);
+    return parts.map((part, idx) => {
+      if (part.startsWith('@') && part.length > 1) {
+        return (
+          <span
+            key={idx}
+            className="rounded bg-indigo-50 px-1 py-0.5 font-semibold text-indigo-700"
+          >
+            {part}
+          </span>
+        );
+      }
+      return <Fragment key={idx}>{part}</Fragment>;
+    });
+  };
 
   const canStaffSubmit =
-    (isEditor || isAdmin) &&
+    isAdmin &&
     (request.status === 'Draft' || request.status === 'Revision Required');
 
   const canReviewActions =
@@ -359,6 +498,35 @@ export function RequestDetailDrawer({
               <span className="hidden sm:inline">Export Official Report</span>
               <span className="sm:hidden">Report</span>
             </button>
+            {!isViewer &&
+              (confirmDeleteOpen ? (
+                <div className="inline-flex items-center gap-1 rounded-lg border border-rose-300 bg-rose-50 px-2 py-1">
+                  <span className="text-[11px] font-semibold text-rose-800">Delete?</span>
+                  <button
+                    type="button"
+                    onClick={() => onDeleteRequest(request.id)}
+                    className="rounded bg-rose-600 px-2 py-1 text-[11px] font-semibold text-white hover:bg-rose-700"
+                  >
+                    Confirm Delete
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDeleteOpen(false)}
+                    className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setConfirmDeleteOpen(true)}
+                  className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3 text-xs font-semibold text-rose-700 transition-colors hover:bg-rose-50 whitespace-nowrap"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Delete Task</span>
+                </button>
+              ))}
             <button
               type="button"
               onClick={onClose}
@@ -576,8 +744,8 @@ export function RequestDetailDrawer({
 
               {!canVerifyChecklist && (
                 <p className="mt-2.5 text-[11px] text-slate-500">
-                  Read-only for Viewer role. Editor or Admin access is required to verify
-                  checklist gates.
+                  Read-only access. Only verified Admins can verify checklist gates or update
+                  records.
                 </p>
               )}
 
@@ -628,6 +796,108 @@ export function RequestDetailDrawer({
                   </label>
                 ))}
               </div>
+            </div>
+
+            {/* Sub-Tasks Checklist */}
+            <div className="rounded-xl border border-slate-200 bg-white p-5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <ListChecks className="h-4 w-4 text-indigo-600" />
+                  <h3 className="font-display text-sm font-bold text-slate-900">
+                    Sub-Tasks Checklist
+                  </h3>
+                </div>
+                <span className="font-mono text-xs font-semibold text-slate-700 tabular-nums">
+                  {subtasksCompleted}/{subtasksTotal} Done ({subtasksPct}%)
+                </span>
+              </div>
+
+              <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className={`h-full transition-all duration-300 ${
+                    subtasksPct === 100 && subtasksTotal > 0 ? 'bg-emerald-600' : 'bg-indigo-600'
+                  }`}
+                  style={{ width: `${subtasksPct}%` }}
+                />
+              </div>
+
+              {!isViewer && (
+                <form onSubmit={handleCreateSubtaskSubmit} className="mt-3 flex gap-2">
+                  <input
+                    type="text"
+                    value={newSubtaskTitle}
+                    onChange={(e) => setNewSubtaskTitle(e.target.value)}
+                    placeholder="Add actionable sub-task step..."
+                    className="h-9 flex-1 rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:bg-white focus:outline-none"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!newSubtaskTitle.trim()}
+                    className="inline-flex h-9 items-center gap-1 rounded-lg bg-indigo-600 px-3 text-xs font-semibold text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    <span>Add Sub-Task</span>
+                  </button>
+                </form>
+              )}
+
+              {requestSubtasks.length === 0 ? (
+                <p className="mt-3 rounded-lg border border-dashed border-slate-200 bg-slate-50/70 px-3 py-4 text-center text-xs text-slate-500">
+                  No sub-tasks added yet.
+                </p>
+              ) : (
+                <div className="mt-3 space-y-2">
+                  {requestSubtasks.map((st) => (
+                    <div
+                      key={st.id}
+                      className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 ${
+                        st.completed
+                          ? 'border-emerald-200 bg-emerald-50/40'
+                          : 'border-slate-200 bg-white'
+                      }`}
+                    >
+                      <label
+                        className={`flex min-w-0 flex-1 items-center gap-2.5 ${
+                          isViewer ? 'cursor-default' : 'cursor-pointer'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={st.completed}
+                          disabled={isViewer}
+                          onChange={() => onToggleSubtask(st.id)}
+                          className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-60"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p
+                            className={`text-xs font-medium ${
+                              st.completed ? 'text-slate-500 line-through' : 'text-slate-800'
+                            }`}
+                          >
+                            {st.title}
+                          </p>
+                          {st.completed && st.completedBy && (
+                            <p className="font-mono text-[10px] text-emerald-700">
+                              Completed by {st.completedBy}
+                              {st.completedAt ? ` · ${formatDateTime(st.completedAt)}` : ''}
+                            </p>
+                          )}
+                        </div>
+                      </label>
+                      {!isViewer && (
+                        <button
+                          type="button"
+                          onClick={() => onDeleteSubtask(st.id)}
+                          aria-label={`Delete sub-task ${st.title}`}
+                          className="rounded p-1 text-slate-400 transition-colors hover:bg-rose-50 hover:text-rose-600"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
@@ -825,8 +1095,8 @@ export function RequestDetailDrawer({
                 <div className="mt-3 flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs font-medium text-slate-600">
                   <Lock className="h-3.5 w-3.5 shrink-0 text-slate-400" />
                   <span>
-                    Read-only access (Viewer). You can inspect records and export reports, while
-                    edits and approvals require Editor or Admin permissions.
+                    Read-only access. You can inspect records and export reports, while edits and
+                    approvals require Admin privileges.
                   </span>
                 </div>
               ) : (
@@ -974,8 +1244,113 @@ export function RequestDetailDrawer({
               )}
             </div>
 
+            {/* Threaded Team Comments with @mentions */}
+            <div className="rounded-xl border border-slate-200 bg-white p-5">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <MessageSquare className="h-4 w-4 text-indigo-600" />
+                  <h3 className="font-display text-sm font-bold text-slate-900">
+                    Team Discussion &amp; @Mentions
+                  </h3>
+                </div>
+                <span className="font-mono text-xs text-slate-500 tabular-nums">
+                  {requestComments.length} comment{requestComments.length === 1 ? '' : 's'}
+                </span>
+              </div>
+
+              <div className="mt-3 space-y-2.5">
+                {requestComments.length === 0 ? (
+                  <p className="rounded-lg border border-dashed border-slate-200 bg-slate-50/70 px-3 py-4 text-center text-xs text-slate-500">
+                    No team discussion comments yet. Use @Name to mention a teammate.
+                  </p>
+                ) : (
+                  requestComments.map((cmt) => (
+                    <div
+                      key={cmt.id}
+                      className="rounded-lg border border-slate-200 bg-slate-50/60 p-3"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-bold text-slate-900">{cmt.authorName}</span>
+                          <RoleBadge role={cmt.authorRole} />
+                        </div>
+                        <span className="font-mono text-[10px] text-slate-400 tabular-nums">
+                          {formatDateTime(cmt.createdAt)}
+                        </span>
+                      </div>
+                      <p className="font-mono text-[10px] text-slate-500">{cmt.authorEmail}</p>
+                      <p className="mt-1.5 whitespace-pre-wrap text-xs leading-relaxed text-slate-700">
+                        {renderCommentWithMentions(cmt.body)}
+                      </p>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {!isViewer && (
+                <form onSubmit={handleSubmitThreadedComment} className="relative mt-3">
+                  <label htmlFor="threaded-comment-input" className="sr-only">
+                    Add team comment
+                  </label>
+                  <textarea
+                    ref={commentTextareaRef}
+                    id="threaded-comment-input"
+                    rows={2}
+                    value={commentBody}
+                    onChange={(e) => handleCommentInputChange(e.target.value)}
+                    placeholder="Write a comment... type @ to mention a team member"
+                    className="w-full rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-xs text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:bg-white focus:outline-none"
+                  />
+
+                  {mentionQuery !== null && mentionCandidates.length > 0 && (
+                    <div className="mt-1 overflow-hidden rounded-lg border border-indigo-200 bg-white shadow-lg">
+                      <div className="flex items-center gap-1.5 border-b border-slate-100 bg-indigo-50/60 px-2.5 py-1 text-[10px] font-bold text-indigo-800">
+                        <AtSign className="h-3 w-3" />
+                        <span>Mention Team Member</span>
+                      </div>
+                      <ul className="max-h-40 divide-y divide-slate-100 overflow-y-auto">
+                        {mentionCandidates.map((member) => (
+                          <li key={member.id}>
+                            <button
+                              type="button"
+                              onClick={() => handleInsertMention(member)}
+                              className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-xs hover:bg-indigo-50"
+                            >
+                              <div className="min-w-0">
+                                <span className="font-semibold text-slate-900">{member.name}</span>
+                                <span className="ml-1.5 font-mono text-[10px] text-slate-500">
+                                  {member.email}
+                                </span>
+                              </div>
+                              <span className="shrink-0 text-[10px] font-medium text-indigo-700">
+                                {member.department}
+                              </span>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <span className="text-[11px] text-slate-400">
+                      Type <span className="font-mono font-semibold text-indigo-600">@</span> to notify teammates
+                    </span>
+                    <button
+                      type="submit"
+                      disabled={!commentBody.trim()}
+                      className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-indigo-600 px-3 text-xs font-semibold text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <Send className="h-3 w-3" />
+                      <span>Post Comment</span>
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+
             {/* Immutable Audit Trail */}
-            <div className="mt-6 flex-1">
+            <div className="mt-2 flex-1">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <History className="h-4 w-4 text-slate-500" />

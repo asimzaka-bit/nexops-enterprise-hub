@@ -83,7 +83,7 @@ export function MeetingsMomView({
   onCompleteActionItem,
   onInspectRequest,
 }: MeetingsMomViewProps) {
-  const canManage = activeRole === 'Admin' || activeRole === 'Editor';
+  const canManage = activeRole === 'Admin';
 
   const [searchQuery, setSearchQuery] = useState('');
   const [deptFilter, setDeptFilter] = useState<string>('All');

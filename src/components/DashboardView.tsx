@@ -6,19 +6,41 @@ import {
   CheckCircle2,
   Clock,
   Download,
+  Edit3,
   FileOutput,
   FileText,
+  Megaphone,
+  Pin,
+  PinOff,
+  Plus,
+  Trash2,
   TrendingUp,
+  UserCheck,
   Wallet,
+  X,
 } from 'lucide-react';
-import { CompanyProject, OperationalRequest, RequestStatus } from '../types/nexops';
+import { FormEvent, useMemo, useState } from 'react';
+import {
+  AnnouncementPriorityTag,
+  AnnouncementSeverity,
+  AttendanceLog,
+  CompanyAnnouncement,
+  CompanyProject,
+  OperationalRequest,
+  RequestStatus,
+  Role,
+} from '../types/nexops';
 import {
   DepartmentScorecardRow,
+  ExecutiveDepartmentAnalyticsRow,
   exportDepartmentScorecardCsv,
+  exportExecutiveKpiSummaryCsv,
   formatCurrency,
+  formatDateTime,
   formatShortDate,
   getBudgetUtilizationPct,
   getOverdueDays,
+  getTodayDateString,
   isRequestOverdue,
   toUsdEquivalent,
 } from '../utils/storage';
@@ -30,14 +52,28 @@ import {
 } from './StatusIndicator';
 
 interface DashboardViewProps {
+  companyName: string;
   requests: OperationalRequest[];
   projects: CompanyProject[];
+  attendanceLogs: AttendanceLog[];
+  announcements: CompanyAnnouncement[];
+  activeRole: Role;
   departments: string[];
   onOpenRequest: (request: OperationalRequest) => void;
   onNavigateToQueue: (statusFilter?: RequestStatus | 'All') => void;
   onNavigateToProjects?: () => void;
   onOpenExecutiveReport: () => void;
   onExportScorecardSuccess?: (deptCount: number) => void;
+  onPublishAnnouncement: (payload: {
+    title: string;
+    message: string;
+    severity: AnnouncementSeverity;
+    priorityTag: AnnouncementPriorityTag;
+    pinned: boolean;
+  }) => void;
+  onEditAnnouncement: (announcement: CompanyAnnouncement) => void;
+  onDeleteAnnouncement: (announcementId: string) => void;
+  onTogglePinAnnouncement: (announcementId: string) => void;
 }
 
 const STATUS_ORDER: { status: RequestStatus; barColor: string }[] = [
@@ -50,21 +86,125 @@ const STATUS_ORDER: { status: RequestStatus; barColor: string }[] = [
 ];
 
 export function DashboardView({
+  companyName,
   requests,
   projects,
+  attendanceLogs,
+  announcements,
+  activeRole,
   departments,
   onOpenRequest,
   onNavigateToQueue,
   onNavigateToProjects,
   onOpenExecutiveReport,
   onExportScorecardSuccess,
+  onPublishAnnouncement,
+  onEditAnnouncement,
+  onDeleteAnnouncement,
+  onTogglePinAnnouncement,
 }: DashboardViewProps) {
+  const isAdmin = activeRole === 'Admin';
+  const todayStr = getTodayDateString();
+
+  // Notice Board Modal & Confirm State (Admin Only)
+  const [noticeModalOpen, setNoticeModalOpen] = useState(false);
+  const [editingNotice, setEditingNotice] = useState<CompanyAnnouncement | null>(null);
+  const [noticeTitle, setNoticeTitle] = useState('');
+  const [noticeMessage, setNoticeMessage] = useState('');
+  const [noticeTag, setNoticeTag] = useState<AnnouncementPriorityTag>('General');
+  const [noticePinned, setNoticePinned] = useState(true);
+  const [noticeError, setNoticeError] = useState<string | null>(null);
+  const [confirmDeleteNoticeId, setConfirmDeleteNoticeId] = useState<string | null>(null);
+
+  const activeNotices = useMemo(
+    () =>
+      announcements
+        .filter((a) => !a.archived)
+        .sort((a, b) => {
+          const pinDiff = Number(Boolean(b.pinned)) - Number(Boolean(a.pinned));
+          if (pinDiff !== 0) return pinDiff;
+          return new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime();
+        }),
+    [announcements],
+  );
+
+  const openPostNotice = () => {
+    setEditingNotice(null);
+    setNoticeTitle('');
+    setNoticeMessage('');
+    setNoticeTag('General');
+    setNoticePinned(true);
+    setNoticeError(null);
+    setNoticeModalOpen(true);
+  };
+
+  const openEditNotice = (notice: CompanyAnnouncement) => {
+    setEditingNotice(notice);
+    setNoticeTitle(notice.title);
+    setNoticeMessage(notice.message);
+    setNoticeTag(
+      notice.priorityTag ??
+        (notice.severity === 'urgent' ? 'Urgent' : notice.severity === 'warning' ? 'HR' : 'General'),
+    );
+    setNoticePinned(Boolean(notice.pinned));
+    setNoticeError(null);
+    setNoticeModalOpen(true);
+  };
+
+  const handleNoticeSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!isAdmin) return;
+    if (!noticeTitle.trim()) {
+      setNoticeError('Notice title is required.');
+      return;
+    }
+    if (!noticeMessage.trim()) {
+      setNoticeError('Notice message body is required.');
+      return;
+    }
+
+    const mappedSeverity: AnnouncementSeverity =
+      noticeTag === 'Urgent' ? 'urgent' : noticeTag === 'HR' ? 'warning' : 'info';
+
+    if (editingNotice) {
+      onEditAnnouncement({
+        ...editingNotice,
+        title: noticeTitle.trim(),
+        message: noticeMessage.trim(),
+        priorityTag: noticeTag,
+        severity: mappedSeverity,
+        pinned: noticePinned,
+        updatedAt: new Date().toISOString(),
+      });
+    } else {
+      onPublishAnnouncement({
+        title: noticeTitle.trim(),
+        message: noticeMessage.trim(),
+        severity: mappedSeverity,
+        priorityTag: noticeTag,
+        pinned: noticePinned,
+      });
+    }
+
+    setNoticeModalOpen(false);
+    setEditingNotice(null);
+  };
+
   const totalRequests = requests.length;
+  const pendingCount = requests.filter(
+    (r) => r.status === 'Draft' || r.status === 'Submitted',
+  ).length;
+  const inProgressCount = requests.filter(
+    (r) => r.status === 'Under QA Review' || r.status === 'Revision Required',
+  ).length;
+  const completedCount = requests.filter((r) => r.status === 'Approved').length;
+  const rejectedCount = requests.filter((r) => r.status === 'Rejected').length;
+
   const pendingApproval = requests.filter(
     (r) => r.status === 'Submitted' || r.status === 'Under QA Review',
   ).length;
   const revisionRequired = requests.filter((r) => r.status === 'Revision Required').length;
-  const approvedCount = requests.filter((r) => r.status === 'Approved').length;
+  const approvedCount = completedCount;
   const decidedCount = requests.filter(
     (r) => r.status === 'Approved' || r.status === 'Rejected' || r.status === 'Revision Required',
   ).length;
@@ -72,15 +212,75 @@ export function DashboardView({
     decidedCount > 0 ? Math.round((approvedCount / decidedCount) * 100) : 0;
 
   const displayDepartments = Array.from(
-    new Set([...departments, ...requests.map((r) => r.department).filter(Boolean)]),
+    new Set([
+      ...departments,
+      ...requests.map((r) => r.department).filter(Boolean),
+      ...attendanceLogs.map((a) => a.department).filter(Boolean),
+    ]),
   );
 
-  const deptCounts = displayDepartments.map((dept) => ({
-    department: dept,
-    total: requests.filter((r) => r.department === dept).length,
-    approved: requests.filter((r) => r.department === dept && r.status === 'Approved').length,
-  }));
-  const maxDeptCount = Math.max(1, ...deptCounts.map((d) => d.total));
+  const todayAttendanceLogs = useMemo(
+    () => attendanceLogs.filter((a) => a.attendanceDate === todayStr),
+    [attendanceLogs, todayStr],
+  );
+
+  const departmentAnalyticsRows: ExecutiveDepartmentAnalyticsRow[] = displayDepartments.map(
+    (dept) => {
+      const deptReqs = requests.filter((r) => r.department === dept);
+      const deptAttToday = todayAttendanceLogs.filter((a) => a.department === dept);
+      return {
+        department: dept,
+        totalTasks: deptReqs.length,
+        pendingCount: deptReqs.filter((r) => r.status === 'Draft' || r.status === 'Submitted').length,
+        inProgressCount: deptReqs.filter(
+          (r) => r.status === 'Under QA Review' || r.status === 'Revision Required',
+        ).length,
+        completedCount: deptReqs.filter((r) => r.status === 'Approved').length,
+        rejectedCount: deptReqs.filter((r) => r.status === 'Rejected').length,
+        presentToday: deptAttToday.filter((a) => a.status === 'Present').length,
+        lateToday: deptAttToday.filter((a) => a.status === 'Late').length,
+        completedShiftToday: deptAttToday.filter((a) => a.status === 'Completed').length,
+      };
+    },
+  );
+
+  const maxDeptCount = Math.max(1, ...departmentAnalyticsRows.map((d) => d.totalTasks));
+
+  // SVG Donut chart geometry (r = 52, circumference = 2 * pi * 52 = 326.7256)
+  const donutRadius = 52;
+  const donutCircumference = 2 * Math.PI * donutRadius;
+  const completionPct =
+    totalRequests > 0 ? Math.round((completedCount / totalRequests) * 100) : 0;
+  const donutSegments = [
+    {
+      label: 'Completed',
+      count: completedCount,
+      stroke: '#059669',
+      dotClass: 'bg-emerald-600',
+      queueFilter: 'Approved' as const,
+    },
+    {
+      label: 'In Progress',
+      count: inProgressCount,
+      stroke: '#d97706',
+      dotClass: 'bg-amber-600',
+      queueFilter: 'Under QA Review' as const,
+    },
+    {
+      label: 'Pending',
+      count: pendingCount,
+      stroke: '#4f46e5',
+      dotClass: 'bg-indigo-600',
+      queueFilter: 'Submitted' as const,
+    },
+    {
+      label: 'Rejected',
+      count: rejectedCount,
+      stroke: '#be123c',
+      dotClass: 'bg-rose-700',
+      queueFilter: 'Rejected' as const,
+    },
+  ];
 
   const scorecardRows: DepartmentScorecardRow[] = displayDepartments.map((dept) => {
     const deptRequests = requests.filter((r) => r.department === dept);
@@ -118,6 +318,20 @@ export function DashboardView({
     onExportScorecardSuccess?.(scorecardRows.length);
   };
 
+  const handleExportExecutiveKpiCsv = () => {
+    exportExecutiveKpiSummaryCsv({
+      companyName,
+      dateStamp: todayStr,
+      totalTasks: totalRequests,
+      pendingCount,
+      inProgressCount,
+      completedCount,
+      rejectedCount,
+      departmentRows: departmentAnalyticsRows,
+    });
+    onExportScorecardSuccess?.(departmentAnalyticsRows.length);
+  };
+
   const overdueCount = requests.filter((r) => isRequestOverdue(r)).length;
 
   const portfolioBudgetUsd = projects.reduce(
@@ -133,7 +347,6 @@ export function DashboardView({
     (p) => getBudgetUtilizationPct(p.estimatedBudget ?? 0, p.actualSpend ?? 0) > 100,
   ).length;
 
-  // Urgent Attention: Overdue, High/Urgent priority, or Revision Required items not yet Approved/Rejected
   const urgentRequests = requests
     .filter(
       (r) =>
@@ -189,9 +402,11 @@ export function DashboardView({
     },
   ];
 
+  let cumulativeOffset = 0;
+
   return (
     <div className="space-y-6">
-      {/* Executive Action Strip */}
+      {/* Executive Action Strip with Export KPI CSV & Calibri PDF Report */}
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-5 py-3.5">
         <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
           <span className="font-semibold text-slate-900">Executive Governance Snapshot</span>
@@ -207,17 +422,203 @@ export function DashboardView({
               <span className="text-emerald-700">All active SLAs on track</span>
             )}
           </span>
+          <span aria-hidden="true" className="text-slate-300">
+            ·
+          </span>
+          <span className="inline-flex items-center gap-1 font-mono text-slate-700 tabular-nums">
+            <UserCheck className="h-3.5 w-3.5 text-emerald-600" />
+            {todayAttendanceLogs.length} Staff Clocked In Today
+          </span>
         </div>
 
-        <button
-          type="button"
-          onClick={onOpenExecutiveReport}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-800 transition-colors hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 whitespace-nowrap"
-        >
-          <FileOutput className="h-3.5 w-3.5" />
-          <span>Export Official Report</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={handleExportExecutiveKpiCsv}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-800 transition-colors hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 whitespace-nowrap"
+          >
+            <Download className="h-3.5 w-3.5" />
+            <span>Export KPI Summary CSV</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={onOpenExecutiveReport}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-indigo-700 whitespace-nowrap"
+          >
+            <FileOutput className="h-3.5 w-3.5" />
+            <span>Export Print / PDF Report</span>
+          </button>
+        </div>
       </div>
+
+      {/* Prominent Company Notice Board & Announcements Widget */}
+      <section
+        aria-label="Company Notice Board & Announcements"
+        className="rounded-xl border border-slate-200 bg-white p-5"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3.5">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-600">
+              <Megaphone className="h-4 w-4" />
+            </div>
+            <div>
+              <h2 className="font-display text-base font-bold text-slate-900">
+                Company Notice Board &amp; Announcements
+              </h2>
+              <p className="text-xs text-slate-500">
+                Official circulars, policy updates, and company notices
+              </p>
+            </div>
+          </div>
+
+          {isAdmin ? (
+            <button
+              type="button"
+              onClick={openPostNotice}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-slate-800"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              <span>Post Official Notice</span>
+            </button>
+          ) : (
+            <span className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-500">
+              Official Notices ({activeNotices.length})
+            </span>
+          )}
+        </div>
+
+        {activeNotices.length === 0 ? (
+          <div className="py-8 text-center">
+            <Megaphone className="mx-auto h-7 w-7 text-slate-300" />
+            <p className="mt-2 text-xs font-semibold text-slate-800">
+              No active company announcements
+            </p>
+            <p className="mt-0.5 text-xs text-slate-500">
+              {isAdmin
+                ? 'Post circulars, holiday schedules, or HR policy notices using the button above.'
+                : 'Official company announcements posted by Administrators will appear here.'}
+            </p>
+          </div>
+        ) : (
+          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+            {activeNotices.map((notice) => {
+              const tag =
+                notice.priorityTag ??
+                (notice.severity === 'urgent'
+                  ? 'Urgent'
+                  : notice.severity === 'warning'
+                    ? 'HR'
+                    : 'General');
+              const isConfirmingDel = confirmDeleteNoticeId === notice.id;
+
+              return (
+                <div
+                  key={notice.id}
+                  className={`flex flex-col justify-between rounded-xl border p-4 ${
+                    tag === 'Urgent'
+                      ? 'border-rose-200 bg-rose-50/50'
+                      : notice.pinned
+                        ? 'border-indigo-200 bg-indigo-50/40'
+                        : 'border-slate-200 bg-slate-50/50'
+                  }`}
+                >
+                  <div>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span
+                          className={`rounded border px-2 py-0.5 text-[10px] font-bold uppercase ${
+                            tag === 'Urgent'
+                              ? 'border-rose-300 bg-rose-100 text-rose-800'
+                              : tag === 'HR'
+                                ? 'border-amber-300 bg-amber-100 text-amber-900'
+                                : 'border-indigo-200 bg-indigo-100 text-indigo-800'
+                          }`}
+                        >
+                          {tag}
+                        </span>
+                        {notice.pinned && (
+                          <span className="inline-flex items-center gap-1 rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-slate-700">
+                            <Pin className="h-2.5 w-2.5 text-indigo-600" />
+                            Pinned
+                          </span>
+                        )}
+                      </div>
+
+                      {isAdmin && (
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => onTogglePinAnnouncement(notice.id)}
+                            title={notice.pinned ? 'Unpin notice' : 'Pin notice'}
+                            className="rounded border border-slate-200 bg-white p-1 text-slate-500 hover:bg-slate-100 hover:text-indigo-700"
+                          >
+                            {notice.pinned ? (
+                              <PinOff className="h-3.5 w-3.5" />
+                            ) : (
+                              <Pin className="h-3.5 w-3.5" />
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => openEditNotice(notice)}
+                            title="Edit notice"
+                            className="rounded border border-slate-200 bg-white p-1 text-slate-500 hover:bg-slate-100 hover:text-indigo-700"
+                          >
+                            <Edit3 className="h-3.5 w-3.5" />
+                          </button>
+                          {isConfirmingDel ? (
+                            <div className="inline-flex items-center gap-1 rounded border border-rose-200 bg-rose-50 px-1.5 py-0.5">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  onDeleteAnnouncement(notice.id);
+                                  setConfirmDeleteNoticeId(null);
+                                }}
+                                className="text-[10px] font-bold text-rose-700 hover:underline"
+                              >
+                                Delete
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteNoticeId(null)}
+                                className="text-[10px] text-slate-600"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteNoticeId(notice.id)}
+                              title="Delete notice"
+                              className="rounded border border-slate-200 bg-white p-1 text-slate-500 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    <h3 className="mt-2 text-sm font-bold text-slate-900">{notice.title}</h3>
+                    <p className="mt-1 text-xs leading-relaxed text-slate-700">
+                      {notice.message}
+                    </p>
+                  </div>
+
+                  <p className="mt-3 border-t border-slate-200/70 pt-2 font-mono text-[10px] text-slate-500">
+                    Posted by {notice.publishedBy} · {formatDateTime(notice.publishedAt)}
+                    {notice.updatedAt && notice.updatedAt !== notice.publishedAt
+                      ? ' (Edited)'
+                      : ''}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
 
       {/* 4 Top KPI Cards */}
       <section aria-label="Key Performance Indicators" className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -252,48 +653,170 @@ export function DashboardView({
         })}
       </section>
 
-      {/* Visual Analytics Row */}
+      {/* Executive Visual Analytics Row: Task Completion Donut + Dept Workload & Attendance */}
       <section className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-        {/* Requests by Department Bar Chart */}
+        {/* Task Completion Breakdown (SVG Donut Chart) */}
+        <div className="rounded-xl border border-slate-200 bg-white p-6 lg:col-span-5">
+          <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-4">
+            <div>
+              <h2 className="font-display text-base font-bold text-slate-900">
+                Task Completion Breakdown
+              </h2>
+              <p className="mt-0.5 text-xs text-slate-500">
+                Pending vs. In Progress vs. Completed governance distribution
+              </p>
+            </div>
+            <span className="font-mono text-xs font-semibold text-slate-500 tabular-nums">
+              {totalRequests} total
+            </span>
+          </div>
+
+          <div className="mt-5 flex flex-col items-center gap-6 sm:flex-row">
+            <div className="relative flex h-36 w-36 shrink-0 items-center justify-center">
+              <svg viewBox="0 0 132 132" className="h-36 w-36 -rotate-90" aria-hidden="true">
+                <circle
+                  cx="66"
+                  cy="66"
+                  r={donutRadius}
+                  fill="none"
+                  stroke="#f1f5f9"
+                  strokeWidth="16"
+                />
+                {totalRequests > 0 &&
+                  donutSegments.map((seg) => {
+                    if (seg.count === 0) return null;
+                    const len = (seg.count / totalRequests) * donutCircumference;
+                    const dashArray = `${len} ${donutCircumference - len}`;
+                    const dashOffset = -cumulativeOffset;
+                    cumulativeOffset += len;
+                    return (
+                      <circle
+                        key={seg.label}
+                        cx="66"
+                        cy="66"
+                        r={donutRadius}
+                        fill="none"
+                        stroke={seg.stroke}
+                        strokeWidth="16"
+                        strokeDasharray={dashArray}
+                        strokeDashoffset={dashOffset}
+                      />
+                    );
+                  })}
+              </svg>
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
+                <span className="font-display text-xl font-bold text-slate-900 tabular-nums">
+                  {completionPct}%
+                </span>
+                <span className="text-[10px] font-semibold text-slate-500">Completed</span>
+              </div>
+            </div>
+
+            <div className="w-full flex-1 divide-y divide-slate-100">
+              {donutSegments.map((seg) => {
+                const pct =
+                  totalRequests > 0 ? Math.round((seg.count / totalRequests) * 100) : 0;
+                return (
+                  <button
+                    key={seg.label}
+                    type="button"
+                    onClick={() => onNavigateToQueue(seg.queueFilter)}
+                    className="flex w-full items-center justify-between py-2 text-left text-xs transition-colors hover:bg-slate-50"
+                  >
+                    <span className="flex items-center gap-2 font-semibold text-slate-800">
+                      <span className={`h-2.5 w-2.5 rounded-xs ${seg.dotClass}`} />
+                      {seg.label}
+                    </span>
+                    <span className="font-mono text-slate-600 tabular-nums">
+                      {seg.count} <span className="text-slate-400">({pct}%)</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Granular 6-stage pipeline bar */}
+          <div className="mt-5 border-t border-slate-100 pt-4">
+            <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-slate-100">
+              {STATUS_ORDER.map(({ status, barColor }) => {
+                const count = requests.filter((r) => r.status === status).length;
+                if (count === 0 || totalRequests === 0) return null;
+                return (
+                  <div
+                    key={status}
+                    className={`${barColor} h-full border-r border-white last:border-r-0`}
+                    style={{ width: `${(count / totalRequests) * 100}%` }}
+                    title={`${status}: ${count}`}
+                  />
+                );
+              })}
+            </div>
+            <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500">
+              {STATUS_ORDER.map(({ status, barColor }) => {
+                const count = requests.filter((r) => r.status === status).length;
+                return (
+                  <span key={status} className="inline-flex items-center gap-1.5 font-mono tabular-nums">
+                    <span className={`h-2 w-2 rounded-xs ${barColor}`} />
+                    {status}: {count}
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* Department-Wise Workload & Attendance Summary */}
         <div className="rounded-xl border border-slate-200 bg-white p-6 lg:col-span-7">
           <div className="flex items-center justify-between gap-4 border-b border-slate-100 pb-4">
             <div>
               <h2 className="font-display text-base font-bold text-slate-900">
-                Requests by Department
+                Department Workload &amp; Attendance Summary
               </h2>
               <p className="mt-0.5 text-xs text-slate-500">
-                Volume distribution and approved throughput across corporate units
+                Task volume, completion progress &amp; today&apos;s staff attendance across departments
               </p>
             </div>
             <span className="font-mono text-xs font-medium text-slate-500 tabular-nums">
-              Total: {totalRequests}
+              {todayStr}
             </span>
           </div>
 
           <div className="mt-5 space-y-4">
-            {deptCounts.map((item) => {
-              const totalPct = Math.round((item.total / maxDeptCount) * 100);
+            {departmentAnalyticsRows.map((item) => {
+              const totalPct = Math.round((item.totalTasks / maxDeptCount) * 100);
               const approvedPct =
-                item.total > 0 ? Math.round((item.approved / item.total) * 100) : 0;
+                item.totalTasks > 0
+                  ? Math.round((item.completedCount / item.totalTasks) * 100)
+                  : 0;
+              const todayAttTotal =
+                item.presentToday + item.lateToday + item.completedShiftToday;
 
               return (
                 <div key={item.department} className="space-y-1.5">
-                  <div className="flex items-center justify-between text-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
                     <span className="font-semibold text-slate-800">{item.department}</span>
-                    <span className="font-mono text-slate-500 tabular-nums">
-                      {item.total} total · {item.approved} approved ({approvedPct}%)
-                    </span>
+                    <div className="flex flex-wrap items-center gap-3 font-mono text-[11px] tabular-nums">
+                      <span className="text-slate-600">
+                        {item.totalTasks} tasks ({item.completedCount} done ·{' '}
+                        {item.pendingCount + item.inProgressCount} active)
+                      </span>
+                      <span className="rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 font-semibold text-emerald-700">
+                        Attendance Today: {todayAttTotal}
+                        {item.lateToday > 0 ? ` (${item.lateToday} Late)` : ''}
+                      </span>
+                    </div>
                   </div>
                   <div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-100">
                     <div
                       className="flex h-full rounded-full bg-indigo-600 transition-all duration-300"
-                      style={{ width: `${Math.max(totalPct, item.total > 0 ? 8 : 0)}%` }}
+                      style={{ width: `${Math.max(totalPct, item.totalTasks > 0 ? 8 : 0)}%` }}
                     >
-                      {item.approved > 0 && (
+                      {item.completedCount > 0 && (
                         <div
                           className="h-full bg-emerald-500"
                           style={{ width: `${approvedPct}%` }}
-                          title={`${item.approved} Approved`}
+                          title={`${item.completedCount} Completed`}
                         />
                       )}
                     </div>
@@ -306,66 +829,12 @@ export function DashboardView({
           <div className="mt-5 flex flex-wrap items-center gap-5 border-t border-slate-100 pt-4 text-xs text-slate-500">
             <span className="inline-flex items-center gap-2">
               <span className="h-2.5 w-2.5 rounded-xs bg-emerald-500" aria-hidden="true" />
-              Approved requests
+              Completed tasks
             </span>
             <span className="inline-flex items-center gap-2">
               <span className="h-2.5 w-2.5 rounded-xs bg-indigo-600" aria-hidden="true" />
-              In-flight / Active pipeline
+              Pending / In-Progress workload
             </span>
-          </div>
-        </div>
-
-        {/* Status Distribution Breakdown */}
-        <div className="rounded-xl border border-slate-200 bg-white p-6 lg:col-span-5">
-          <div className="flex items-center justify-between gap-4 border-b border-slate-100 pb-4">
-            <div>
-              <h2 className="font-display text-base font-bold text-slate-900">
-                Workflow Status Distribution
-              </h2>
-              <p className="mt-0.5 text-xs text-slate-500">
-                Real-time breakdown across governance stages
-              </p>
-            </div>
-          </div>
-
-          {/* Segmented proportional bar */}
-          <div className="mt-5 flex h-3 w-full overflow-hidden rounded-full bg-slate-100">
-            {STATUS_ORDER.map(({ status, barColor }) => {
-              const count = requests.filter((r) => r.status === status).length;
-              if (count === 0 || totalRequests === 0) return null;
-              const pct = (count / totalRequests) * 100;
-              return (
-                <div
-                  key={status}
-                  className={`${barColor} h-full border-r border-white last:border-r-0`}
-                  style={{ width: `${pct}%` }}
-                  title={`${status}: ${count}`}
-                />
-              );
-            })}
-          </div>
-
-          <div className="mt-5 divide-y divide-slate-100">
-            {STATUS_ORDER.map(({ status, barColor }) => {
-              const count = requests.filter((r) => r.status === status).length;
-              const pct = totalRequests > 0 ? Math.round((count / totalRequests) * 100) : 0;
-              return (
-                <button
-                  key={status}
-                  type="button"
-                  onClick={() => onNavigateToQueue(status)}
-                  className="flex w-full items-center justify-between py-2.5 text-left text-xs transition-colors hover:bg-slate-50"
-                >
-                  <span className="flex items-center gap-2.5 font-medium text-slate-800">
-                    <span className={`h-2.5 w-2.5 rounded-xs ${barColor}`} aria-hidden="true" />
-                    <span>{status}</span>
-                  </span>
-                  <span className="font-mono text-slate-600 tabular-nums">
-                    {count} <span className="text-slate-400">({pct}%)</span>
-                  </span>
-                </button>
-              );
-            })}
           </div>
         </div>
       </section>
@@ -670,6 +1139,115 @@ export function DashboardView({
           </div>
         )}
       </section>
+
+      {/* Post / Edit Official Notice Modal (Admin Only) */}
+      {noticeModalOpen && isAdmin && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-xs"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="w-full max-w-lg overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+              <div className="flex items-center gap-2">
+                <Megaphone className="h-4 w-4 text-indigo-600" />
+                <h3 className="font-display text-base font-bold text-slate-900">
+                  {editingNotice ? 'Edit Official Company Notice' : 'Post Official Company Notice'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setNoticeModalOpen(false)}
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleNoticeSubmit} className="space-y-4 p-6">
+              {noticeError && (
+                <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700">
+                  {noticeError}
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700">
+                  Headline <span className="text-rose-600">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={noticeTitle}
+                  onChange={(e) => setNoticeTitle(e.target.value)}
+                  placeholder="e.g., Official Holiday Notice & Updated Attendance Cutoff"
+                  className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700">
+                    Priority Tag
+                  </label>
+                  <select
+                    value={noticeTag}
+                    onChange={(e) => setNoticeTag(e.target.value as AnnouncementPriorityTag)}
+                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                  >
+                    <option value="General">General</option>
+                    <option value="HR">HR</option>
+                    <option value="Urgent">Urgent</option>
+                  </select>
+                </div>
+
+                <div className="flex items-end pb-2">
+                  <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={noticePinned}
+                      onChange={(e) => setNoticePinned(e.target.checked)}
+                      className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    Pin to top of Notice Board
+                  </label>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700">
+                  Circular / Policy Details <span className="text-rose-600">*</span>
+                </label>
+                <textarea
+                  rows={4}
+                  required
+                  value={noticeMessage}
+                  onChange={(e) => setNoticeMessage(e.target.value)}
+                  placeholder="Write official circular text, effective dates, and action items..."
+                  className="mt-1.5 w-full rounded-lg border border-slate-200 p-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 border-t border-slate-100 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setNoticeModalOpen(false)}
+                  className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-700"
+                >
+                  {editingNotice ? 'Save Changes' : 'Publish Notice'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+

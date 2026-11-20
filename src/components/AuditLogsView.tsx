@@ -16,6 +16,17 @@ const ACTION_TYPES: (AuditActionType | 'All')[] = [
   'Checklist Updated',
   'Comment Added',
   'Team Updated',
+  'Task Deleted',
+  'Leave Submitted',
+  'Leave Approved',
+  'Leave Rejected',
+  'Attendance Logged',
+  'Role Changed',
+  'Notice Posted',
+  'Notice Updated',
+  'Notice Deleted',
+  'Vault Updated',
+  'Subtask Updated',
 ];
 
 export function AuditLogsView({
@@ -34,7 +45,9 @@ export function AuditLogsView({
       !normalized ||
       log.requestId.toLowerCase().includes(normalized) ||
       log.actorName.toLowerCase().includes(normalized) ||
+      (log.actorEmail && log.actorEmail.toLowerCase().includes(normalized)) ||
       log.actorRole.toLowerCase().includes(normalized) ||
+      log.actionType.toLowerCase().includes(normalized) ||
       log.details.toLowerCase().includes(normalized);
     return matchesAction && matchesSearch;
   });
@@ -57,7 +70,7 @@ export function AuditLogsView({
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search audit ledger by Actor, Target Request ID, or Details..."
+            placeholder="Search security audit trail by Actor, Email, Target ID, Action, or Details..."
             className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50 pr-3 pl-9 text-sm text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:bg-white focus:outline-none"
           />
         </div>
@@ -95,7 +108,7 @@ export function AuditLogsView({
       <div className="flex items-center justify-between px-1 text-xs text-slate-500">
         <span className="inline-flex items-center gap-1.5 font-medium">
           <FileSpreadsheet className="h-3.5 w-3.5 text-slate-400" />
-          <span>Read-Only Compliance Ledger</span>
+          <span>Admin-Only Security Audit Trail</span>
         </span>
         <span className="font-mono tabular-nums">
           Showing {filteredLogs.length} of {logs.length} immutable records
@@ -115,11 +128,11 @@ export function AuditLogsView({
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[860px] border-collapse text-left text-sm">
+            <table className="w-full min-w-[920px] border-collapse text-left text-sm">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50/80 text-xs font-semibold text-slate-500">
                   <th className="py-3 pr-3 pl-5">Timestamp</th>
-                  <th className="px-3 py-3">Actor</th>
+                  <th className="px-3 py-3">Actor &amp; Email</th>
                   <th className="px-3 py-3">Action Type</th>
                   <th className="px-3 py-3">Target ID</th>
                   <th className="py-3 pr-5 pl-3">Event Details</th>
@@ -135,6 +148,9 @@ export function AuditLogsView({
                       </td>
                       <td className="px-3 py-3.5 whitespace-nowrap">
                         <p className="text-xs font-semibold text-slate-900">{log.actorName}</p>
+                        {log.actorEmail && (
+                          <p className="font-mono text-[11px] text-indigo-700">{log.actorEmail}</p>
+                        )}
                         <p className="text-[11px] text-slate-500">
                           {log.actorSignOffTitle
                             ? `${log.actorSignOffTitle} · ${log.actorRole}`

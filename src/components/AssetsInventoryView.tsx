@@ -90,7 +90,7 @@ export function AssetsInventoryView({
   onExportSuccess,
   onInspectRequest,
 }: AssetsInventoryViewProps) {
-  const canManageAssets = activeRole === 'Admin' || activeRole === 'Editor';
+  const canManageAssets = activeRole === 'Admin';
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<AssetCategory | 'All'>('All');
   const [statusFilter, setStatusFilter] = useState<AssetStatus | 'All'>('All');

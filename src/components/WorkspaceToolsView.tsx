@@ -343,7 +343,7 @@ export function WorkspaceToolsView({
   onDeleteWorkspaceLink,
   onNotify,
 }: WorkspaceToolsViewProps) {
-  const isViewer = activeRole === 'Viewer';
+  const isViewer = activeRole !== 'Admin';
 
   // =========================================================================
   // 1. GMAIL AUTHENTIC CLIENT STATE

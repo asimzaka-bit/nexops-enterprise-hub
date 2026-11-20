@@ -1,6 +1,7 @@
 import { DEFAULT_PERMISSION_MATRIX } from '../data/seedData';
 import {
   ApprovalStatus,
+  AttendanceLog,
   AuditEvent,
   CompanyAsset,
   CurrencyCode,
@@ -257,17 +258,17 @@ export function resolveEffectiveReviewer(
     (m) => m.name.toLowerCase() === cleanIntended.toLowerCase() && isApprovedMember(m),
   );
   if (!target) {
-    // Fallback to first active approved non-OOO Editor/Admin if intended reviewer isn't found
+    // Fallback to first active approved non-OOO Admin if intended reviewer isn't found
     const fallback =
       members.find(
         (m) =>
           isApprovedMember(m) &&
-          (m.role === 'Editor' || m.role === 'Admin') &&
+          m.role === 'Admin' &&
           !m.outOfOffice,
       ) ??
-      members.find((m) => isApprovedMember(m) && (m.role === 'Editor' || m.role === 'Admin'));
+      members.find((m) => isApprovedMember(m) && m.role === 'Admin');
     return {
-      assignedReviewer: fallback?.name || cleanIntended || 'Operations Reviewer',
+      assignedReviewer: fallback?.name || cleanIntended || 'Operations Administrator',
     };
   }
 
@@ -313,6 +314,7 @@ export function exportAuditLogsCsv(logs: AuditEvent[]): void {
     'Audit ID',
     'Timestamp (UTC)',
     'Actor Name',
+    'Actor Email',
     'Actor Sign-Off Title',
     'Actor Role',
     'Action Type',
@@ -323,6 +325,7 @@ export function exportAuditLogsCsv(logs: AuditEvent[]): void {
     escapeCell(log.id),
     escapeCell(log.timestamp),
     escapeCell(log.actorName),
+    escapeCell(log.actorEmail || ''),
     escapeCell(log.actorSignOffTitle || log.actorRole),
     escapeCell(log.actorRole),
     escapeCell(log.actionType),
@@ -688,11 +691,10 @@ export function normalizePermissionMatrix(raw: unknown): PermissionMatrix {
     }
   }
 
-  // Enforce strict boundaries: Admin always has full Admin controls; Editor never manages Admin settings or announcements; Viewer is strict read-only.
+  // Enforce strict boundaries: Admin holds full operational controls; non-admin roles are strictly read-only.
   base.Admin.manage_admin_settings = true;
-  base.Editor.manage_admin_settings = false;
-  base.Editor.publish_announcements = false;
   for (const key of PERMISSION_KEYS) {
+    base.Editor[key] = false;
     base.Viewer[key] = false;
   }
 
@@ -767,9 +769,14 @@ export function parseSystemBackupJson(rawText: string): NexOpsState {
         }))
       : [],
     leaves: Array.isArray(rawState.leaves) ? rawState.leaves : [],
+    attendanceLogs: Array.isArray(rawState.attendanceLogs) ? rawState.attendanceLogs : [],
     announcements: Array.isArray(rawState.announcements)
       ? rawState.announcements.map((a) => ({
           ...a,
+          priorityTag:
+            a.priorityTag ??
+            (a.severity === 'urgent' ? 'Urgent' : a.severity === 'warning' ? 'HR' : 'General'),
+          pinned: Boolean(a.pinned),
           publishedByRole: normalizeRole(a.publishedByRole),
         }))
       : [],
@@ -781,7 +788,148 @@ export function parseSystemBackupJson(rawText: string): NexOpsState {
       ? rawState.globalAuditLogs.map((a) => ({ ...a, actorRole: normalizeRole(a.actorRole) }))
       : [],
     notifications: Array.isArray(rawState.notifications) ? rawState.notifications : [],
+    subtasks: Array.isArray(rawState.subtasks) ? rawState.subtasks : [],
+    taskComments: Array.isArray(rawState.taskComments) ? rawState.taskComments : [],
+    vaultDocuments: Array.isArray(rawState.vaultDocuments) ? rawState.vaultDocuments : [],
     permissionMatrix: normalizePermissionMatrix(rawState.permissionMatrix),
   };
 }
+
+export interface ExecutiveDepartmentAnalyticsRow {
+  department: string;
+  totalTasks: number;
+  pendingCount: number;
+  inProgressCount: number;
+  completedCount: number;
+  rejectedCount: number;
+  presentToday: number;
+  lateToday: number;
+  completedShiftToday: number;
+}
+
+export function exportExecutiveKpiSummaryCsv(params: {
+  companyName: string;
+  dateStamp: string;
+  totalTasks: number;
+  pendingCount: number;
+  inProgressCount: number;
+  completedCount: number;
+  rejectedCount: number;
+  departmentRows: ExecutiveDepartmentAnalyticsRow[];
+}): void {
+  const lines: string[] = [
+    [
+      escapeCsvCell(`${params.companyName} - Executive KPI Summary`),
+      escapeCsvCell(`Generated ${params.dateStamp}`),
+    ].join(','),
+    '',
+    ['Metric', 'Count', 'Share (%)'].join(','),
+    [
+      'Total Operational Requests',
+      String(params.totalTasks),
+      params.totalTasks > 0 ? '100%' : '0%',
+    ].join(','),
+    [
+      'Pending (Draft / Submitted)',
+      String(params.pendingCount),
+      params.totalTasks > 0
+        ? `${Math.round((params.pendingCount / params.totalTasks) * 100)}%`
+        : '0%',
+    ].join(','),
+    [
+      'In Progress (QA Review / Revision)',
+      String(params.inProgressCount),
+      params.totalTasks > 0
+        ? `${Math.round((params.inProgressCount / params.totalTasks) * 100)}%`
+        : '0%',
+    ].join(','),
+    [
+      'Completed (Approved)',
+      String(params.completedCount),
+      params.totalTasks > 0
+        ? `${Math.round((params.completedCount / params.totalTasks) * 100)}%`
+        : '0%',
+    ].join(','),
+    [
+      'Rejected',
+      String(params.rejectedCount),
+      params.totalTasks > 0
+        ? `${Math.round((params.rejectedCount / params.totalTasks) * 100)}%`
+        : '0%',
+    ].join(','),
+    '',
+    [
+      'Department',
+      'Total Tasks',
+      'Pending',
+      'In Progress',
+      'Completed',
+      'Rejected',
+      'Staff Present Today',
+      'Staff Late Today',
+      'Completed Shift Today',
+    ].join(','),
+    ...params.departmentRows.map((row) =>
+      [
+        escapeCsvCell(row.department),
+        escapeCsvCell(String(row.totalTasks)),
+        escapeCsvCell(String(row.pendingCount)),
+        escapeCsvCell(String(row.inProgressCount)),
+        escapeCsvCell(String(row.completedCount)),
+        escapeCsvCell(String(row.rejectedCount)),
+        escapeCsvCell(String(row.presentToday)),
+        escapeCsvCell(String(row.lateToday)),
+        escapeCsvCell(String(row.completedShiftToday)),
+      ].join(','),
+    ),
+  ];
+
+  const csvContent = lines.join('\r\n');
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', `nexops-executive-kpi-summary-${params.dateStamp}.csv`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+export function exportAttendanceLogsCsv(logs: AttendanceLog[]): void {
+  const headers = [
+    'Date',
+    'Employee ID',
+    'Staff Name',
+    'Email',
+    'Department',
+    'Check-In Time',
+    'Check-Out Time',
+    'Total Hours',
+    'Status',
+  ];
+  const rows = logs.map((log) => [
+    escapeCsvCell(log.attendanceDate),
+    escapeCsvCell(log.employeeId),
+    escapeCsvCell(log.userName),
+    escapeCsvCell(log.userEmail),
+    escapeCsvCell(log.department),
+    escapeCsvCell(formatDateTime(log.checkInTime)),
+    escapeCsvCell(log.checkOutTime ? formatDateTime(log.checkOutTime) : 'Active Shift'),
+    escapeCsvCell(typeof log.totalHours === 'number' ? log.totalHours.toFixed(2) : '0.00'),
+    escapeCsvCell(log.status),
+  ]);
+  const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\r\n');
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  const dateStamp = getTodayDateString();
+  link.href = url;
+  link.setAttribute('download', `nexops-staff-attendance-${dateStamp}.csv`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 

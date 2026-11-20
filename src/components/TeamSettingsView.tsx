@@ -4,13 +4,11 @@ import {
   Check,
   CheckCircle2,
   Cloud,
-  Copy,
   Database,
   Download,
   Eye,
   EyeOff,
   HardDrive,
-  KeyRound,
   Loader2,
   Lock,
   Palette,
@@ -33,7 +31,6 @@ import {
   AuditEvent,
   CompanyBrandingConfig,
   Department,
-  MasterKeyConfig,
   NexOpsState,
   OperationalRequest,
   PermissionKey,
@@ -49,7 +46,6 @@ interface TeamSettingsViewProps {
   activeRole: Role;
   branding: CompanyBrandingConfig;
   permissionMatrix: PermissionMatrix;
-  masterKeyConfig: MasterKeyConfig | null;
   tableDiagnostics: TableSyncStatus[];
   isCheckingHealth: boolean;
   teamMembers: TeamMember[];
@@ -66,16 +62,17 @@ interface TeamSettingsViewProps {
   onToggleMemberActive: (memberId: string) => void;
   onApproveUser: (memberId: string, assignedRole: Role) => Promise<void> | void;
   onRejectUser: (memberId: string) => Promise<void> | void;
-  onGenerateMasterKey: (requireForSensitiveActions: boolean) => Promise<string>;
-  onToggleMasterKeyRequirement: (required: boolean) => Promise<void>;
-  onVerifyMasterKey: (plainKey: string) => Promise<boolean>;
   onProvisionEmployee: (payload: ProvisionEmployeePayload) => Promise<void>;
   onDownloadBackup: () => void;
   onRestoreBackup: (restoredState: NexOpsState) => void;
   onBackupError: (message: string) => void;
 }
 
-const ROLES: Role[] = ['Admin', 'Editor', 'Viewer'];
+const ROLES: Role[] = ['Admin', 'Viewer'];
+const ASSIGNABLE_ROLES: { value: Role; label: string }[] = [
+  { value: 'Viewer', label: 'Viewer (Read-Only)' },
+  { value: 'Admin', label: 'Admin (Full Data Control)' },
+];
 
 const PERMISSION_LABELS: { key: PermissionKey; label: string; scope: string }[] = [
   {
@@ -141,7 +138,6 @@ export function TeamSettingsView({
   activeRole,
   branding,
   permissionMatrix,
-  masterKeyConfig,
   tableDiagnostics,
   isCheckingHealth,
   teamMembers,
@@ -158,9 +154,6 @@ export function TeamSettingsView({
   onToggleMemberActive,
   onApproveUser,
   onRejectUser,
-  onGenerateMasterKey,
-  onToggleMasterKeyRequirement,
-  onVerifyMasterKey,
   onProvisionEmployee,
   onDownloadBackup,
   onRestoreBackup,
@@ -175,15 +168,6 @@ export function TeamSettingsView({
   const [draftApprovalRoles, setDraftApprovalRoles] = useState<Record<string, Role>>({});
   const [approvalBusyId, setApprovalBusyId] = useState<string | null>(null);
 
-  // Master Key Vault state
-  const [revealedMasterKey, setRevealedMasterKey] = useState<string | null>(null);
-  const [masterKeyBusy, setMasterKeyBusy] = useState(false);
-  const [masterKeyCopied, setMasterKeyCopied] = useState(false);
-  const [backupAuthOpen, setBackupAuthOpen] = useState(false);
-  const [backupMasterKeyInput, setBackupMasterKeyInput] = useState('');
-  const [backupMasterKeyError, setBackupMasterKeyError] = useState<string | null>(null);
-  const [verifyingBackupKey, setVerifyingBackupKey] = useState(false);
-
   const [draftMatrix, setDraftMatrix] = useState<PermissionMatrix>(permissionMatrix);
 
   useEffect(() => {
@@ -192,11 +176,8 @@ export function TeamSettingsView({
 
   const handleTogglePermission = (role: Role, key: PermissionKey) => {
     if (!isAdmin) return;
-    if (role === 'Viewer') return;
-    if (role === 'Editor' && (key === 'publish_announcements' || key === 'manage_admin_settings')) {
-      return;
-    }
-    if (role === 'Admin' && key === 'manage_admin_settings') return;
+    if (role !== 'Admin') return;
+    if (key === 'manage_admin_settings') return;
     setDraftMatrix((prev) => ({
       ...prev,
       [role]: {
@@ -420,62 +401,9 @@ export function TeamSettingsView({
       });
   }, [teamMembers, approvalFilter]);
 
-  const handleGenerateOrRotateKey = async () => {
-    if (!isAdmin) return;
-    setMasterKeyBusy(true);
-    setMasterKeyCopied(false);
-    try {
-      const plainKey = await onGenerateMasterKey(
-        masterKeyConfig?.requireForSensitiveActions ?? true,
-      );
-      setRevealedMasterKey(plainKey);
-    } finally {
-      setMasterKeyBusy(false);
-    }
-  };
-
-  const handleCopyMasterKey = async () => {
-    if (!revealedMasterKey) return;
-    try {
-      await navigator.clipboard.writeText(revealedMasterKey);
-      setMasterKeyCopied(true);
-      window.setTimeout(() => setMasterKeyCopied(false), 2500);
-    } catch {
-      // Ignore clipboard permission errors
-    }
-  };
-
   const handleTriggerBackupRestore = () => {
     if (!isAdmin) return;
-    if (masterKeyConfig?.requireForSensitiveActions && masterKeyConfig?.keyHash) {
-      setBackupMasterKeyInput('');
-      setBackupMasterKeyError(null);
-      setBackupAuthOpen(true);
-      return;
-    }
     backupFileRef.current?.click();
-  };
-
-  const handleVerifyBackupMasterKey = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!backupMasterKeyInput.trim()) {
-      setBackupMasterKeyError('Enter the corporate Master Key to continue.');
-      return;
-    }
-    setVerifyingBackupKey(true);
-    setBackupMasterKeyError(null);
-    try {
-      const valid = await onVerifyMasterKey(backupMasterKeyInput);
-      if (!valid) {
-        setBackupMasterKeyError('Invalid Master Key. Verification failed.');
-        return;
-      }
-      setBackupAuthOpen(false);
-      setBackupMasterKeyInput('');
-      backupFileRef.current?.click();
-    } finally {
-      setVerifyingBackupKey(false);
-    }
   };
 
   return (
@@ -490,8 +418,8 @@ export function TeamSettingsView({
                 Admin Access Required ({activeRole})
               </p>
               <p className="mt-0.5 text-xs text-amber-800">
-                User approvals, Master Key security, role assignments, and system administration
-                are restricted strictly to verified Admin accounts.
+                User approvals, role assignments, and system administration are restricted strictly
+                to verified Admin accounts.
               </p>
             </div>
           </div>
@@ -579,9 +507,10 @@ export function TeamSettingsView({
                     const status: ApprovalStatus = superAdmin
                       ? 'approved'
                       : member.approvalStatus ?? (member.active ? 'approved' : 'pending');
-                    const selectedRole: Role = superAdmin
+                    const rawRole: Role = superAdmin
                       ? 'Admin'
                       : draftApprovalRoles[member.id] ?? member.role;
+                    const selectedRole: Role = rawRole === 'Admin' ? 'Admin' : 'Viewer';
                     const busy = approvalBusyId === member.id;
 
                     return (
@@ -647,8 +576,7 @@ export function TeamSettingsView({
                             className="h-8 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-800 focus:border-indigo-500 focus:outline-none disabled:bg-slate-50 disabled:text-slate-500"
                           >
                             <option value="Viewer">Viewer (Read-Only)</option>
-                            <option value="Editor">Editor (Add &amp; Edit)</option>
-                            <option value="Admin">Admin (Full Control)</option>
+                            <option value="Admin">Admin (Full Data Control)</option>
                           </select>
                         </td>
                         <td className="py-3.5 pr-6 pl-3 text-right whitespace-nowrap">
@@ -704,114 +632,6 @@ export function TeamSettingsView({
                 )}
               </tbody>
             </table>
-          </div>
-        </div>
-      )}
-
-      {/* Admin-Only: Master Key Security Vault */}
-      {isAdmin && (
-        <div className="rounded-xl border border-slate-200 bg-white p-6">
-          <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 pb-4">
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <KeyRound className="h-4 w-4 text-indigo-600" aria-hidden="true" />
-                <h2 className="font-display text-base font-bold text-slate-900">
-                  Master Key Security Vault
-                </h2>
-                <span
-                  className={`rounded-md border px-2 py-0.5 font-mono text-[11px] font-semibold ${
-                    masterKeyConfig?.keyHash
-                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                      : 'border-amber-200 bg-amber-50 text-amber-800'
-                  }`}
-                >
-                  {masterKeyConfig?.keyHash
-                    ? `Active · ${masterKeyConfig.keyHint}`
-                    : 'Not Provisioned'}
-                </span>
-              </div>
-              <p className="mt-1 text-xs text-slate-500">
-                Admin-only cryptographic Master Key stored as a SHA-256 digest in Supabase.
-                Non-admin roles never see or access this vault.
-              </p>
-            </div>
-
-            <button
-              type="button"
-              disabled={masterKeyBusy}
-              onClick={() => void handleGenerateOrRotateKey()}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-slate-800 disabled:opacity-60 whitespace-nowrap"
-            >
-              {masterKeyBusy ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <KeyRound className="h-3.5 w-3.5" />
-              )}
-              <span>
-                {masterKeyConfig?.keyHash ? 'Rotate Master Key' : 'Generate Master Key'}
-              </span>
-            </button>
-          </div>
-
-          {revealedMasterKey && (
-            <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-xs font-bold text-amber-950">
-                  One-Time Master Key Reveal — Copy &amp; Store Securely
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setRevealedMasterKey(null)}
-                  className="text-xs font-semibold text-amber-800 hover:underline"
-                >
-                  Dismiss
-                </button>
-              </div>
-              <p className="mt-1 text-[11px] text-amber-900">
-                Only the SHA-256 hash is stored in the database. This plaintext key will not be
-                shown again once dismissed.
-              </p>
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <code className="flex-1 rounded-lg border border-amber-200 bg-white px-3 py-2 font-mono text-xs font-bold text-slate-900 select-all">
-                  {revealedMasterKey}
-                </code>
-                <button
-                  type="button"
-                  onClick={() => void handleCopyMasterKey()}
-                  className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-amber-900 px-3 text-xs font-semibold text-white hover:bg-amber-800"
-                >
-                  {masterKeyCopied ? (
-                    <Check className="h-3.5 w-3.5" />
-                  ) : (
-                    <Copy className="h-3.5 w-3.5" />
-                  )}
-                  <span>{masterKeyCopied ? 'Copied' : 'Copy Key'}</span>
-                </button>
-              </div>
-            </div>
-          )}
-
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
-            <div>
-              <p className="text-xs font-bold text-slate-900">
-                Require Master Key for JSON Backup Restore &amp; Sensitive Admin Actions
-              </p>
-              <p className="mt-0.5 text-[11px] text-slate-500">
-                {masterKeyConfig?.updatedAt
-                  ? `Last rotated ${formatDateTime(masterKeyConfig.updatedAt)} by ${masterKeyConfig.updatedBy || 'Admin'}`
-                  : 'Generate a Master Key to enforce second-factor Admin authorization.'}
-              </p>
-            </div>
-            <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-800">
-              <input
-                type="checkbox"
-                checked={Boolean(masterKeyConfig?.requireForSensitiveActions)}
-                disabled={!masterKeyConfig?.keyHash}
-                onChange={(e) => void onToggleMasterKeyRequirement(e.target.checked)}
-                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50"
-              />
-              <span>Enforce Master Key</span>
-            </label>
           </div>
         </div>
       )}
@@ -1164,13 +984,13 @@ export function TeamSettingsView({
                   Assigned Role
                 </label>
                 <select
-                  value={newRole}
+                  value={newRole === 'Admin' ? 'Admin' : 'Viewer'}
                   onChange={(e) => setNewRole(e.target.value as Role)}
                   className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-900 focus:border-indigo-500 focus:outline-none"
                 >
-                  {ROLES.map((r) => (
-                    <option key={r} value={r}>
-                      {r}
+                  {ASSIGNABLE_ROLES.map((r) => (
+                    <option key={r.value} value={r.value}>
+                      {r.label}
                     </option>
                   ))}
                 </select>
@@ -1330,21 +1150,21 @@ export function TeamSettingsView({
                     {isAdmin && !superAdmin ? (
                       <select
                         aria-label={`Role for ${member.name}`}
-                        value={member.role}
+                        value={member.role === 'Admin' ? 'Admin' : 'Viewer'}
                         onChange={(e) =>
                           onUpdateMemberRole(member.id, e.target.value as Role)
                         }
                         className="h-8 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-800 focus:border-indigo-500 focus:outline-none"
                       >
-                        {ROLES.map((r) => (
-                          <option key={r} value={r}>
-                            {r}
+                        {ASSIGNABLE_ROLES.map((r) => (
+                          <option key={r.value} value={r.value}>
+                            {r.label}
                           </option>
                         ))}
                       </select>
                     ) : (
                       <span className="text-xs font-medium text-slate-700">
-                        {superAdmin ? 'Admin' : member.role}
+                        {superAdmin ? 'Admin' : member.role === 'Admin' ? 'Admin' : 'Viewer (Read-Only)'}
                       </span>
                     )}
                   </td>
@@ -1646,11 +1466,8 @@ export function TeamSettingsView({
                     const enabled = Boolean(draftMatrix[role]?.[perm.key]);
                     const locked =
                       !isAdmin ||
-                      role === 'Viewer' ||
-                      (role === 'Editor' &&
-                        (perm.key === 'publish_announcements' ||
-                          perm.key === 'manage_admin_settings')) ||
-                      (role === 'Admin' && perm.key === 'manage_admin_settings');
+                      role !== 'Admin' ||
+                      perm.key === 'manage_admin_settings';
                     return (
                       <td key={role} className="px-3 py-3 text-center">
                         <button
@@ -1675,72 +1492,6 @@ export function TeamSettingsView({
           </table>
         </div>
       </div>
-
-      {/* Master Key Verification Modal for Sensitive Backup Restore */}
-      {backupAuthOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-xs"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Master Key Authorization Required"
-        >
-          <form
-            onSubmit={(e) => void handleVerifyBackupMasterKey(e)}
-            className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl"
-          >
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <KeyRound className="h-4 w-4 text-indigo-600" />
-                <h3 className="font-display text-base font-bold text-slate-900">
-                  Master Key Verification Required
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setBackupAuthOpen(false)}
-                aria-label="Close modal"
-                className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <p className="mt-2 text-xs text-slate-500">
-              Restoring a workspace JSON backup overwrites live operational tables. Enter your
-              corporate Master Key to proceed.
-            </p>
-            <input
-              type="password"
-              value={backupMasterKeyInput}
-              onChange={(e) => {
-                setBackupMasterKeyInput(e.target.value);
-                setBackupMasterKeyError(null);
-              }}
-              placeholder="NXM-XXXX-XXXX-XXXX-XXXX"
-              className="mt-4 h-10 w-full rounded-lg border border-slate-200 px-3 font-mono text-xs text-slate-900 focus:border-indigo-500 focus:outline-none"
-            />
-            {backupMasterKeyError && (
-              <p className="mt-2 text-xs font-medium text-rose-700">{backupMasterKeyError}</p>
-            )}
-            <div className="mt-5 flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setBackupAuthOpen(false)}
-                className="rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={verifyingBackupKey}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
-              >
-                {verifyingBackupKey && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                <span>Verify &amp; Select Backup</span>
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
     </div>
   );
 }

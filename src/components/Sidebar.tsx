@@ -6,6 +6,7 @@ import {
   ClipboardCheck,
   FileSpreadsheet,
   FolderKanban,
+  FolderLock,
   LayoutDashboard,
   Package,
   PanelLeftClose,
@@ -43,6 +44,7 @@ interface SidebarProps {
   activeProjectsCount?: number;
   assetAlertsCount?: number;
   pendingSopsCount?: number;
+  vaultCount?: number;
   pendingLeavesCount?: number;
   openActionItemsCount?: number;
   workspaceLinksCount?: number;
@@ -88,6 +90,7 @@ export function Sidebar({
   activeProjectsCount,
   assetAlertsCount,
   pendingSopsCount,
+  vaultCount,
   pendingLeavesCount,
   openActionItemsCount,
   workspaceLinksCount,
@@ -134,8 +137,14 @@ export function Sidebar({
       badge: pendingSopsCount,
     },
     {
+      id: 'vault',
+      label: 'Document Vault',
+      icon: FolderLock,
+      badge: vaultCount,
+    },
+    {
       id: 'leaves',
-      label: 'Leaves & Time-Off',
+      label: 'Attendance & Leaves',
       icon: CalendarCheck2,
       badge: pendingLeavesCount,
     },
@@ -145,13 +154,13 @@ export function Sidebar({
       icon: CalendarClock,
       badge: openActionItemsCount,
     },
-    {
-      id: 'audit',
-      label: 'Audit & Compliance',
-      icon: FileSpreadsheet,
-    },
     ...(activeRole === 'Admin'
       ? [
+          {
+            id: 'audit' as NavSection,
+            label: 'Audit Trail',
+            icon: FileSpreadsheet,
+          },
           {
             id: 'settings' as NavSection,
             label: 'Admin Panel & Settings',
@@ -315,18 +324,18 @@ export function Sidebar({
           );
         })}
 
-        {/* Dedicated Workspace Tools Section (Gmail, Google Docs, Google Sheets, Google Forms) */}
+        {/* Dedicated Unified Workspace Section (Gmail, Google Docs, Google Sheets, Google Forms) */}
         <div className="pt-3 mt-3 border-t border-slate-800/80">
           {!isCollapsed ? (
             <p className="px-3 pb-1.5 text-[11px] font-semibold tracking-wider text-slate-400">
-              Workspace Tools
+              Google Workspace
             </p>
           ) : null}
 
           <button
             type="button"
             onClick={() => handleNavigate('workspace')}
-            title={isCollapsed ? 'Workspace Tools' : undefined}
+            title={isCollapsed ? 'Workspace' : undefined}
             className={`group relative flex w-full items-center rounded-lg py-2.5 text-sm font-medium transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-indigo-400 ${
               isCollapsed ? 'justify-center px-0' : 'justify-between px-3'
             } ${
@@ -345,7 +354,7 @@ export function Sidebar({
                 aria-hidden="true"
               />
               {!isCollapsed && (
-                <span className="truncate whitespace-nowrap">Workspace Tools</span>
+                <span className="truncate whitespace-nowrap">Workspace</span>
               )}
             </span>
 
@@ -366,7 +375,7 @@ export function Sidebar({
                 role="tooltip"
                 className="pointer-events-none absolute left-full z-50 ml-3 hidden rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-xs font-semibold text-white whitespace-nowrap shadow-xl group-hover:flex"
               >
-                Workspace Tools (Gmail, Docs, Sheets, Forms)
+                Workspace (Gmail, Docs, Sheets, Forms)
               </span>
             )}
           </button>

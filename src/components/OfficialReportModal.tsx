@@ -1,12 +1,18 @@
 import { CheckSquare, Printer, Square, X } from 'lucide-react';
 import { useState } from 'react';
-import { CompanyBrandingConfig, OperationalRequest, TeamMember } from '../types/nexops';
+import {
+  AttendanceLog,
+  CompanyBrandingConfig,
+  OperationalRequest,
+  TeamMember,
+} from '../types/nexops';
 import { NexOpsLogo } from './NexOpsLogo';
 import {
   formatCurrency,
   formatDateTime,
   formatShortDate,
   getOverdueDays,
+  getTodayDateString,
   isRequestOverdue,
 } from '../utils/storage';
 import {
@@ -20,6 +26,7 @@ import {
 interface OfficialReportModalProps {
   branding: CompanyBrandingConfig;
   requests: OperationalRequest[];
+  attendanceLogs?: AttendanceLog[];
   initialRequestId?: string | null;
   currentUser: TeamMember;
   onClose: () => void;
@@ -29,6 +36,7 @@ interface OfficialReportModalProps {
 export function OfficialReportModal({
   branding,
   requests,
+  attendanceLogs = [],
   initialRequestId = null,
   currentUser,
   onClose,
@@ -56,10 +64,14 @@ export function OfficialReportModal({
   };
 
   // Executive aggregate stats
+  const todayStr = getTodayDateString();
   const totalRequests = requests.length;
   const approvedCount = requests.filter((r) => r.status === 'Approved').length;
   const pendingCount = requests.filter(
-    (r) => r.status === 'Submitted' || r.status === 'Under QA Review',
+    (r) => r.status === 'Draft' || r.status === 'Submitted',
+  ).length;
+  const inProgressCount = requests.filter(
+    (r) => r.status === 'Under QA Review' || r.status === 'Revision Required',
   ).length;
   const revisionCount = requests.filter((r) => r.status === 'Revision Required').length;
   const overdueRequests = requests.filter((r) => isRequestOverdue(r));
@@ -170,9 +182,9 @@ export function OfficialReportModal({
                       </p>
                     </div>
                     <div className="rounded-lg border border-slate-200 p-3.5">
-                      <p className="text-[11px] font-medium text-slate-500">Pending QA</p>
+                      <p className="text-[11px] font-medium text-slate-500">Pending / In Progress</p>
                       <p className="mt-1 font-display text-xl font-bold text-amber-700 tabular-nums">
-                        {pendingCount}
+                        {pendingCount} / {inProgressCount}
                       </p>
                     </div>
                     <div className="rounded-lg border border-slate-200 p-3.5">
@@ -189,7 +201,7 @@ export function OfficialReportModal({
                 {/* Departmental Breakdown */}
                 <section className="print-avoid-break">
                   <h3 className="font-display text-sm font-bold text-slate-900">
-                    02. Departmental Compliance Breakdown
+                    02. Department Workload &amp; Today&apos;s Attendance Summary
                   </h3>
                   <table className="mt-3 w-full border-collapse border border-slate-200 text-left text-xs">
                     <thead>
@@ -199,13 +211,16 @@ export function OfficialReportModal({
                           Total
                         </th>
                         <th className="border-b border-slate-200 px-3 py-2 text-right">
-                          Approved
+                          Completed
                         </th>
                         <th className="border-b border-slate-200 px-3 py-2 text-right">
-                          Pending / Revision
+                          Pending / In Progress
                         </th>
                         <th className="border-b border-slate-200 px-3 py-2 text-right">
                           Overdue SLA
+                        </th>
+                        <th className="border-b border-slate-200 px-3 py-2 text-right">
+                          Attendance Today
                         </th>
                       </tr>
                     </thead>
@@ -215,11 +230,15 @@ export function OfficialReportModal({
                         const app = items.filter((r) => r.status === 'Approved').length;
                         const pend = items.filter(
                           (r) =>
+                            r.status === 'Draft' ||
                             r.status === 'Submitted' ||
                             r.status === 'Under QA Review' ||
                             r.status === 'Revision Required',
                         ).length;
                         const over = items.filter((r) => isRequestOverdue(r)).length;
+                        const deptAtt = attendanceLogs.filter(
+                          (a) => a.attendanceDate === todayStr && a.department === dept,
+                        ).length;
                         return (
                           <tr key={dept}>
                             <td className="px-3 py-2 font-semibold text-slate-900">{dept}</td>
@@ -234,6 +253,9 @@ export function OfficialReportModal({
                             </td>
                             <td className="px-3 py-2 text-right font-mono text-rose-700 tabular-nums">
                               {over}
+                            </td>
+                            <td className="px-3 py-2 text-right font-mono text-indigo-700 tabular-nums">
+                              {deptAtt}
                             </td>
                           </tr>
                         );

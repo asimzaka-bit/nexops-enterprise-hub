@@ -865,7 +865,7 @@ export function LoginScreen({
               <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
               <span>
                 All newly registered accounts remain in Pending Admin Approval until verified and
-                assigned a role (Viewer, Editor, or Admin) by an Administrator.
+                assigned a role (Viewer or Admin) by an Administrator.
               </span>
             </div>
           </div>

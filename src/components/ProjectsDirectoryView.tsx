@@ -81,7 +81,7 @@ export function ProjectsDirectoryView({
   onDeleteProject,
   onFilterQueueByProject,
 }: ProjectsDirectoryViewProps) {
-  const canManage = activeRole === 'Admin' || activeRole === 'Editor';
+  const canManage = activeRole === 'Admin';
 
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
   const [searchQuery, setSearchQuery] = useState('');

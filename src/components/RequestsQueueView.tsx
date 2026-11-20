@@ -129,8 +129,8 @@ export function RequestsQueueView({
     [departments, requests],
   );
 
-  const isViewer = activeRole === 'Viewer';
-  const canBulkManage = activeRole === 'Admin' || activeRole === 'Editor';
+  const isViewer = activeRole !== 'Admin';
+  const canBulkManage = activeRole === 'Admin';
 
   const normalizedSearch = searchQuery.trim().toLowerCase();
   const overdueCount = requests.filter((r) => isRequestOverdue(r)).length;

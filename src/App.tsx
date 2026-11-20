@@ -19,15 +19,18 @@ import { TeamSettingsView } from './components/TeamSettingsView';
 import { ToastContainer } from './components/ToastContainer';
 import { TopBar } from './components/TopBar';
 import { UserProfileModal } from './components/UserProfileModal';
+import { DocumentVaultView } from './components/DocumentVaultView';
 import { WorkspaceSkeleton } from './components/WorkspaceSkeleton';
 import { WorkspaceToolsView } from './components/WorkspaceToolsView';
 import {
+  AnnouncementPriorityTag,
   AnnouncementSeverity,
   AppNotification,
   ApprovalStageSignOff,
   AssetCondition,
   AssetHistoryEntry,
   AssetStatus,
+  AttendanceLog,
   AuditActionType,
   AuditEvent,
   AuthSession,
@@ -36,8 +39,8 @@ import {
   CompanyBrandingConfig,
   CompanyProject,
   Department,
+  DocumentVaultItem,
   LeaveRequest,
-  MasterKeyConfig,
   MeetingActionItem,
   MeetingMinute,
   NavSection,
@@ -50,6 +53,8 @@ import {
   SopAcknowledgment,
   SopDocument,
   TableSyncStatus,
+  TaskComment,
+  TaskSubtask,
   TeamMember,
   ToastMessage,
   WorkspaceEmailLog,
@@ -74,6 +79,7 @@ import {
   downloadSystemBackupJson,
   formatCurrency,
   generateNextRequestId,
+  getTodayDateString,
   isAssetAlert,
   isSuperAdminEmail,
   normalizePermissionMatrix,
@@ -128,9 +134,6 @@ export default function App() {
   const [isCheckingHealth, setIsCheckingHealth] = useState(false);
   const [tableDiagnostics, setTableDiagnostics] = useState<TableSyncStatus[]>(() =>
     dataService.getOfflineDiagnostics(),
-  );
-  const [masterKeyConfig, setMasterKeyConfig] = useState<MasterKeyConfig | null>(() =>
-    dataService.masterKey.loadSync(),
   );
   const [isAdminInitialized, setIsAdminInitialized] = useState(() =>
     dataService.auth.hasLocalAdminSync(dataService.loadStateSync().teamMembers),
@@ -223,6 +226,30 @@ export default function App() {
       sbUser: Parameters<typeof buildMemberFromSupabaseUser>[0],
     ) => {
       const member = buildMemberFromSupabaseUser(sbUser, dataService.loadStateSync().teamMembers);
+      const isNewPendingUser =
+        !dataService
+          .loadStateSync()
+          .teamMembers.some(
+            (m) => m.id === member.id || m.email.toLowerCase() === member.email.toLowerCase(),
+          ) &&
+        !isSuperAdminEmail(member.email) &&
+        (member.approvalStatus ?? 'pending') === 'pending';
+
+      const pendingAdminNotif: AppNotification | null = isNewPendingUser
+        ? {
+            id: `notif-reg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            title: 'New User Awaiting Approval',
+            message: `${member.name} (${member.email}) signed up and requires Admin access approval.`,
+            timestamp: new Date().toISOString(),
+            read: false,
+            targetSection: 'settings',
+            recipientRole: 'Admin',
+            actorEmail: member.email,
+            category: 'user_approval',
+            severity: 'warning',
+          }
+        : null;
+
       setState((prev) => {
         const exists = prev.teamMembers.some(
           (m) => m.id === member.id || m.email.toLowerCase() === member.email.toLowerCase(),
@@ -238,8 +265,14 @@ export default function App() {
           ...prev,
           activeRole: member.role,
           teamMembers: nextMembers,
+          notifications: pendingAdminNotif
+            ? [pendingAdminNotif, ...prev.notifications]
+            : prev.notifications,
         };
       });
+      if (pendingAdminNotif) {
+        void dataService.notifications.create(pendingAdminNotif);
+      }
 
       const nextSession: AuthSession = {
         isAuthenticated: true,
@@ -324,7 +357,6 @@ export default function App() {
         const remote = await dataService.fetchFullWorkspaceState();
         setState(remote.state);
         setBranding(remote.branding);
-        setMasterKeyConfig(remote.masterKeyConfig);
         setTableDiagnostics(remote.diagnostics);
         setDbConnected(remote.cloudHealthy);
         if (showFeedbackToast) {
@@ -501,9 +533,9 @@ export default function App() {
     }
   }, [authSession?.isAuthenticated, currentUser.role, state.activeRole]);
 
-  // Non-Admins must NEVER remain on Admin Panel & Settings view
+  // Non-Admins must NEVER remain on Admin-only sections (Settings or Activity Audit Trail)
   useEffect(() => {
-    if (activeSection === 'settings' && currentUser.role !== 'Admin') {
+    if ((activeSection === 'settings' || activeSection === 'audit') && currentUser.role !== 'Admin') {
       setActiveSection('dashboard');
     }
   }, [activeSection, currentUser.role]);
@@ -675,6 +707,62 @@ export default function App() {
           scheduleRealtimeRefresh();
         },
       )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'notifications' },
+        () => {
+          scheduleRealtimeRefresh();
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'attendance_logs' },
+        () => {
+          scheduleRealtimeRefresh();
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'leave_requests' },
+        () => {
+          scheduleRealtimeRefresh();
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'audit_logs' },
+        () => {
+          scheduleRealtimeRefresh();
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'announcements' },
+        () => {
+          scheduleRealtimeRefresh();
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'task_comments' },
+        () => {
+          scheduleRealtimeRefresh();
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'subtasks' },
+        () => {
+          scheduleRealtimeRefresh();
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'document_vault' },
+        () => {
+          scheduleRealtimeRefresh();
+        },
+      )
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') {
           setDbConnected(true);
@@ -696,7 +784,7 @@ export default function App() {
       (m) =>
         m.active &&
         (m.approvalStatus ?? 'approved') === 'approved' &&
-        (m.role === 'Editor' || m.role === 'Admin'),
+        m.role === 'Admin',
     );
     return reviewer?.name || currentUser.name || '';
   }, [state.teamMembers, currentUser.name]);
@@ -805,6 +893,7 @@ export default function App() {
       requestId,
       timestamp: new Date().toISOString(),
       actorName: actor.name,
+      actorEmail: actor.email || currentUser.email || undefined,
       actorRole: actor.role,
       actorSignOffTitle: actor.signOffTitle || actor.title,
       actionType,
@@ -860,6 +949,22 @@ export default function App() {
     const result = await dataService.auth.registerUser(payload, rememberSession);
     const registered = result.user;
 
+    const pendingAdminNotif: AppNotification | null =
+      !isSuperAdminEmail(registered.email) && (registered.approvalStatus ?? 'pending') === 'pending'
+        ? {
+            id: `notif-reg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            title: 'New User Awaiting Approval',
+            message: `${registered.name} (${registered.email}) registered and awaits Admin approval.`,
+            timestamp: new Date().toISOString(),
+            read: false,
+            targetSection: 'settings',
+            recipientRole: 'Admin',
+            actorEmail: registered.email,
+            category: 'user_approval',
+            severity: 'warning',
+          }
+        : null;
+
     setState((prev) => ({
       ...prev,
       teamMembers: [
@@ -870,7 +975,14 @@ export default function App() {
             m.email.toLowerCase() !== registered.email.toLowerCase(),
         ),
       ],
+      notifications: pendingAdminNotif
+        ? [pendingAdminNotif, ...prev.notifications]
+        : prev.notifications,
     }));
+
+    if (pendingAdminNotif) {
+      void dataService.notifications.create(pendingAdminNotif);
+    }
 
     if (result.status === 'confirmation_required') {
       pushToast(
@@ -1101,13 +1213,13 @@ export default function App() {
 
   // Open Create Modal fresh or from template
   const handleOpenBlankCreateModal = () => {
-    if (currentUser.role === 'Viewer') return;
+    if (currentUser.role !== 'Admin') return;
     setTemplateSource(null);
     setCreateModalOpen(true);
   };
 
   const handleDuplicateRequest = (req: OperationalRequest) => {
-    if (currentUser.role === 'Viewer') return;
+    if (currentUser.role !== 'Admin') return;
     setSelectedRequestId(null);
     setTemplateSource(req);
     setCreateModalOpen(true);
@@ -1115,7 +1227,7 @@ export default function App() {
 
   // Create new request
   const handleCreateRequest = (payload: CreateRequestPayload) => {
-    if (currentUser.role === 'Viewer') return;
+    if (currentUser.role !== 'Admin') return;
     const now = new Date().toISOString();
     const newId = generateNextRequestId(state.requests);
     const initialStatus: RequestStatus = payload.submitImmediately ? 'Submitted' : 'Draft';
@@ -1177,17 +1289,29 @@ export default function App() {
       auditTrail: [auditEntry],
     };
 
-    const notification: AppNotification | null = payload.submitImmediately
-      ? {
-          id: `notif-${Date.now()}`,
-          title: 'New Operational Submission',
-          message: `${currentActor.name} submitted ${newId} (${payload.title}) for QA verification.`,
-          timestamp: now,
-          read: false,
-          requestId: newId,
-          severity: payload.priority === 'Urgent' ? 'warning' : 'info',
-        }
-      : null;
+    const reviewerMember = state.teamMembers.find(
+      (m) => m.name.trim().toLowerCase() === reviewerResolution.assignedReviewer.trim().toLowerCase(),
+    );
+
+    const notification: AppNotification | null =
+      payload.submitImmediately || reviewerMember
+        ? {
+            id: `notif-${Date.now()}`,
+            title: payload.submitImmediately
+              ? `Task Assigned & Submitted: ${newId}`
+              : `Draft Task Assigned: ${newId}`,
+            message: `${currentActor.name} created ${newId} ("${payload.title}") assigned to ${reviewerResolution.assignedReviewer || 'Operations QA'}.`,
+            timestamp: now,
+            read: false,
+            requestId: newId,
+            targetSection: 'requests',
+            recipientEmail: reviewerMember?.email,
+            recipientRole: reviewerMember ? undefined : 'Admin',
+            actorEmail: currentActor.email,
+            category: 'task',
+            severity: payload.priority === 'Urgent' ? 'warning' : 'info',
+          }
+        : null;
 
     const linkedUpdatedAsset: CompanyAsset | undefined = payload.assetId
       ? state.assets.find((ast) => ast.id === payload.assetId || ast.tag === payload.assetTag)
@@ -1225,6 +1349,7 @@ export default function App() {
 
     void Promise.all([
       dataService.requests.create(newRequest, auditEntry, notification),
+      notification ? dataService.notifications.create(notification) : Promise.resolve(),
       updatedAssetWithHistory
         ? dataService.assets.upsert(updatedAssetWithHistory)
         : Promise.resolve(),
@@ -1245,9 +1370,43 @@ export default function App() {
     );
   };
 
+  // Delete operational request
+  const handleDeleteRequest = (requestId: string) => {
+    if (currentUser.role !== 'Admin') return;
+    const target = state.requests.find((r) => r.id === requestId);
+    if (!target) return;
+
+    const auditEntry = createAuditEvent(
+      requestId,
+      'Task Deleted',
+      `Deleted operational request ${requestId} ("${target.title}", Department: ${target.department}, Status: ${target.status}).`,
+    );
+
+    setState((prev) => ({
+      ...prev,
+      requests: prev.requests.filter((r) => r.id !== requestId),
+      subtasks: prev.subtasks.filter((st) => st.requestId !== requestId),
+      taskComments: prev.taskComments.filter((cmt) => cmt.requestId !== requestId),
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+    }));
+
+    if (selectedRequestId === requestId) {
+      setSelectedRequestId(null);
+    }
+
+    void dataService.requests
+      .remove(requestId, auditEntry)
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      })
+      .catch(handleCloudWriteError);
+
+    pushToast(`Deleted ${requestId}`, `"${target.title}" removed from queue.`, 'info');
+  };
+
   // Toggle QA checklist item
   const handleToggleChecklistItem = (requestId: string, itemId: string) => {
-    if (currentUser.role === 'Viewer') return;
+    if (currentUser.role !== 'Admin') return;
     const target = state.requests.find((r) => r.id === requestId);
     if (!target) return;
     const item = target.checklist.find((c) => c.id === itemId);
@@ -1308,7 +1467,7 @@ export default function App() {
 
   // Stage 1 Editor / QA Sign-Off for Two-Tier Escalated Approval Chain
   const handleStage1SignOff = (requestId: string, comment?: string) => {
-    if (currentUser.role === 'Viewer') return;
+    if (currentUser.role !== 'Admin') return;
     const target = state.requests.find((r) => r.id === requestId);
     if (!target) return;
     const actor = getActorForRole(state.activeRole, state.teamMembers);
@@ -1370,7 +1529,7 @@ export default function App() {
 
   // Update Cost-Center Actual Spend on an individual request
   const handleUpdateRequestFinancials = (requestId: string, actualSpend: number) => {
-    if (currentUser.role === 'Viewer') return;
+    if (currentUser.role !== 'Admin') return;
     const target = state.requests.find((r) => r.id === requestId);
     if (!target) return;
     const now = new Date().toISOString();
@@ -1420,7 +1579,7 @@ export default function App() {
     nextStatus: RequestStatus,
     comment?: string,
   ) => {
-    if (currentUser.role === 'Viewer') return;
+    if (currentUser.role !== 'Admin') return;
     const targetBefore = state.requests.find((r) => r.id === requestId);
     if (!targetBefore) return;
 
@@ -1469,6 +1628,41 @@ export default function App() {
 
     const syncAudit = createAuditEvent(requestId, 'Status Changed', detailText, state.activeRole);
 
+    const submitterMember = state.teamMembers.find(
+      (m) =>
+        m.id === targetBefore.submitterId ||
+        m.name.trim().toLowerCase() === targetBefore.submittedBy.trim().toLowerCase(),
+    );
+
+    const statusNotifId = `notif-${Date.now()}`;
+    const statusNotifSeverity: AppNotification['severity'] =
+      nextStatus === 'Approved'
+        ? 'success'
+        : nextStatus === 'Revision Required'
+          ? 'warning'
+          : nextStatus === 'Rejected'
+            ? 'danger'
+            : 'info';
+
+    const syncNotif: AppNotification = {
+      id: statusNotifId,
+      title:
+        nextStatus === 'Approved'
+          ? `Task Completed: ${requestId}`
+          : `${requestId} marked ${nextStatus}`,
+      message: comment
+        ? `${actor.name}: ${comment}`
+        : `${actor.name} moved ${requestId} ("${targetBefore.title}") to ${nextStatus}.`,
+      timestamp: now,
+      read: false,
+      requestId,
+      targetSection: 'requests',
+      recipientEmail: submitterMember?.email,
+      actorEmail: actor.email,
+      category: 'task',
+      severity: statusNotifSeverity,
+    };
+
     setState((prev) => {
       const target = prev.requests.find((r) => r.id === requestId);
       if (!target) return prev;
@@ -1492,27 +1686,6 @@ export default function App() {
           auditTrail: [...req.auditTrail, syncAudit],
         };
       });
-
-      const severityMap: Record<RequestStatus, AppNotification['severity']> = {
-        Approved: 'success',
-        'Revision Required': 'warning',
-        Rejected: 'danger',
-        Submitted: 'info',
-        'Under QA Review': 'info',
-        Draft: 'info',
-      };
-
-      const notification: AppNotification = {
-        id: `notif-${Date.now()}`,
-        title: `${requestId} marked ${nextStatus}`,
-        message: comment
-          ? `${actor.name}: ${comment}`
-          : `${actor.name} moved ${requestId} to ${nextStatus}.`,
-        timestamp: now,
-        read: false,
-        requestId,
-        severity: severityMap[nextStatus],
-      };
 
       const shouldLogAssetApproval =
         nextStatus === 'Approved' && Boolean(target.assetId || target.assetTag);
@@ -1541,7 +1714,7 @@ export default function App() {
         requests: updatedRequests,
         assets: updatedAssets,
         globalAuditLogs: [syncAudit, ...prev.globalAuditLogs],
-        notifications: [notification, ...prev.notifications],
+        notifications: [syncNotif, ...prev.notifications],
       };
     });
 
@@ -1556,24 +1729,6 @@ export default function App() {
       });
     }
 
-    const syncNotif: AppNotification = {
-      id: `notif-${Date.now()}`,
-      title: `${requestId} marked ${nextStatus}`,
-      message: comment
-        ? `${currentUser.name}: ${comment}`
-        : `${currentUser.name} moved ${requestId} to ${nextStatus}.`,
-      timestamp: now,
-      read: false,
-      requestId,
-      severity:
-        nextStatus === 'Approved'
-          ? 'success'
-          : nextStatus === 'Revision Required'
-            ? 'warning'
-            : nextStatus === 'Rejected'
-              ? 'danger'
-              : 'info',
-    };
     const approvedLinkedAssetBefore =
       nextStatus === 'Approved' && (targetBefore.assetId || targetBefore.assetTag)
         ? state.assets.find(
@@ -1607,6 +1762,7 @@ export default function App() {
         syncAudit,
         syncNotif,
       ),
+      dataService.notifications.create(syncNotif),
       approvedLinkedAssetNext
         ? dataService.assets.upsert(approvedLinkedAssetNext)
         : Promise.resolve(),
@@ -1630,7 +1786,7 @@ export default function App() {
 
   // Add comment to audit trail
   const handleAddComment = (requestId: string, comment: string) => {
-    if (currentUser.role === 'Viewer') return;
+    if (currentUser.role !== 'Admin') return;
     const now = new Date().toISOString();
     setState((prev) => {
       const auditEntry = createAuditEvent(
@@ -1661,7 +1817,7 @@ export default function App() {
 
   // Escalate high-priority or overdue request to Admin
   const handleEscalateRequest = (requestId: string) => {
-    if (currentUser.role === 'Viewer') return;
+    if (currentUser.role !== 'Admin') return;
     const target = state.requests.find((r) => r.id === requestId);
     if (!target) return;
 
@@ -1719,7 +1875,7 @@ export default function App() {
   const handleCreateProject = (
     projectInput: Omit<CompanyProject, 'id' | 'updatedAt'>,
   ) => {
-    if (currentUser.role === 'Viewer') return;
+    if (currentUser.role !== 'Admin') return;
     const now = new Date().toISOString();
     const newProject: CompanyProject = {
       ...projectInput,
@@ -1753,7 +1909,7 @@ export default function App() {
     projectId: string,
     patch: Partial<Omit<CompanyProject, 'id' | 'updatedAt'>>,
   ) => {
-    if (currentUser.role === 'Viewer') return;
+    if (currentUser.role !== 'Admin') return;
     const target = state.projects.find((p) => p.id === projectId);
     if (!target) return;
     const now = new Date().toISOString();
@@ -1795,7 +1951,7 @@ export default function App() {
   };
 
   const handleDeleteProject = (projectId: string) => {
-    if (currentUser.role === 'Viewer') return;
+    if (currentUser.role !== 'Admin') return;
     const target = state.projects.find((p) => p.id === projectId);
     if (!target) return;
     const auditEntry = createAuditEvent(
@@ -1821,7 +1977,7 @@ export default function App() {
   const handleRegisterAsset = (
     assetInput: Omit<CompanyAsset, 'id' | 'updatedAt' | 'history'>,
   ) => {
-    if (currentUser.role === 'Viewer') return;
+    if (currentUser.role !== 'Admin') return;
     const now = new Date().toISOString();
     const actor = getActorForRole(state.activeRole, state.teamMembers);
     const initialHistory: AssetHistoryEntry = {
@@ -1871,7 +2027,7 @@ export default function App() {
       notes?: string;
     },
   ) => {
-    if (currentUser.role === 'Viewer') return;
+    if (currentUser.role !== 'Admin') return;
     const target = state.assets.find((a) => a.id === assetId);
     if (!target) return;
     const now = new Date().toISOString();
@@ -1929,7 +2085,7 @@ export default function App() {
       notes: string;
     },
   ) => {
-    if (currentUser.role === 'Viewer') return;
+    if (currentUser.role !== 'Admin') return;
     const target = state.assets.find((a) => a.id === assetId);
     if (!target) return;
     const now = new Date().toISOString();
@@ -1980,7 +2136,7 @@ export default function App() {
   const handlePublishSop = (
     sopInput: Omit<SopDocument, 'id' | 'acknowledgments' | 'updatedAt'>,
   ) => {
-    if (currentUser.role === 'Viewer') return;
+    if (currentUser.role !== 'Admin') return;
     const now = new Date().toISOString();
     const newSop: SopDocument = {
       ...sopInput,
@@ -2013,7 +2169,7 @@ export default function App() {
   };
 
   const handleToggleSopMandatory = (sopId: string) => {
-    if (currentUser.role === 'Viewer') return;
+    if (currentUser.role !== 'Admin') return;
     const target = state.sops.find((s) => s.id === sopId);
     if (!target) return;
     const now = new Date().toISOString();
@@ -2051,7 +2207,7 @@ export default function App() {
   };
 
   const handleAcknowledgeSop = (sopId: string) => {
-    if (currentUser.role === 'Viewer') return;
+    if (currentUser.role !== 'Admin') return;
     const target = state.sops.find((s) => s.id === sopId);
     if (!target) return;
 
@@ -2104,9 +2260,108 @@ export default function App() {
     );
   };
 
-  // Leave & Time-Off Approvals Handlers (`nexops_leaves`)
+  // Staff Attendance (Clock-In / Clock-Out) & Leave Management Handlers
+  const handleClockIn = () => {
+    if (currentUser.role !== 'Admin') return;
+    const today = getTodayDateString();
+    const existing = state.attendanceLogs.find(
+      (log) =>
+        log.attendanceDate === today &&
+        (log.userEmail.toLowerCase() === currentUser.email.toLowerCase() ||
+          log.userId === currentUser.id),
+    );
+    if (existing) {
+      pushToast('Already Clocked In', 'Attendance log already started for today.', 'info');
+      return;
+    }
+
+    const nowDate = new Date();
+    const nowIso = nowDate.toISOString();
+    const hour = nowDate.getHours();
+    const minute = nowDate.getMinutes();
+    const isLate = hour > 9 || (hour === 9 && minute > 30);
+    const status = isLate ? 'Late' : 'Present';
+
+    const newLog: AttendanceLog = {
+      id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      userId: currentUser.id,
+      employeeId: currentUser.employeeId,
+      userName: currentUser.name,
+      userEmail: currentUser.email,
+      department: currentUser.department,
+      attendanceDate: today,
+      checkInTime: nowIso,
+      status,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    };
+
+    const auditEntry = createAuditEvent(
+      `ATT-${today}`,
+      'Attendance Logged',
+      `${currentUser.name} (${currentUser.email}) clocked in at ${nowDate.toLocaleTimeString()} — Status: ${status}.`,
+    );
+
+    setState((prev) => ({
+      ...prev,
+      attendanceLogs: [newLog, ...prev.attendanceLogs],
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+    }));
+
+    void dataService.attendance
+      .upsert(newLog, auditEntry)
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      })
+      .catch(handleCloudWriteError);
+
+    pushToast(`Clocked In · ${status}`, `Recorded check-in for ${today}.`, isLate ? 'warning' : 'success');
+  };
+
+  const handleClockOut = (attendanceId: string) => {
+    if (currentUser.role !== 'Admin') return;
+    const target = state.attendanceLogs.find((a) => a.id === attendanceId);
+    if (!target || target.checkOutTime) return;
+
+    const nowDate = new Date();
+    const nowIso = nowDate.toISOString();
+    const inMs = new Date(target.checkInTime).getTime();
+    const outMs = nowDate.getTime();
+    const totalHours = Number(Math.max(0, (outMs - inMs) / 3600000).toFixed(2));
+
+    const updatedLog: AttendanceLog = {
+      ...target,
+      checkOutTime: nowIso,
+      totalHours,
+      status: 'Completed',
+      updatedAt: nowIso,
+    };
+
+    const auditEntry = createAuditEvent(
+      `ATT-${target.attendanceDate}`,
+      'Attendance Logged',
+      `${target.userName} (${target.userEmail}) clocked out at ${nowDate.toLocaleTimeString()} — Total Worked: ${totalHours.toFixed(2)}h.`,
+    );
+
+    setState((prev) => ({
+      ...prev,
+      attendanceLogs: prev.attendanceLogs.map((a) => (a.id === attendanceId ? updatedLog : a)),
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+    }));
+
+    void dataService.attendance
+      .upsert(updatedLog, auditEntry)
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      })
+      .catch(handleCloudWriteError);
+
+    pushToast('Clocked Out', `Completed shift (${totalHours.toFixed(2)} hrs logged).`, 'success');
+  };
+
+  // Leave & Time-Off Approvals Handlers (`leave_requests` + `nexops_leaves`)
   const handleCreateLeave = (payload: CreateLeavePayload) => {
-    if (currentUser.role === 'Viewer') return;
+    if (currentUser.role !== 'Admin') return;
     const now = new Date().toISOString();
     const maxNum = state.leaves.reduce((max, l) => {
       const match = l.code.match(/^LVE-\d{4}-(\d+)$/);
@@ -2117,6 +2372,7 @@ export default function App() {
       id: `lve-${Date.now()}`,
       code,
       employeeId: currentUser.employeeId,
+      employeeEmail: currentUser.email,
       employeeName: currentUser.name,
       department: currentUser.department,
       leaveType: payload.leaveType,
@@ -2132,16 +2388,20 @@ export default function App() {
 
     const auditEntry = createAuditEvent(
       code,
-      'Created',
-      `${currentUser.name} submitted ${payload.leaveType} request ${code} (${payload.startDate} to ${payload.endDate}, ${payload.totalDays}d)${payload.backupDelegateName ? ` · Backup: ${payload.backupDelegateName}` : ''}.`,
+      'Leave Submitted',
+      `${currentUser.name} (${currentUser.email}) submitted ${payload.leaveType} leave ${code} (${payload.startDate} to ${payload.endDate}, ${payload.totalDays}d)${payload.backupDelegateName ? ` · Backup: ${payload.backupDelegateName}` : ''}.`,
     );
 
     const notification: AppNotification = {
       id: `notif-lve-${Date.now()}`,
-      title: `Leave Request: ${code}`,
-      message: `${currentUser.name} applied for ${payload.totalDays}d ${payload.leaveType} (${payload.startDate}).`,
+      title: `Leave Request Submitted: ${code}`,
+      message: `${currentUser.name} applied for ${payload.totalDays}d ${payload.leaveType} (${payload.startDate}–${payload.endDate}).`,
       timestamp: now,
       read: false,
+      targetSection: 'leaves',
+      recipientRole: 'Admin',
+      actorEmail: currentUser.email,
+      category: 'leave',
       severity: 'info',
     };
 
@@ -2152,14 +2412,16 @@ export default function App() {
       notifications: [notification, ...prev.notifications],
     }));
 
-    void dataService.leaves
-      .upsert(newLeave, auditEntry)
+    void Promise.all([
+      dataService.leaves.upsert(newLeave, auditEntry),
+      dataService.notifications.create(notification),
+    ])
       .then(() => {
         if (dataService.isSupabaseConfigured()) setDbConnected(true);
       })
       .catch(handleCloudWriteError);
 
-    pushToast(`Submitted ${code}`, `${payload.leaveType} (${payload.totalDays} days) awaiting approval.`, 'success');
+    pushToast(`Submitted ${code}`, `${payload.leaveType} (${payload.totalDays} days) awaiting Admin approval.`, 'success');
   };
 
   const handleDecisionLeave = (
@@ -2167,7 +2429,10 @@ export default function App() {
     decision: 'Approved' | 'Rejected',
     reviewerNotes?: string,
   ) => {
-    if (currentUser.role === 'Viewer') return;
+    if (currentUser.role !== 'Admin') {
+      pushToast('Admin Access Required', 'Only Admins can approve or reject leave requests.', 'error');
+      return;
+    }
     const target = state.leaves.find((l) => l.id === leaveId);
     if (!target) return;
     const now = new Date().toISOString();
@@ -2181,16 +2446,27 @@ export default function App() {
 
     const auditEntry = createAuditEvent(
       target.code,
-      'Status Changed',
+      decision === 'Approved' ? 'Leave Approved' : 'Leave Rejected',
       `${currentUser.name} marked leave request ${target.code} (${target.employeeName}, ${target.totalDays}d ${target.leaveType}) as ${decision}.${reviewerNotes ? ` Remarks: ${reviewerNotes}` : ''}`,
+    );
+
+    const employeeMember = state.teamMembers.find(
+      (m) =>
+        (target.employeeEmail && m.email.toLowerCase() === target.employeeEmail.toLowerCase()) ||
+        m.employeeId === target.employeeId ||
+        m.name.trim().toLowerCase() === target.employeeName.trim().toLowerCase(),
     );
 
     const notification: AppNotification = {
       id: `notif-lve-dec-${Date.now()}`,
-      title: `${target.code} ${decision}`,
-      message: `${currentUser.name} ${decision.toLowerCase()} leave for ${target.employeeName} (${target.startDate}–${target.endDate}).`,
+      title: `Leave ${decision}: ${target.code}`,
+      message: `${currentUser.name} ${decision.toLowerCase()} your ${target.leaveType} leave (${target.startDate}–${target.endDate}).`,
       timestamp: now,
       read: false,
+      targetSection: 'leaves',
+      recipientEmail: target.employeeEmail || employeeMember?.email,
+      actorEmail: currentUser.email,
+      category: 'leave',
       severity: decision === 'Approved' ? 'success' : 'warning',
     };
 
@@ -2201,8 +2477,10 @@ export default function App() {
       notifications: [notification, ...prev.notifications],
     }));
 
-    void dataService.leaves
-      .upsert(updatedLeave, auditEntry)
+    void Promise.all([
+      dataService.leaves.upsert(updatedLeave, auditEntry),
+      dataService.notifications.create(notification),
+    ])
       .then(() => {
         if (dataService.isSupabaseConfigured()) setDbConnected(true);
       })
@@ -2229,8 +2507,8 @@ export default function App() {
     }
     const auditEntry = createAuditEvent(
       'TEAM-RBAC',
-      'Team Updated',
-      `Updated ${target.name}'s role from ${target.role} to ${role}.`,
+      'Role Changed',
+      `Updated ${target.name} (${target.email}) role from ${target.role} to ${role}.`,
       state.activeRole,
     );
     const nextMembers = state.teamMembers.map((m) =>
@@ -2322,7 +2600,7 @@ export default function App() {
 
     const auditEntry = createAuditEvent(
       'TEAM-APPROVAL',
-      'Team Updated',
+      'Role Changed',
       `Admin ${currentUser.name} approved ${target.name} (${target.email}) with role ${effectiveRole}.`,
       currentUser.role,
     );
@@ -2382,7 +2660,7 @@ export default function App() {
 
     const auditEntry = createAuditEvent(
       'TEAM-APPROVAL',
-      'Team Updated',
+      'Role Changed',
       `Admin ${currentUser.name} rejected access request for ${target.name} (${target.email}).`,
       currentUser.role,
     );
@@ -2420,74 +2698,6 @@ export default function App() {
       `Access denied for ${target.email}.`,
       'warning',
     );
-  };
-
-  const handleGenerateMasterKey = async (requireForSensitiveActions: boolean): Promise<string> => {
-    if (currentUser.role !== 'Admin') {
-      throw new Error('Only verified Admins can generate or rotate the Master Key.');
-    }
-    const { plainKey, config } = await dataService.masterKey.generateNewKey(
-      currentUser.name,
-      requireForSensitiveActions,
-    );
-    setMasterKeyConfig(config);
-    const auditEntry = createAuditEvent(
-      'SYS-MASTER-KEY',
-      'Team Updated',
-      `Admin ${currentUser.name} generated/rotated corporate Master Key (${config.keyHint}).`,
-      currentUser.role,
-    );
-    setState((prev) => ({
-      ...prev,
-      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
-    }));
-    void dataService.auditLogs.append(auditEntry).catch(handleCloudWriteError);
-    pushToast(
-      'Master Key Generated',
-      `Copy and store your Master Key (${config.keyHint}) securely.`,
-      'success',
-    );
-    return plainKey;
-  };
-
-  const handleToggleMasterKeyRequirement = async (required: boolean): Promise<void> => {
-    if (currentUser.role !== 'Admin') {
-      throw new Error('Only verified Admins can modify Master Key security policy.');
-    }
-    if (!masterKeyConfig) {
-      throw new Error('Generate a Master Key first before enabling enforcement.');
-    }
-    const updated: MasterKeyConfig = {
-      ...masterKeyConfig,
-      requireForSensitiveActions: required,
-      updatedAt: new Date().toISOString(),
-      updatedBy: currentUser.name,
-    };
-    await dataService.masterKey.saveConfig(updated, currentUser.name);
-    setMasterKeyConfig(updated);
-    const auditEntry = createAuditEvent(
-      'SYS-MASTER-KEY',
-      'Team Updated',
-      `Admin ${currentUser.name} ${required ? 'enabled' : 'disabled'} Master Key enforcement for sensitive system actions.`,
-      currentUser.role,
-    );
-    setState((prev) => ({
-      ...prev,
-      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
-    }));
-    void dataService.auditLogs.append(auditEntry).catch(handleCloudWriteError);
-    pushToast(
-      required ? 'Master Key Protection Enabled' : 'Master Key Protection Disabled',
-      required
-        ? 'Sensitive Admin operations now require Master Key verification.'
-        : 'Master Key prompt turned off for backup restore actions.',
-      'info',
-    );
-  };
-
-  const handleVerifyMasterKey = async (plainKey: string): Promise<boolean> => {
-    if (currentUser.role !== 'Admin') return false;
-    return dataService.masterKey.verifyKey(plainKey, masterKeyConfig);
   };
 
   const handleProvisionEmployee = async (payload: ProvisionEmployeePayload) => {
@@ -2676,11 +2886,13 @@ export default function App() {
     );
   };
 
-  // Executive Announcements & Circulars Handlers (Admin Only)
+  // Company Notice Board & Announcements Handlers (Admin Only)
   const handlePublishAnnouncement = (payload: {
     title: string;
     message: string;
     severity: AnnouncementSeverity;
+    priorityTag: AnnouncementPriorityTag;
+    pinned: boolean;
   }) => {
     if (currentUser.role !== 'Admin') return;
     const now = new Date().toISOString();
@@ -2689,15 +2901,19 @@ export default function App() {
       title: payload.title,
       message: payload.message,
       severity: payload.severity,
+      priorityTag: payload.priorityTag,
+      pinned: payload.pinned,
       publishedBy: currentUser.name,
+      publishedByEmail: currentUser.email,
       publishedByRole: currentUser.role,
       publishedAt: now,
+      updatedAt: now,
       archived: false,
     };
     const auditEntry = createAuditEvent(
       'EXEC-CIRCULAR',
-      'Team Updated',
-      `Published official company circular (${payload.severity.toUpperCase()}): "${payload.title}".`,
+      'Notice Posted',
+      `Posted company notice [${payload.priorityTag}${payload.pinned ? ' · Pinned' : ''}]: "${payload.title}".`,
     );
     const nextAnnouncements = [notice, ...state.announcements];
     setState((prev) => ({
@@ -2705,34 +2921,122 @@ export default function App() {
       announcements: nextAnnouncements,
       globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
     }));
-    void Promise.all([
-      dataService.auditLogs.append(auditEntry),
-      dataService.systemState.upsertKey(
-        SYSTEM_STATE_KEYS.ANNOUNCEMENTS,
-        nextAnnouncements,
-        currentUser.name,
-      ),
-    ])
+    void dataService.announcements
+      .upsert(notice, nextAnnouncements, auditEntry)
       .then(() => {
         if (dataService.isSupabaseConfigured()) setDbConnected(true);
       })
       .catch(handleCloudWriteError);
-    pushToast('Official Circular Published', payload.title, 'success');
+    pushToast('Company Notice Posted', payload.title, 'success');
+  };
+
+  const handleEditAnnouncement = (updatedNotice: CompanyAnnouncement) => {
+    if (currentUser.role !== 'Admin') return;
+    const now = new Date().toISOString();
+    const nextNotice: CompanyAnnouncement = {
+      ...updatedNotice,
+      updatedAt: now,
+    };
+    const auditEntry = createAuditEvent(
+      'EXEC-CIRCULAR',
+      'Notice Updated',
+      `Updated company notice "${nextNotice.title}" [${nextNotice.priorityTag}${nextNotice.pinned ? ' · Pinned' : ''}].`,
+    );
+    const nextAnnouncements = state.announcements.map((a) =>
+      a.id === nextNotice.id ? nextNotice : a,
+    );
+    setState((prev) => ({
+      ...prev,
+      announcements: nextAnnouncements,
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+    }));
+    void dataService.announcements
+      .upsert(nextNotice, nextAnnouncements, auditEntry)
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      })
+      .catch(handleCloudWriteError);
+    pushToast('Notice Updated', nextNotice.title, 'success');
+  };
+
+  const handleTogglePinAnnouncement = (announcementId: string) => {
+    if (currentUser.role !== 'Admin') return;
+    const target = state.announcements.find((a) => a.id === announcementId);
+    if (!target) return;
+    const nextPinned = !target.pinned;
+    const now = new Date().toISOString();
+    const nextNotice: CompanyAnnouncement = {
+      ...target,
+      pinned: nextPinned,
+      updatedAt: now,
+    };
+    const auditEntry = createAuditEvent(
+      'EXEC-CIRCULAR',
+      'Notice Updated',
+      `${nextPinned ? 'Pinned' : 'Unpinned'} company notice "${target.title}".`,
+    );
+    const nextAnnouncements = state.announcements.map((a) =>
+      a.id === announcementId ? nextNotice : a,
+    );
+    setState((prev) => ({
+      ...prev,
+      announcements: nextAnnouncements,
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+    }));
+    void dataService.announcements
+      .upsert(nextNotice, nextAnnouncements, auditEntry)
+      .catch(handleCloudWriteError);
+    pushToast(nextPinned ? 'Notice Pinned' : 'Notice Unpinned', target.title, 'info');
+  };
+
+  const handleDeleteAnnouncement = (announcementId: string) => {
+    if (currentUser.role !== 'Admin') return;
+    const target = state.announcements.find((a) => a.id === announcementId);
+    if (!target) return;
+    const auditEntry = createAuditEvent(
+      'EXEC-CIRCULAR',
+      'Notice Deleted',
+      `Deleted company notice "${target.title}".`,
+    );
+    const nextAnnouncements = state.announcements.filter((a) => a.id !== announcementId);
+    setState((prev) => ({
+      ...prev,
+      announcements: nextAnnouncements,
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+    }));
+    void dataService.announcements
+      .remove(announcementId, nextAnnouncements, currentUser.name, auditEntry)
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      })
+      .catch(handleCloudWriteError);
+    pushToast('Notice Deleted', target.title, 'info');
   };
 
   const handleArchiveAnnouncement = (announcementId: string) => {
     if (currentUser.role !== 'Admin') return;
     const target = state.announcements.find((a) => a.id === announcementId);
     if (!target) return;
+    const nextNotice: CompanyAnnouncement = {
+      ...target,
+      archived: true,
+      updatedAt: new Date().toISOString(),
+    };
+    const auditEntry = createAuditEvent(
+      'EXEC-CIRCULAR',
+      'Notice Updated',
+      `Archived company notice "${target.title}".`,
+    );
     const nextAnnouncements = state.announcements.map((a) =>
-      a.id === announcementId ? { ...a, archived: true } : a,
+      a.id === announcementId ? nextNotice : a,
     );
     setState((prev) => ({
       ...prev,
       announcements: nextAnnouncements,
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
     }));
-    void dataService.systemState
-      .upsertKey(SYSTEM_STATE_KEYS.ANNOUNCEMENTS, nextAnnouncements, currentUser.name)
+    void dataService.announcements
+      .upsert(nextNotice, nextAnnouncements, auditEntry)
       .catch(handleCloudWriteError);
     pushToast('Circular Archived', `"${target.title}" moved to archive.`, 'info');
   };
@@ -2741,22 +3045,33 @@ export default function App() {
     if (currentUser.role !== 'Admin') return;
     const target = state.announcements.find((a) => a.id === announcementId);
     if (!target) return;
+    const nextNotice: CompanyAnnouncement = {
+      ...target,
+      archived: false,
+      updatedAt: new Date().toISOString(),
+    };
+    const auditEntry = createAuditEvent(
+      'EXEC-CIRCULAR',
+      'Notice Updated',
+      `Restored company notice "${target.title}" to banner.`,
+    );
     const nextAnnouncements = state.announcements.map((a) =>
-      a.id === announcementId ? { ...a, archived: false } : a,
+      a.id === announcementId ? nextNotice : a,
     );
     setState((prev) => ({
       ...prev,
       announcements: nextAnnouncements,
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
     }));
-    void dataService.systemState
-      .upsertKey(SYSTEM_STATE_KEYS.ANNOUNCEMENTS, nextAnnouncements, currentUser.name)
+    void dataService.announcements
+      .upsert(nextNotice, nextAnnouncements, auditEntry)
       .catch(handleCloudWriteError);
     pushToast('Circular Republished', `"${target.title}" restored to top notice banner.`, 'success');
   };
 
   // Meetings & Action Items (MoM) Tracker Handlers
   const handleCreateMeeting = (payload: CreateMeetingPayload) => {
-    if (currentUser.role === 'Viewer') return;
+    if (currentUser.role !== 'Admin') return;
     const now = new Date().toISOString();
     const maxNum = state.meetings.reduce((max, m) => {
       const match = m.code.match(/^MOM-\d{4}-(\d+)$/);
@@ -2816,7 +3131,7 @@ export default function App() {
       dueDate: string;
     },
   ) => {
-    if (currentUser.role === 'Viewer') return;
+    if (currentUser.role !== 'Admin') return;
     const meeting = state.meetings.find((m) => m.id === meetingId);
     if (!meeting) return;
     const newAction: MeetingActionItem = {
@@ -2854,7 +3169,7 @@ export default function App() {
   };
 
   const handleConvertActionToRequest = (meetingId: string, actionItemId: string) => {
-    if (currentUser.role === 'Viewer') return;
+    if (currentUser.role !== 'Admin') return;
     const meeting = state.meetings.find((m) => m.id === meetingId);
     const actionItem = meeting?.actionItems.find((a) => a.id === actionItemId);
     if (!meeting || !actionItem || actionItem.linkedRequestId) return;
@@ -2951,7 +3266,7 @@ export default function App() {
   };
 
   const handleCompleteMeetingActionItem = (meetingId: string, actionItemId: string) => {
-    if (currentUser.role === 'Viewer') return;
+    if (currentUser.role !== 'Admin') return;
     const meeting = state.meetings.find((m) => m.id === meetingId);
     const actionItem = meeting?.actionItems.find((a) => a.id === actionItemId);
     if (!meeting || !actionItem) return;
@@ -3087,7 +3402,7 @@ export default function App() {
 
   // Workspace Tools Handlers (Gmail, Google Docs, Google Sheets, Google Forms)
   const handleSaveEmailLog = (emailLog: WorkspaceEmailLog) => {
-    if (currentUser.role === 'Viewer') return;
+    if (currentUser.role !== 'Admin') return;
     const auditEntry = createAuditEvent(
       'WORKSPACE-GMAIL',
       'Team Updated',
@@ -3115,7 +3430,7 @@ export default function App() {
   };
 
   const handleSaveWorkspaceLink = (link: WorkspaceSavedLink) => {
-    if (currentUser.role === 'Viewer') return;
+    if (currentUser.role !== 'Admin') return;
     const toolLabel =
       link.toolType === 'docs'
         ? 'Google Docs'
@@ -3148,7 +3463,7 @@ export default function App() {
   };
 
   const handleDeleteWorkspaceLink = (linkId: string) => {
-    if (currentUser.role === 'Viewer') return;
+    if (currentUser.role !== 'Admin') return;
     const target = state.workspaceLinks.find((l) => l.id === linkId);
     if (!target) return;
     const auditEntry = createAuditEvent(
@@ -3173,24 +3488,262 @@ export default function App() {
     pushToast('Workspace Link Removed', target.title, 'info');
   };
 
-  const handleMarkAllRead = () => {
-    void dataService.notifications.markAllRead();
+  // Task Sub-Tasks Checklist & Threaded Team Comments (@mentions)
+  const handleAddSubtask = (requestId: string, title: string) => {
+    if (currentUser.role !== 'Admin') return;
+    const now = new Date().toISOString();
+    const subtask: TaskSubtask = {
+      id: `sub-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      requestId,
+      title,
+      completed: false,
+      createdBy: currentUser.name,
+      createdAt: now,
+    };
+    const auditEntry = createAuditEvent(
+      requestId,
+      'Subtask Updated',
+      `Added sub-task "${title}" to ${requestId}.`,
+    );
     setState((prev) => ({
       ...prev,
-      notifications: prev.notifications.map((n) => ({ ...n, read: true })),
+      subtasks: [...prev.subtasks, subtask],
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
     }));
-    pushToast('Notifications Cleared', 'All operational alerts marked as read.', 'info');
+    void dataService.subtasks
+      .upsert(subtask, auditEntry)
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      })
+      .catch(handleCloudWriteError);
+    pushToast('Sub-Task Added', title, 'success');
   };
 
-  const handleSelectNotificationRequest = (requestId: string, notificationId: string) => {
-    void dataService.notifications.markRead(notificationId);
+  const handleToggleSubtask = (subtaskId: string) => {
+    if (currentUser.role !== 'Admin') return;
+    const target = state.subtasks.find((s) => s.id === subtaskId);
+    if (!target) return;
+    const now = new Date().toISOString();
+    const nextCompleted = !target.completed;
+    const updatedSubtask: TaskSubtask = {
+      ...target,
+      completed: nextCompleted,
+      completedBy: nextCompleted ? currentUser.name : undefined,
+      completedAt: nextCompleted ? now : undefined,
+    };
+    const auditEntry = createAuditEvent(
+      target.requestId,
+      'Subtask Updated',
+      `${nextCompleted ? 'Completed' : 'Reopened'} sub-task "${target.title}" on ${target.requestId}.`,
+    );
+    setState((prev) => ({
+      ...prev,
+      subtasks: prev.subtasks.map((s) => (s.id === subtaskId ? updatedSubtask : s)),
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+    }));
+    void dataService.subtasks
+      .upsert(updatedSubtask, auditEntry)
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      })
+      .catch(handleCloudWriteError);
+  };
+
+  const handleDeleteSubtask = (subtaskId: string) => {
+    if (currentUser.role !== 'Admin') return;
+    const target = state.subtasks.find((s) => s.id === subtaskId);
+    if (!target) return;
+    const auditEntry = createAuditEvent(
+      target.requestId,
+      'Subtask Updated',
+      `Removed sub-task "${target.title}" from ${target.requestId}.`,
+    );
+    setState((prev) => ({
+      ...prev,
+      subtasks: prev.subtasks.filter((s) => s.id !== subtaskId),
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+    }));
+    void dataService.subtasks
+      .remove(subtaskId, auditEntry)
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      })
+      .catch(handleCloudWriteError);
+  };
+
+  const handleAddTaskComment = (requestId: string, body: string, mentions: string[]) => {
+    if (currentUser.role !== 'Admin') return;
+    const now = new Date().toISOString();
+    const comment: TaskComment = {
+      id: `cmt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      requestId,
+      authorId: currentUser.id,
+      authorName: currentUser.name,
+      authorEmail: currentUser.email,
+      authorRole: currentUser.role,
+      body,
+      mentions,
+      createdAt: now,
+    };
+    const auditEntry = createAuditEvent(
+      requestId,
+      'Comment Added',
+      `${currentUser.name} posted team discussion comment on ${requestId}: "${body.slice(0, 120)}${body.length > 120 ? '...' : ''}"`,
+    );
+
+    const uniqueMentionEmails = Array.from(
+      new Set(
+        mentions
+          .map((m) => m.trim().toLowerCase())
+          .filter((email) => email && email !== currentUser.email.trim().toLowerCase()),
+      ),
+    );
+
+    const mentionNotifs: AppNotification[] = uniqueMentionEmails.map((recipientEmail, idx) => ({
+      id: `notif-mnt-${Date.now()}-${idx}`,
+      title: `Mentioned in ${requestId}`,
+      message: `${currentUser.name} mentioned you: "${body.slice(0, 100)}${body.length > 100 ? '...' : ''}"`,
+      timestamp: now,
+      read: false,
+      requestId,
+      targetSection: 'requests',
+      recipientEmail,
+      actorEmail: currentUser.email,
+      category: 'mention',
+      severity: 'info',
+    }));
+
+    setState((prev) => ({
+      ...prev,
+      taskComments: [...prev.taskComments, comment],
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+      notifications: [...mentionNotifs, ...prev.notifications],
+    }));
+
+    void Promise.all([
+      dataService.taskComments.create(comment, auditEntry),
+      mentionNotifs.length > 0
+        ? dataService.notifications.createMany(mentionNotifs)
+        : Promise.resolve(),
+    ])
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      })
+      .catch(handleCloudWriteError);
+
+    pushToast(
+      'Comment Posted',
+      mentionNotifs.length > 0
+        ? `Notified ${mentionNotifs.length} mentioned teammate${mentionNotifs.length === 1 ? '' : 's'}.`
+        : `Added discussion note to ${requestId}.`,
+      'success',
+    );
+  };
+
+  // Department Document Vault Handlers
+  const handleAddVaultDocument = (item: DocumentVaultItem) => {
+    if (currentUser.role !== 'Admin') return;
+    const auditEntry = createAuditEvent(
+      'DOC-VAULT',
+      'Vault Updated',
+      `Added "${item.title}" to ${item.folder} (${item.accessTag}, ${item.department}).`,
+    );
+    setState((prev) => ({
+      ...prev,
+      vaultDocuments: [item, ...prev.vaultDocuments],
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+    }));
+    void dataService.documentVault
+      .upsert(item, auditEntry)
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      })
+      .catch(handleCloudWriteError);
+    pushToast('Document Added to Vault', `${item.title} (${item.folder})`, 'success');
+  };
+
+  const handleDeleteVaultDocument = (itemId: string) => {
+    if (currentUser.role !== 'Admin') return;
+    const target = state.vaultDocuments.find((d) => d.id === itemId);
+    if (!target) return;
+    const auditEntry = createAuditEvent(
+      'DOC-VAULT',
+      'Vault Updated',
+      `Removed "${target.title}" from ${target.folder}.`,
+    );
+    setState((prev) => ({
+      ...prev,
+      vaultDocuments: prev.vaultDocuments.filter((d) => d.id !== itemId),
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+    }));
+    void dataService.documentVault
+      .remove(itemId, auditEntry)
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      })
+      .catch(handleCloudWriteError);
+    pushToast('Document Removed', target.title, 'info');
+  };
+
+  const getScopedNotificationIds = () => {
+    const userEmail = currentUser.email.trim().toLowerCase();
+    return state.notifications
+      .filter((n) => {
+        if (n.recipientEmail) {
+          return n.recipientEmail.trim().toLowerCase() === userEmail;
+        }
+        if (n.recipientRole && n.recipientRole !== 'all') {
+          return n.recipientRole === currentUser.role;
+        }
+        return true;
+      })
+      .map((n) => n.id);
+  };
+
+  const handleMarkAllRead = () => {
+    const visibleIds = getScopedNotificationIds();
+    if (visibleIds.length === 0) return;
+    void dataService.notifications.markAllRead(visibleIds);
     setState((prev) => ({
       ...prev,
       notifications: prev.notifications.map((n) =>
-        n.id === notificationId ? { ...n, read: true } : n,
+        visibleIds.includes(n.id) ? { ...n, read: true } : n,
       ),
     }));
-    setSelectedRequestId(requestId);
+    pushToast('Notifications Read', 'All notifications marked as read.', 'info');
+  };
+
+  const handleClearNotifications = () => {
+    const visibleIds = getScopedNotificationIds();
+    if (visibleIds.length === 0) return;
+    void dataService.notifications.clearAll(visibleIds);
+    setState((prev) => ({
+      ...prev,
+      notifications: prev.notifications.filter((n) => !visibleIds.includes(n.id)),
+    }));
+    pushToast('Notifications Cleared', 'Cleared your notification feed.', 'info');
+  };
+
+  const handleSelectNotification = (notification: AppNotification) => {
+    void dataService.notifications.markRead(notification.id);
+    setState((prev) => ({
+      ...prev,
+      notifications: prev.notifications.map((n) =>
+        n.id === notification.id ? { ...n, read: true } : n,
+      ),
+    }));
+    if (notification.requestId) {
+      setActiveSection('requests');
+      setSelectedRequestId(notification.requestId);
+    } else if (notification.targetSection) {
+      if (
+        (notification.targetSection === 'settings' || notification.targetSection === 'audit') &&
+        currentUser.role !== 'Admin'
+      ) {
+        return;
+      }
+      setActiveSection(notification.targetSection);
+    }
   };
 
   const handleInspectRequestById = (requestId: string) => {
@@ -3204,7 +3757,7 @@ export default function App() {
 
   // Bulk Priority Update
   const handleBulkUpdatePriority = (requestIds: string[], nextPriority: Priority) => {
-    if (currentUser.role === 'Viewer') return;
+    if (currentUser.role !== 'Admin') return;
     if (requestIds.length === 0) return;
     const now = new Date().toISOString();
     const auditEntries: AuditEvent[] = [];
@@ -3258,7 +3811,7 @@ export default function App() {
 
   // Bulk CSV Import
   const handleImportRequests = (rows: ImportedRequestRow[]) => {
-    if (currentUser.role === 'Viewer') return;
+    if (currentUser.role !== 'Admin') return;
     if (rows.length === 0) return;
     const now = new Date().toISOString();
     const baseId = generateNextRequestId(state.requests);
@@ -3353,7 +3906,7 @@ export default function App() {
     const matchedRequest = state.requests.find((r) => r.id === audit.requestId);
     if (matchedRequest) {
       setSelectedRequestId(matchedRequest.id);
-    } else {
+    } else if (currentUser.role === 'Admin') {
       setActiveSection('audit');
       pushToast('Opened Audit Ledger', `${audit.actionType} · ${audit.actorName}`, 'info');
     }
@@ -3539,6 +4092,7 @@ export default function App() {
           activeProjectsCount={activeProjectsCount}
           assetAlertsCount={assetAlertsCount}
           pendingSopsCount={pendingSopsCount}
+          vaultCount={state.vaultDocuments.length}
           pendingLeavesCount={pendingLeavesCount}
           openActionItemsCount={openActionItemsCount}
           workspaceLinksCount={state.workspaceLinks.length}
@@ -3572,11 +4126,17 @@ export default function App() {
             onSelectAuditMatch={handleSelectAuditFromSearch}
             notifications={state.notifications}
             onMarkAllRead={handleMarkAllRead}
-            onSelectNotificationRequest={handleSelectNotificationRequest}
+            onClearNotifications={handleClearNotifications}
+            onSelectNotification={handleSelectNotification}
             onOpenMobileMenu={() => setMobileMenuOpen(true)}
             onOpenCreateModal={handleOpenBlankCreateModal}
             onOpenProfile={() => setProfileModalOpen(true)}
             onSignOut={handleSignOut}
+            activeWorkspaceTool={activeWorkspaceTool}
+            onSelectWorkspaceTool={(tool) => {
+              setActiveWorkspaceTool(tool);
+              setActiveSection('workspace');
+            }}
           />
 
           <AnnouncementBanner
@@ -3594,8 +4154,12 @@ export default function App() {
               <>
                 {activeSection === 'dashboard' && (
                   <DashboardView
+                    companyName={branding.companyName}
                     requests={state.requests}
                     projects={state.projects}
+                    attendanceLogs={state.attendanceLogs}
+                    announcements={state.announcements}
+                    activeRole={currentUser.role}
                     departments={branding.departments}
                     onOpenRequest={(req) => setSelectedRequestId(req.id)}
                     onNavigateToQueue={handleNavigateToQueue}
@@ -3610,6 +4174,10 @@ export default function App() {
                         'success',
                       )
                     }
+                    onPublishAnnouncement={handlePublishAnnouncement}
+                    onEditAnnouncement={handleEditAnnouncement}
+                    onDeleteAnnouncement={handleDeleteAnnouncement}
+                    onTogglePinAnnouncement={handleTogglePinAnnouncement}
                   />
                 )}
 
@@ -3698,14 +4266,28 @@ export default function App() {
                   />
                 )}
 
+                {activeSection === 'vault' && (
+                  <DocumentVaultView
+                    documents={state.vaultDocuments}
+                    departments={branding.departments}
+                    activeRole={currentUser.role}
+                    currentUser={currentUser}
+                    onAddDocument={handleAddVaultDocument}
+                    onDeleteDocument={handleDeleteVaultDocument}
+                  />
+                )}
+
                 {activeSection === 'leaves' && (
                   <LeavesView
                     leaves={state.leaves}
+                    attendanceLogs={state.attendanceLogs}
                     activeRole={currentUser.role}
                     currentUser={currentUser}
                     departments={branding.departments}
                     teamMembers={state.teamMembers}
                     permissionMatrix={state.permissionMatrix}
+                    onClockIn={handleClockIn}
+                    onClockOut={handleClockOut}
                     onCreateLeave={handleCreateLeave}
                     onDecisionLeave={handleDecisionLeave}
                   />
@@ -3726,7 +4308,7 @@ export default function App() {
                   />
                 )}
 
-                {activeSection === 'audit' && (
+                {activeSection === 'audit' && currentUser.role === 'Admin' && (
                   <AuditLogsView
                     logs={state.globalAuditLogs}
                     onInspectRequest={handleInspectRequestById}
@@ -3769,7 +4351,6 @@ export default function App() {
                     activeRole={currentUser.role}
                     branding={branding}
                     permissionMatrix={state.permissionMatrix}
-                    masterKeyConfig={masterKeyConfig}
                     tableDiagnostics={tableDiagnostics}
                     isCheckingHealth={isCheckingHealth}
                     teamMembers={state.teamMembers}
@@ -3786,9 +4367,6 @@ export default function App() {
                     onToggleMemberActive={handleToggleMemberActive}
                     onApproveUser={handleApproveUser}
                     onRejectUser={handleRejectUser}
-                    onGenerateMasterKey={handleGenerateMasterKey}
-                    onToggleMasterKeyRequirement={handleToggleMasterKeyRequirement}
-                    onVerifyMasterKey={handleVerifyMasterKey}
                     onProvisionEmployee={handleProvisionEmployee}
                     onDownloadBackup={handleDownloadBackup}
                     onRestoreBackup={handleRestoreBackup}
@@ -3801,7 +4379,7 @@ export default function App() {
         </div>
 
         {/* Create Request Modal */}
-        {createModalOpen && currentUser.role !== 'Viewer' && (
+        {createModalOpen && currentUser.role === 'Admin' && (
           <CreateRequestModal
             nextRequestId={nextRequestId}
             departments={branding.departments}
@@ -3819,7 +4397,7 @@ export default function App() {
         )}
 
         {/* CSV Bulk Import Modal */}
-        {importModalOpen && currentUser.role !== 'Viewer' && (
+        {importModalOpen && currentUser.role === 'Admin' && (
           <ImportRequestsModal
             nextRequestId={nextRequestId}
             departments={branding.departments}
@@ -3849,12 +4427,20 @@ export default function App() {
             request={selectedRequest}
             activeRole={currentUser.role}
             approvalBudgetThresholdUsd={branding.approvalBudgetThresholdUsd ?? 5000}
+            subtasks={state.subtasks}
+            taskComments={state.taskComments}
+            teamMembers={state.teamMembers}
             onClose={() => setSelectedRequestId(null)}
             onToggleChecklistItem={handleToggleChecklistItem}
             onTransitionStatus={handleTransitionStatus}
             onStage1Approve={handleStage1SignOff}
             onUpdateRequestFinancials={handleUpdateRequestFinancials}
             onAddComment={handleAddComment}
+            onDeleteRequest={handleDeleteRequest}
+            onAddSubtask={handleAddSubtask}
+            onToggleSubtask={handleToggleSubtask}
+            onDeleteSubtask={handleDeleteSubtask}
+            onAddTaskComment={handleAddTaskComment}
             onExportReport={(requestId) =>
               setReportModalState({ open: true, requestId })
             }
@@ -3872,6 +4458,7 @@ export default function App() {
         <OfficialReportModal
           branding={branding}
           requests={state.requests}
+          attendanceLogs={state.attendanceLogs}
           initialRequestId={reportModalState.requestId}
           currentUser={currentUser}
           onClose={() => setReportModalState({ open: false, requestId: null })}

@@ -118,8 +118,8 @@ export function SopVaultView({
   onToggleMandatory,
   onAcknowledgeSop,
 }: SopVaultViewProps) {
-  const isViewer = activeRole === 'Viewer';
-  const canManageSops = activeRole === 'Admin' || activeRole === 'Editor';
+  const isViewer = activeRole !== 'Admin';
+  const canManageSops = activeRole === 'Admin';
 
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<SopCategory | 'All'>('All');

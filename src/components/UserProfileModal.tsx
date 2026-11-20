@@ -53,8 +53,7 @@ export function UserProfileModal({
   const [signOffTitle, setSignOffTitle] = useState(user.signOffTitle || user.title);
   const [signOffError, setSignOffError] = useState<string | null>(null);
 
-  const canDelegateApprovals =
-    user.role === 'Editor' || user.role === 'Admin';
+  const canDelegateApprovals = user.role === 'Admin';
   const eligibleDelegates = useMemo(
     () =>
       teamMembers.filter(
@@ -62,7 +61,7 @@ export function UserProfileModal({
           m.active &&
           ((m.approvalStatus ?? 'approved') === 'approved' || isSuperAdminEmail(m.email)) &&
           m.id !== user.id &&
-          (m.role === 'Editor' || m.role === 'Admin'),
+          m.role === 'Admin',
       ),
     [teamMembers, user.id],
   );

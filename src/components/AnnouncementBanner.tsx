@@ -12,7 +12,12 @@ import {
   X,
 } from 'lucide-react';
 import { FormEvent, useState } from 'react';
-import { AnnouncementSeverity, CompanyAnnouncement, Role } from '../types/nexops';
+import {
+  AnnouncementPriorityTag,
+  AnnouncementSeverity,
+  CompanyAnnouncement,
+  Role,
+} from '../types/nexops';
 import { formatDateTime } from '../utils/storage';
 
 interface AnnouncementBannerProps {
@@ -22,6 +27,8 @@ interface AnnouncementBannerProps {
     title: string;
     message: string;
     severity: AnnouncementSeverity;
+    priorityTag: AnnouncementPriorityTag;
+    pinned: boolean;
   }) => void;
   onArchiveAnnouncement: (announcementId: string) => void;
   onRestoreAnnouncement: (announcementId: string) => void;
@@ -35,7 +42,9 @@ export function AnnouncementBanner({
   onRestoreAnnouncement,
 }: AnnouncementBannerProps) {
   const isAdmin = activeRole === 'Admin';
-  const activeNotices = announcements.filter((a) => !a.archived);
+  const activeNotices = announcements
+    .filter((a) => !a.archived)
+    .sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)));
   const archivedNotices = announcements.filter((a) => a.archived);
 
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -45,7 +54,9 @@ export function AnnouncementBanner({
   // Publish modal state
   const [title, setTitle] = useState('');
   const [message, setMessage] = useState('');
-  const [severity, setSeverity] = useState<AnnouncementSeverity>('warning');
+  const [severity, setSeverity] = useState<AnnouncementSeverity>('info');
+  const [priorityTag, setPriorityTag] = useState<AnnouncementPriorityTag>('General');
+  const [pinned, setPinned] = useState(true);
   const [formError, setFormError] = useState<string | null>(null);
 
   const safeIndex = activeNotices.length > 0 ? currentIndex % activeNotices.length : 0;
@@ -66,10 +77,14 @@ export function AnnouncementBanner({
       title: title.trim(),
       message: message.trim(),
       severity,
+      priorityTag,
+      pinned,
     });
     setTitle('');
     setMessage('');
-    setSeverity('warning');
+    setSeverity('info');
+    setPriorityTag('General');
+    setPinned(true);
     setCurrentIndex(0);
     setPublishOpen(false);
   };
@@ -299,23 +314,47 @@ export function AnnouncementBanner({
                 />
               </div>
 
-              <div>
-                <label
-                  htmlFor="notice-severity"
-                  className="block text-xs font-semibold text-slate-700"
-                >
-                  Priority / Severity Level
-                </label>
-                <select
-                  id="notice-severity"
-                  value={severity}
-                  onChange={(e) => setSeverity(e.target.value as AnnouncementSeverity)}
-                  className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
-                >
-                  <option value="info">Company Circular (Informational)</option>
-                  <option value="warning">Executive Notice (Policy / Compliance)</option>
-                  <option value="urgent">Urgent Alert (Immediate Action Required)</option>
-                </select>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <label
+                    htmlFor="notice-tag"
+                    className="block text-xs font-semibold text-slate-700"
+                  >
+                    Notice Category Tag
+                  </label>
+                  <select
+                    id="notice-tag"
+                    value={priorityTag}
+                    onChange={(e) => {
+                      const nextTag = e.target.value as AnnouncementPriorityTag;
+                      setPriorityTag(nextTag);
+                      setSeverity(
+                        nextTag === 'Urgent'
+                          ? 'urgent'
+                          : nextTag === 'HR'
+                            ? 'warning'
+                            : 'info',
+                      );
+                    }}
+                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                  >
+                    <option value="General">General</option>
+                    <option value="HR">HR</option>
+                    <option value="Urgent">Urgent</option>
+                  </select>
+                </div>
+
+                <div className="flex items-end pb-2">
+                  <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={pinned}
+                      onChange={(e) => setPinned(e.target.checked)}
+                      className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    Pin to top of Notice Board
+                  </label>
+                </div>
               </div>
 
               <div>
