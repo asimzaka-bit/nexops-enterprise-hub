@@ -81,7 +81,7 @@ export function ProjectsDirectoryView({
   onDeleteProject,
   onFilterQueueByProject,
 }: ProjectsDirectoryViewProps) {
-  const canManage = activeRole === 'Admin' || activeRole === 'Manager / QA Reviewer';
+  const canManage = activeRole === 'Admin' || activeRole === 'Editor';
 
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
   const [searchQuery, setSearchQuery] = useState('');
@@ -104,13 +104,12 @@ export function ProjectsDirectoryView({
   const [formError, setFormError] = useState<string | null>(null);
 
   const availableManagers = useMemo(() => {
-    const names = Array.from(
+    return Array.from(
       new Set([
         ...teamMembers.filter((m) => m.active).map((m) => m.name),
         ...projects.map((p) => p.leadManager),
       ]),
-    );
-    return names.length > 0 ? names : ['Marcus Vance', 'Elena Rostova'];
+    ).filter(Boolean);
   }, [teamMembers, projects]);
 
   const availableDepartments = useMemo(
@@ -164,7 +163,7 @@ export function ProjectsDirectoryView({
     setCode(generateNextProjectCode(projects));
     setName('');
     setType('Internal Project');
-    setLeadManager(availableManagers[0] ?? 'Marcus Vance');
+    setLeadManager(availableManagers[0] ?? '');
     setDepartment(availableDepartments[0] ?? 'Engineering');
     setStatus('Active');
     setBudgetHours('400');
@@ -358,9 +357,9 @@ export function ProjectsDirectoryView({
         <div className="flex items-center gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">
           <ShieldAlert className="h-4 w-4 shrink-0 text-amber-600" />
           <span>
-            Viewing directory in read-only mode as <strong>{activeRole}</strong>. Switch to{' '}
-            <strong>Admin</strong> or <strong>Manager / QA Reviewer</strong> to add, edit, or
-            update project statuses.
+            Viewing directory in read-only mode as <strong>{activeRole}</strong>.{' '}
+            <strong>Admin</strong> or <strong>Editor</strong> permissions are required to add,
+            edit, or update project statuses.
           </span>
         </div>
       )}
@@ -908,7 +907,7 @@ export function ProjectsDirectoryView({
                       setLeadManager(e.target.value);
                       setFormError(null);
                     }}
-                    placeholder="Marcus Vance"
+                    placeholder="Select or enter lead manager name"
                     className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
                   />
                   <datalist id="nexops-lead-managers">

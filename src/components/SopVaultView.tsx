@@ -118,7 +118,8 @@ export function SopVaultView({
   onToggleMandatory,
   onAcknowledgeSop,
 }: SopVaultViewProps) {
-  const canManageSops = activeRole === 'Admin' || activeRole === 'Manager / QA Reviewer';
+  const isViewer = activeRole === 'Viewer';
+  const canManageSops = activeRole === 'Admin' || activeRole === 'Editor';
 
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<SopCategory | 'All'>('All');
@@ -511,7 +512,7 @@ export function SopVaultView({
             ) : (
               <span className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs font-medium text-slate-500 whitespace-nowrap">
                 <Lock className="h-3.5 w-3.5 text-slate-400" />
-                <span>Read &amp; Sign-Off Access</span>
+                <span>Read-Only Access (Viewer)</span>
               </span>
             )}
           </div>
@@ -1058,6 +1059,11 @@ export function SopVaultView({
                           Acknowledged · {formatDateTime(myAck.acknowledgedAt)}
                         </span>
                       </div>
+                    ) : isViewer ? (
+                      <div className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-500">
+                        <Lock className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                        <span>Read-Only Access (Viewer)</span>
+                      </div>
                     ) : (
                       <button
                         type="button"
@@ -1288,7 +1294,7 @@ export function SopVaultView({
                     setPubError(null);
                   }}
                   placeholder={
-                    'Verify staging validation logs before submitting request.\nAttach asset tag or project code when applicable.\nObtain Manager / QA Reviewer sign-off prior to deployment.'
+                    'Verify staging validation logs before submitting request.\nAttach asset tag or project code when applicable.\nObtain Editor / QA Reviewer sign-off prior to deployment.'
                   }
                   className="mt-1.5 w-full rounded-lg border border-slate-200 p-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
                 />

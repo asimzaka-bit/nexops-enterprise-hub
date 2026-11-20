@@ -298,7 +298,7 @@ export function TopBar({
 
   const getRoleIcon = (role: Role) => {
     if (role === 'Admin') return <Shield className="h-3.5 w-3.5 text-indigo-600 shrink-0" />;
-    if (role === 'Manager / QA Reviewer')
+    if (role === 'Editor')
       return <ShieldCheck className="h-3.5 w-3.5 text-emerald-600 shrink-0" />;
     return <User className="h-3.5 w-3.5 text-slate-600 shrink-0" />;
   };
@@ -568,16 +568,18 @@ export function TopBar({
             </span>
           </div>
 
-          {/* Primary Create Action */}
-          <button
-            type="button"
-            onClick={onOpenCreateModal}
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-indigo-600 px-3 text-xs font-semibold text-white transition-colors hover:bg-indigo-700 focus-visible:outline-2 focus-visible:outline-indigo-600 whitespace-nowrap shrink-0 sm:px-3.5"
-          >
-            <Plus className="h-3.5 w-3.5 shrink-0" />
-            <span className="hidden sm:inline">New Request</span>
-            <span className="sm:hidden">New</span>
-          </button>
+          {/* Primary Create Action (hidden for read-only Viewer role) */}
+          {activeRole !== 'Viewer' && (
+            <button
+              type="button"
+              onClick={onOpenCreateModal}
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-indigo-600 px-3 text-xs font-semibold text-white transition-colors hover:bg-indigo-700 focus-visible:outline-2 focus-visible:outline-indigo-600 whitespace-nowrap shrink-0 sm:px-3.5"
+            >
+              <Plus className="h-3.5 w-3.5 shrink-0" />
+              <span className="hidden sm:inline">New Request</span>
+              <span className="sm:hidden">New</span>
+            </button>
+          )}
 
           {/* Notification Bell */}
           <div className="relative" ref={notifRef}>

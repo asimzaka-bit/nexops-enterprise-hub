@@ -6,9 +6,10 @@ import { CreateRequestModal, CreateRequestPayload } from './components/CreateReq
 import { DashboardView } from './components/DashboardView';
 import { ImportedRequestRow, ImportRequestsModal } from './components/ImportRequestsModal';
 import { CreateLeavePayload, LeavesView } from './components/LeavesView';
-import { InitialAdminPayload, LoginScreen, SignUpOutcome } from './components/LoginScreen';
+import { InitialAdminPayload, LoginScreen, RegisterUserPayload, SignUpOutcome } from './components/LoginScreen';
 import { CreateMeetingPayload, MeetingsMomView } from './components/MeetingsMomView';
 import { OfficialReportModal } from './components/OfficialReportModal';
+import { PendingApprovalScreen } from './components/PendingApprovalScreen';
 import { ProjectsDirectoryView } from './components/ProjectsDirectoryView';
 import { RequestDetailDrawer } from './components/RequestDetailDrawer';
 import { RequestsQueueView } from './components/RequestsQueueView';
@@ -36,6 +37,7 @@ import {
   CompanyProject,
   Department,
   LeaveRequest,
+  MasterKeyConfig,
   MeetingActionItem,
   MeetingMinute,
   NavSection,
@@ -73,6 +75,7 @@ import {
   formatCurrency,
   generateNextRequestId,
   isAssetAlert,
+  isSuperAdminEmail,
   normalizePermissionMatrix,
   requiresTwoTierApproval,
   resolveEffectiveReviewer,
@@ -125,6 +128,9 @@ export default function App() {
   const [isCheckingHealth, setIsCheckingHealth] = useState(false);
   const [tableDiagnostics, setTableDiagnostics] = useState<TableSyncStatus[]>(() =>
     dataService.getOfflineDiagnostics(),
+  );
+  const [masterKeyConfig, setMasterKeyConfig] = useState<MasterKeyConfig | null>(() =>
+    dataService.masterKey.loadSync(),
   );
   const [isAdminInitialized, setIsAdminInitialized] = useState(() =>
     dataService.auth.hasLocalAdminSync(dataService.loadStateSync().teamMembers),
@@ -245,6 +251,8 @@ export default function App() {
         userName: member.name,
         userEmail: member.email,
         userRole: member.role,
+        approvalStatus: member.approvalStatus,
+        isSuperAdmin: member.isSuperAdmin,
         userDepartment: member.department,
         userTitle: member.title,
         avatarUrl: member.avatarUrl,
@@ -316,6 +324,7 @@ export default function App() {
         const remote = await dataService.fetchFullWorkspaceState();
         setState(remote.state);
         setBranding(remote.branding);
+        setMasterKeyConfig(remote.masterKeyConfig);
         setTableDiagnostics(remote.diagnostics);
         setDbConnected(remote.cloudHealthy);
         if (showFeedbackToast) {
@@ -370,14 +379,6 @@ export default function App() {
     }
   }, [pushToast, state]);
 
-  useEffect(() => {
-    if (authSession?.isAuthenticated) {
-      void syncFromSupabase(false, dataService.isSupabaseConfigured());
-    } else {
-      setIsHydrating(false);
-    }
-  }, [authSession?.isAuthenticated, syncFromSupabase]);
-
   const currentUser: TeamMember = useMemo(() => {
     if (authSession) {
       const bySessionId = state.teamMembers.find(
@@ -386,7 +387,19 @@ export default function App() {
           (authSession.userEmail &&
             m.email.toLowerCase() === authSession.userEmail.toLowerCase()),
       );
-      if (bySessionId) return bySessionId;
+      if (bySessionId) {
+        if (isSuperAdminEmail(bySessionId.email)) {
+          return {
+            ...bySessionId,
+            role: 'Admin',
+            approvalStatus: 'approved',
+            isSuperAdmin: true,
+            active: true,
+          };
+        }
+        return bySessionId;
+      }
+      const isSuper = isSuperAdminEmail(authSession.userEmail || '');
       return {
         id: authSession.userId,
         employeeId:
@@ -394,11 +407,15 @@ export default function App() {
           `EMP-${authSession.userId.slice(0, 4).toUpperCase()}`,
         name: authSession.userName || authSession.userEmail || 'Authenticated User',
         email: authSession.userEmail || '',
-        role: authSession.userRole || 'Staff / Contributor',
+        role: isSuper ? 'Admin' : authSession.userRole || 'Viewer',
+        approvalStatus: isSuper
+          ? 'approved'
+          : authSession.approvalStatus ?? 'pending',
+        isSuperAdmin: isSuper,
         department: authSession.userDepartment || branding.departments[0] || 'Operations',
-        title: authSession.userTitle || authSession.userRole || 'Staff / Contributor',
+        title: authSession.userTitle || authSession.userRole || 'Viewer',
         signOffTitle:
-          authSession.userTitle || authSession.userRole || 'Staff / Contributor',
+          authSession.userTitle || authSession.userRole || 'Viewer',
         avatarUrl: authSession.avatarUrl,
         active: true,
         lastActive: authSession.signedInAt,
@@ -410,14 +427,72 @@ export default function App() {
       employeeId: 'EMP-000',
       name: 'Unauthenticated',
       email: '',
-      role: 'Staff / Contributor',
+      role: 'Viewer',
+      approvalStatus: 'pending',
+      isSuperAdmin: false,
       department: branding.departments[0] || 'Operations',
-      title: 'Staff / Contributor',
-      signOffTitle: 'Staff / Contributor',
+      title: 'Viewer',
+      signOffTitle: 'Viewer',
       active: false,
       lastActive: new Date().toISOString(),
     };
   }, [authSession, state.teamMembers, branding.departments]);
+
+  const isApprovedUser = Boolean(
+    authSession?.isAuthenticated &&
+      (isSuperAdminEmail(currentUser.email) ||
+        ((currentUser.approvalStatus ?? 'pending') === 'approved' && currentUser.active)),
+  );
+
+  const pendingUsersCount = useMemo(
+    () =>
+      state.teamMembers.filter(
+        (m) =>
+          !isSuperAdminEmail(m.email) &&
+          (m.approvalStatus ?? (m.active ? 'approved' : 'pending')) === 'pending',
+      ).length,
+    [state.teamMembers],
+  );
+
+  useEffect(() => {
+    if (authSession?.isAuthenticated && isApprovedUser) {
+      void syncFromSupabase(false, dataService.isSupabaseConfigured());
+    } else if (authSession?.isAuthenticated && !isApprovedUser) {
+      setIsHydrating(false);
+      void dataService.auth
+        .refreshUserProfile(authSession.userId, authSession.userEmail, currentUser)
+        .then((refreshed) => {
+          if (!refreshed) return;
+          setState((prev) => ({
+            ...prev,
+            teamMembers: prev.teamMembers.some(
+              (m) =>
+                m.id === refreshed.id ||
+                m.email.toLowerCase() === refreshed.email.toLowerCase(),
+            )
+              ? prev.teamMembers.map((m) =>
+                  m.id === refreshed.id ||
+                  m.email.toLowerCase() === refreshed.email.toLowerCase()
+                    ? refreshed
+                    : m,
+                )
+              : [refreshed, ...prev.teamMembers],
+          }));
+          if (refreshed.approvalStatus !== authSession.approvalStatus || refreshed.role !== authSession.userRole) {
+            const nextSession: AuthSession = {
+              ...authSession,
+              userRole: refreshed.role,
+              approvalStatus: refreshed.approvalStatus,
+              isSuperAdmin: refreshed.isSuperAdmin,
+            };
+            dataService.auth.saveSessionSync(nextSession);
+            setAuthSession(nextSession);
+          }
+        });
+    } else {
+      setIsHydrating(false);
+    }
+  }, [authSession?.isAuthenticated, isApprovedUser, syncFromSupabase]);
 
   // Enforce strict role integrity from the authenticated user's profile
   useEffect(() => {
@@ -426,10 +501,61 @@ export default function App() {
     }
   }, [authSession?.isAuthenticated, currentUser.role, state.activeRole]);
 
+  // Non-Admins must NEVER remain on Admin Panel & Settings view
+  useEffect(() => {
+    if (activeSection === 'settings' && currentUser.role !== 'Admin') {
+      setActiveSection('dashboard');
+    }
+  }, [activeSection, currentUser.role]);
+
   useEffect(() => {
     if (!authSession?.isAuthenticated || !supabase) return;
 
     const client = supabase;
+
+    if (!isApprovedUser) {
+      const pendingChannel = client
+        .channel('nexops-pending-profile-watch')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'profiles' },
+          () => {
+            void dataService.auth
+              .refreshUserProfile(authSession.userId, authSession.userEmail, currentUser)
+              .then((refreshed) => {
+                if (!refreshed) return;
+                setState((prev) => ({
+                  ...prev,
+                  teamMembers: prev.teamMembers.some(
+                    (m) =>
+                      m.id === refreshed.id ||
+                      m.email.toLowerCase() === refreshed.email.toLowerCase(),
+                  )
+                    ? prev.teamMembers.map((m) =>
+                        m.id === refreshed.id ||
+                        m.email.toLowerCase() === refreshed.email.toLowerCase()
+                          ? refreshed
+                          : m,
+                      )
+                    : [refreshed, ...prev.teamMembers],
+                }));
+                const nextSession: AuthSession = {
+                  ...authSession,
+                  userRole: refreshed.role,
+                  approvalStatus: refreshed.approvalStatus,
+                  isSuperAdmin: refreshed.isSuperAdmin,
+                };
+                dataService.auth.saveSessionSync(nextSession);
+                setAuthSession(nextSession);
+              });
+          },
+        )
+        .subscribe();
+
+      return () => {
+        void client.removeChannel(pendingChannel);
+      };
+    }
     const scheduleRealtimeRefresh = () => {
       if (realtimeTimerRef.current !== null) {
         window.clearTimeout(realtimeTimerRef.current);
@@ -561,9 +687,19 @@ export default function App() {
       }
       void client.removeChannel(channel);
     };
-  }, [authSession?.isAuthenticated, currentUser.name, pushToast, syncFromSupabase]);
+  }, [authSession, isApprovedUser, currentUser, pushToast, syncFromSupabase]);
 
   const currentActor = currentUser;
+
+  const defaultReviewerName = useMemo(() => {
+    const reviewer = state.teamMembers.find(
+      (m) =>
+        m.active &&
+        (m.approvalStatus ?? 'approved') === 'approved' &&
+        (m.role === 'Editor' || m.role === 'Admin'),
+    );
+    return reviewer?.name || currentUser.name || '';
+  }, [state.teamMembers, currentUser.name]);
 
   const selectedRequest = useMemo(
     () => state.requests.find((r) => r.id === selectedRequestId) ?? null,
@@ -710,9 +846,119 @@ export default function App() {
     });
     pushToast(
       `Signed in as ${user.name}`,
-      `${user.email} · ${user.role}`,
-      'success',
+      user.approvalStatus === 'approved' || isSuperAdminEmail(user.email)
+        ? `${user.email} · ${user.role}`
+        : `${user.email} · Account Pending Admin Approval`,
+      user.approvalStatus === 'approved' || isSuperAdminEmail(user.email) ? 'success' : 'info',
     );
+  };
+
+  const handleRegisterUser = async (
+    payload: RegisterUserPayload,
+    rememberSession: boolean,
+  ): Promise<SignUpOutcome> => {
+    const result = await dataService.auth.registerUser(payload, rememberSession);
+    const registered = result.user;
+
+    setState((prev) => ({
+      ...prev,
+      teamMembers: [
+        registered,
+        ...prev.teamMembers.filter(
+          (m) =>
+            m.id !== registered.id &&
+            m.email.toLowerCase() !== registered.email.toLowerCase(),
+        ),
+      ],
+    }));
+
+    if (result.status === 'confirmation_required') {
+      pushToast(
+        'Account Registered (Pending Verification)',
+        `Verify ${result.email} and wait for Admin approval before accessing company data.`,
+        'info',
+      );
+      return { status: 'confirmation_required', email: result.email };
+    }
+
+    setAuthSession(result.session);
+    if (registered.role === 'Admin') {
+      setIsAdminInitialized(true);
+    }
+    pushToast(
+      isSuperAdminEmail(registered.email)
+        ? 'Super Admin Verified'
+        : 'Account Pending Admin Approval',
+      isSuperAdminEmail(registered.email)
+        ? `${registered.email} signed in with permanent Super Admin rights.`
+        : 'Please contact your administrator to approve your account and assign your role.',
+      isSuperAdminEmail(registered.email) ? 'success' : 'info',
+    );
+    return { status: 'signed_in' };
+  };
+
+  const handleRefreshApprovalStatus = async () => {
+    if (!authSession) return;
+    const refreshed = await dataService.auth.refreshUserProfile(
+      authSession.userId,
+      authSession.userEmail,
+      currentUser,
+    );
+    if (!refreshed) {
+      pushToast(
+        'Still Pending Admin Approval',
+        'No status change detected yet. Please check again shortly.',
+        'info',
+      );
+      return;
+    }
+
+    setState((prev) => ({
+      ...prev,
+      activeRole: refreshed.role,
+      teamMembers: prev.teamMembers.some(
+        (m) =>
+          m.id === refreshed.id ||
+          m.email.toLowerCase() === refreshed.email.toLowerCase(),
+      )
+        ? prev.teamMembers.map((m) =>
+            m.id === refreshed.id ||
+            m.email.toLowerCase() === refreshed.email.toLowerCase()
+              ? refreshed
+              : m,
+          )
+        : [refreshed, ...prev.teamMembers],
+    }));
+
+    const updatedSession: AuthSession = {
+      ...authSession,
+      userRole: refreshed.role,
+      approvalStatus: refreshed.approvalStatus,
+      isSuperAdmin: refreshed.isSuperAdmin,
+    };
+    dataService.auth.saveSessionSync(updatedSession);
+    setAuthSession(updatedSession);
+
+    if (refreshed.approvalStatus === 'approved' && refreshed.active) {
+      pushToast(
+        'Account Approved',
+        `Access granted as ${refreshed.role}. Loading NexOps workspace...`,
+        'success',
+      );
+      void syncFromSupabase(false, true);
+    } else if (refreshed.approvalStatus === 'rejected') {
+      pushToast(
+        'Access Request Declined',
+        'Please contact your System Administrator.',
+        'error',
+      );
+    } else {
+      pushToast(
+        'Still Pending Admin Approval',
+        'Your administrator has not approved this account yet.',
+        'info',
+      );
+    }
   };
 
   const handleResetPassword = async (email: string) => {
@@ -855,11 +1101,13 @@ export default function App() {
 
   // Open Create Modal fresh or from template
   const handleOpenBlankCreateModal = () => {
+    if (currentUser.role === 'Viewer') return;
     setTemplateSource(null);
     setCreateModalOpen(true);
   };
 
   const handleDuplicateRequest = (req: OperationalRequest) => {
+    if (currentUser.role === 'Viewer') return;
     setSelectedRequestId(null);
     setTemplateSource(req);
     setCreateModalOpen(true);
@@ -867,6 +1115,7 @@ export default function App() {
 
   // Create new request
   const handleCreateRequest = (payload: CreateRequestPayload) => {
+    if (currentUser.role === 'Viewer') return;
     const now = new Date().toISOString();
     const newId = generateNextRequestId(state.requests);
     const initialStatus: RequestStatus = payload.submitImmediately ? 'Submitted' : 'Draft';
@@ -881,7 +1130,7 @@ export default function App() {
         ? ` [Budget: ${payload.currency} ${payload.estimatedCost.toLocaleString()}]`
         : '';
 
-    const reviewerResolution = resolveEffectiveReviewer('Marcus Vance', state.teamMembers);
+    const reviewerResolution = resolveEffectiveReviewer(defaultReviewerName, state.teamMembers);
     const delegateNote = reviewerResolution.delegatedFromReviewer
       ? ` (Auto-delegated from ${reviewerResolution.delegatedFromReviewer} OOO to ${reviewerResolution.assignedReviewer})`
       : '';
@@ -998,6 +1247,7 @@ export default function App() {
 
   // Toggle QA checklist item
   const handleToggleChecklistItem = (requestId: string, itemId: string) => {
+    if (currentUser.role === 'Viewer') return;
     const target = state.requests.find((r) => r.id === requestId);
     if (!target) return;
     const item = target.checklist.find((c) => c.id === itemId);
@@ -1056,8 +1306,9 @@ export default function App() {
     );
   };
 
-  // Stage 1 Manager / QA Sign-Off for Two-Tier Escalated Approval Chain
+  // Stage 1 Editor / QA Sign-Off for Two-Tier Escalated Approval Chain
   const handleStage1SignOff = (requestId: string, comment?: string) => {
+    if (currentUser.role === 'Viewer') return;
     const target = state.requests.find((r) => r.id === requestId);
     if (!target) return;
     const actor = getActorForRole(state.activeRole, state.teamMembers);
@@ -1119,6 +1370,7 @@ export default function App() {
 
   // Update Cost-Center Actual Spend on an individual request
   const handleUpdateRequestFinancials = (requestId: string, actualSpend: number) => {
+    if (currentUser.role === 'Viewer') return;
     const target = state.requests.find((r) => r.id === requestId);
     if (!target) return;
     const now = new Date().toISOString();
@@ -1168,6 +1420,7 @@ export default function App() {
     nextStatus: RequestStatus,
     comment?: string,
   ) => {
+    if (currentUser.role === 'Viewer') return;
     const targetBefore = state.requests.find((r) => r.id === requestId);
     if (!targetBefore) return;
 
@@ -1377,6 +1630,7 @@ export default function App() {
 
   // Add comment to audit trail
   const handleAddComment = (requestId: string, comment: string) => {
+    if (currentUser.role === 'Viewer') return;
     const now = new Date().toISOString();
     setState((prev) => {
       const auditEntry = createAuditEvent(
@@ -1407,6 +1661,7 @@ export default function App() {
 
   // Escalate high-priority or overdue request to Admin
   const handleEscalateRequest = (requestId: string) => {
+    if (currentUser.role === 'Viewer') return;
     const target = state.requests.find((r) => r.id === requestId);
     if (!target) return;
 
@@ -1464,6 +1719,7 @@ export default function App() {
   const handleCreateProject = (
     projectInput: Omit<CompanyProject, 'id' | 'updatedAt'>,
   ) => {
+    if (currentUser.role === 'Viewer') return;
     const now = new Date().toISOString();
     const newProject: CompanyProject = {
       ...projectInput,
@@ -1497,6 +1753,7 @@ export default function App() {
     projectId: string,
     patch: Partial<Omit<CompanyProject, 'id' | 'updatedAt'>>,
   ) => {
+    if (currentUser.role === 'Viewer') return;
     const target = state.projects.find((p) => p.id === projectId);
     if (!target) return;
     const now = new Date().toISOString();
@@ -1538,6 +1795,7 @@ export default function App() {
   };
 
   const handleDeleteProject = (projectId: string) => {
+    if (currentUser.role === 'Viewer') return;
     const target = state.projects.find((p) => p.id === projectId);
     if (!target) return;
     const auditEntry = createAuditEvent(
@@ -1563,6 +1821,7 @@ export default function App() {
   const handleRegisterAsset = (
     assetInput: Omit<CompanyAsset, 'id' | 'updatedAt' | 'history'>,
   ) => {
+    if (currentUser.role === 'Viewer') return;
     const now = new Date().toISOString();
     const actor = getActorForRole(state.activeRole, state.teamMembers);
     const initialHistory: AssetHistoryEntry = {
@@ -1612,6 +1871,7 @@ export default function App() {
       notes?: string;
     },
   ) => {
+    if (currentUser.role === 'Viewer') return;
     const target = state.assets.find((a) => a.id === assetId);
     if (!target) return;
     const now = new Date().toISOString();
@@ -1669,6 +1929,7 @@ export default function App() {
       notes: string;
     },
   ) => {
+    if (currentUser.role === 'Viewer') return;
     const target = state.assets.find((a) => a.id === assetId);
     if (!target) return;
     const now = new Date().toISOString();
@@ -1719,6 +1980,7 @@ export default function App() {
   const handlePublishSop = (
     sopInput: Omit<SopDocument, 'id' | 'acknowledgments' | 'updatedAt'>,
   ) => {
+    if (currentUser.role === 'Viewer') return;
     const now = new Date().toISOString();
     const newSop: SopDocument = {
       ...sopInput,
@@ -1751,6 +2013,7 @@ export default function App() {
   };
 
   const handleToggleSopMandatory = (sopId: string) => {
+    if (currentUser.role === 'Viewer') return;
     const target = state.sops.find((s) => s.id === sopId);
     if (!target) return;
     const now = new Date().toISOString();
@@ -1788,6 +2051,7 @@ export default function App() {
   };
 
   const handleAcknowledgeSop = (sopId: string) => {
+    if (currentUser.role === 'Viewer') return;
     const target = state.sops.find((s) => s.id === sopId);
     if (!target) return;
 
@@ -1842,6 +2106,7 @@ export default function App() {
 
   // Leave & Time-Off Approvals Handlers (`nexops_leaves`)
   const handleCreateLeave = (payload: CreateLeavePayload) => {
+    if (currentUser.role === 'Viewer') return;
     const now = new Date().toISOString();
     const maxNum = state.leaves.reduce((max, l) => {
       const match = l.code.match(/^LVE-\d{4}-(\d+)$/);
@@ -1902,6 +2167,7 @@ export default function App() {
     decision: 'Approved' | 'Rejected',
     reviewerNotes?: string,
   ) => {
+    if (currentUser.role === 'Viewer') return;
     const target = state.leaves.find((l) => l.id === leaveId);
     if (!target) return;
     const now = new Date().toISOString();
@@ -1949,10 +2215,18 @@ export default function App() {
     );
   };
 
-  // Team management handlers
+  // Admin-Only Team, Approval & Master Key Management Handlers
   const handleUpdateMemberRole = (memberId: string, role: Role) => {
+    if (currentUser.role !== 'Admin') {
+      pushToast('Admin Access Required', 'Only verified Admins can modify user roles.', 'error');
+      return;
+    }
     const target = state.teamMembers.find((m) => m.id === memberId);
     if (!target) return;
+    if (isSuperAdminEmail(target.email)) {
+      pushToast('Permanent Super Admin', `${target.email} is permanently locked as Admin.`, 'warning');
+      return;
+    }
     const auditEntry = createAuditEvent(
       'TEAM-RBAC',
       'Team Updated',
@@ -1974,6 +2248,10 @@ export default function App() {
   };
 
   const handleUpdateMemberDepartment = (memberId: string, department: Department) => {
+    if (currentUser.role !== 'Admin') {
+      pushToast('Admin Access Required', 'Only verified Admins can reassign departments.', 'error');
+      return;
+    }
     const target = state.teamMembers.find((m) => m.id === memberId);
     if (!target) return;
     const auditEntry = createAuditEvent(
@@ -1997,8 +2275,16 @@ export default function App() {
   };
 
   const handleToggleMemberActive = (memberId: string) => {
+    if (currentUser.role !== 'Admin') {
+      pushToast('Admin Access Required', 'Only verified Admins can change account status.', 'error');
+      return;
+    }
     const target = state.teamMembers.find((m) => m.id === memberId);
     if (!target) return;
+    if (isSuperAdminEmail(target.email)) {
+      pushToast('Permanent Super Admin', `${target.email} cannot be deactivated.`, 'warning');
+      return;
+    }
     const nextActiveState = !target.active;
     const auditEntry = createAuditEvent(
       'TEAM-STATUS',
@@ -2022,6 +2308,186 @@ export default function App() {
       target.name,
       nextActiveState ? 'success' : 'warning',
     );
+  };
+
+  const handleApproveUser = async (memberId: string, assignedRole: Role) => {
+    if (currentUser.role !== 'Admin') {
+      pushToast('Admin Access Required', 'Only verified Admins can approve pending accounts.', 'error');
+      return;
+    }
+    const target = state.teamMembers.find((m) => m.id === memberId);
+    if (!target) return;
+    const effectiveRole: Role = isSuperAdminEmail(target.email) ? 'Admin' : assignedRole;
+    const now = new Date().toISOString();
+
+    const auditEntry = createAuditEvent(
+      'TEAM-APPROVAL',
+      'Team Updated',
+      `Admin ${currentUser.name} approved ${target.name} (${target.email}) with role ${effectiveRole}.`,
+      currentUser.role,
+    );
+
+    const nextMembers = state.teamMembers.map((m) =>
+      m.id === memberId
+        ? {
+            ...m,
+            role: effectiveRole,
+            approvalStatus: 'approved' as const,
+            active: true,
+            approvedBy: currentUser.name,
+            approvedAt: now,
+          }
+        : m,
+    );
+
+    setState((prev) => ({
+      ...prev,
+      teamMembers: nextMembers,
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+    }));
+
+    await dataService.team
+      .updateMember(
+        memberId,
+        {
+          role: effectiveRole,
+          approvalStatus: 'approved',
+          active: true,
+          approvedBy: currentUser.name,
+          approvedAt: now,
+        },
+        auditEntry,
+        nextMembers,
+      )
+      .catch(handleCloudWriteError);
+
+    pushToast(
+      `Approved ${target.name}`,
+      `Assigned ${effectiveRole} access (${target.email}).`,
+      'success',
+    );
+  };
+
+  const handleRejectUser = async (memberId: string) => {
+    if (currentUser.role !== 'Admin') {
+      pushToast('Admin Access Required', 'Only verified Admins can decline pending accounts.', 'error');
+      return;
+    }
+    const target = state.teamMembers.find((m) => m.id === memberId);
+    if (!target) return;
+    if (isSuperAdminEmail(target.email)) {
+      pushToast('Permanent Super Admin', `${target.email} cannot be rejected.`, 'warning');
+      return;
+    }
+
+    const auditEntry = createAuditEvent(
+      'TEAM-APPROVAL',
+      'Team Updated',
+      `Admin ${currentUser.name} rejected access request for ${target.name} (${target.email}).`,
+      currentUser.role,
+    );
+
+    const nextMembers = state.teamMembers.map((m) =>
+      m.id === memberId
+        ? {
+            ...m,
+            approvalStatus: 'rejected' as const,
+            active: false,
+          }
+        : m,
+    );
+
+    setState((prev) => ({
+      ...prev,
+      teamMembers: nextMembers,
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+    }));
+
+    await dataService.team
+      .updateMember(
+        memberId,
+        {
+          approvalStatus: 'rejected',
+          active: false,
+        },
+        auditEntry,
+        nextMembers,
+      )
+      .catch(handleCloudWriteError);
+
+    pushToast(
+      `Rejected ${target.name}`,
+      `Access denied for ${target.email}.`,
+      'warning',
+    );
+  };
+
+  const handleGenerateMasterKey = async (requireForSensitiveActions: boolean): Promise<string> => {
+    if (currentUser.role !== 'Admin') {
+      throw new Error('Only verified Admins can generate or rotate the Master Key.');
+    }
+    const { plainKey, config } = await dataService.masterKey.generateNewKey(
+      currentUser.name,
+      requireForSensitiveActions,
+    );
+    setMasterKeyConfig(config);
+    const auditEntry = createAuditEvent(
+      'SYS-MASTER-KEY',
+      'Team Updated',
+      `Admin ${currentUser.name} generated/rotated corporate Master Key (${config.keyHint}).`,
+      currentUser.role,
+    );
+    setState((prev) => ({
+      ...prev,
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+    }));
+    void dataService.auditLogs.append(auditEntry).catch(handleCloudWriteError);
+    pushToast(
+      'Master Key Generated',
+      `Copy and store your Master Key (${config.keyHint}) securely.`,
+      'success',
+    );
+    return plainKey;
+  };
+
+  const handleToggleMasterKeyRequirement = async (required: boolean): Promise<void> => {
+    if (currentUser.role !== 'Admin') {
+      throw new Error('Only verified Admins can modify Master Key security policy.');
+    }
+    if (!masterKeyConfig) {
+      throw new Error('Generate a Master Key first before enabling enforcement.');
+    }
+    const updated: MasterKeyConfig = {
+      ...masterKeyConfig,
+      requireForSensitiveActions: required,
+      updatedAt: new Date().toISOString(),
+      updatedBy: currentUser.name,
+    };
+    await dataService.masterKey.saveConfig(updated, currentUser.name);
+    setMasterKeyConfig(updated);
+    const auditEntry = createAuditEvent(
+      'SYS-MASTER-KEY',
+      'Team Updated',
+      `Admin ${currentUser.name} ${required ? 'enabled' : 'disabled'} Master Key enforcement for sensitive system actions.`,
+      currentUser.role,
+    );
+    setState((prev) => ({
+      ...prev,
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+    }));
+    void dataService.auditLogs.append(auditEntry).catch(handleCloudWriteError);
+    pushToast(
+      required ? 'Master Key Protection Enabled' : 'Master Key Protection Disabled',
+      required
+        ? 'Sensitive Admin operations now require Master Key verification.'
+        : 'Master Key prompt turned off for backup restore actions.',
+      'info',
+    );
+  };
+
+  const handleVerifyMasterKey = async (plainKey: string): Promise<boolean> => {
+    if (currentUser.role !== 'Admin') return false;
+    return dataService.masterKey.verifyKey(plainKey, masterKeyConfig);
   };
 
   const handleProvisionEmployee = async (payload: ProvisionEmployeePayload) => {
@@ -2210,12 +2676,13 @@ export default function App() {
     );
   };
 
-  // Executive Announcements & Circulars Handlers
+  // Executive Announcements & Circulars Handlers (Admin Only)
   const handlePublishAnnouncement = (payload: {
     title: string;
     message: string;
     severity: AnnouncementSeverity;
   }) => {
+    if (currentUser.role !== 'Admin') return;
     const now = new Date().toISOString();
     const notice: CompanyAnnouncement = {
       id: `ann-${Date.now()}`,
@@ -2254,6 +2721,7 @@ export default function App() {
   };
 
   const handleArchiveAnnouncement = (announcementId: string) => {
+    if (currentUser.role !== 'Admin') return;
     const target = state.announcements.find((a) => a.id === announcementId);
     if (!target) return;
     const nextAnnouncements = state.announcements.map((a) =>
@@ -2270,6 +2738,7 @@ export default function App() {
   };
 
   const handleRestoreAnnouncement = (announcementId: string) => {
+    if (currentUser.role !== 'Admin') return;
     const target = state.announcements.find((a) => a.id === announcementId);
     if (!target) return;
     const nextAnnouncements = state.announcements.map((a) =>
@@ -2287,6 +2756,7 @@ export default function App() {
 
   // Meetings & Action Items (MoM) Tracker Handlers
   const handleCreateMeeting = (payload: CreateMeetingPayload) => {
+    if (currentUser.role === 'Viewer') return;
     const now = new Date().toISOString();
     const maxNum = state.meetings.reduce((max, m) => {
       const match = m.code.match(/^MOM-\d{4}-(\d+)$/);
@@ -2346,6 +2816,7 @@ export default function App() {
       dueDate: string;
     },
   ) => {
+    if (currentUser.role === 'Viewer') return;
     const meeting = state.meetings.find((m) => m.id === meetingId);
     if (!meeting) return;
     const newAction: MeetingActionItem = {
@@ -2383,13 +2854,14 @@ export default function App() {
   };
 
   const handleConvertActionToRequest = (meetingId: string, actionItemId: string) => {
+    if (currentUser.role === 'Viewer') return;
     const meeting = state.meetings.find((m) => m.id === meetingId);
     const actionItem = meeting?.actionItems.find((a) => a.id === actionItemId);
     if (!meeting || !actionItem || actionItem.linkedRequestId) return;
 
     const now = new Date().toISOString();
     const newId = generateNextRequestId(state.requests);
-    const reviewerResolution = resolveEffectiveReviewer('Marcus Vance', state.teamMembers);
+    const reviewerResolution = resolveEffectiveReviewer(defaultReviewerName, state.teamMembers);
     const ownerMember = state.teamMembers.find(
       (m) => m.name.toLowerCase() === actionItem.ownerName.toLowerCase(),
     );
@@ -2479,6 +2951,7 @@ export default function App() {
   };
 
   const handleCompleteMeetingActionItem = (meetingId: string, actionItemId: string) => {
+    if (currentUser.role === 'Viewer') return;
     const meeting = state.meetings.find((m) => m.id === meetingId);
     const actionItem = meeting?.actionItems.find((a) => a.id === actionItemId);
     if (!meeting || !actionItem) return;
@@ -2614,6 +3087,7 @@ export default function App() {
 
   // Workspace Tools Handlers (Gmail, Google Docs, Google Sheets, Google Forms)
   const handleSaveEmailLog = (emailLog: WorkspaceEmailLog) => {
+    if (currentUser.role === 'Viewer') return;
     const auditEntry = createAuditEvent(
       'WORKSPACE-GMAIL',
       'Team Updated',
@@ -2641,6 +3115,7 @@ export default function App() {
   };
 
   const handleSaveWorkspaceLink = (link: WorkspaceSavedLink) => {
+    if (currentUser.role === 'Viewer') return;
     const toolLabel =
       link.toolType === 'docs'
         ? 'Google Docs'
@@ -2673,6 +3148,7 @@ export default function App() {
   };
 
   const handleDeleteWorkspaceLink = (linkId: string) => {
+    if (currentUser.role === 'Viewer') return;
     const target = state.workspaceLinks.find((l) => l.id === linkId);
     if (!target) return;
     const auditEntry = createAuditEvent(
@@ -2728,6 +3204,7 @@ export default function App() {
 
   // Bulk Priority Update
   const handleBulkUpdatePriority = (requestIds: string[], nextPriority: Priority) => {
+    if (currentUser.role === 'Viewer') return;
     if (requestIds.length === 0) return;
     const now = new Date().toISOString();
     const auditEntries: AuditEvent[] = [];
@@ -2781,6 +3258,7 @@ export default function App() {
 
   // Bulk CSV Import
   const handleImportRequests = (rows: ImportedRequestRow[]) => {
+    if (currentUser.role === 'Viewer') return;
     if (rows.length === 0) return;
     const now = new Date().toISOString();
     const baseId = generateNextRequestId(state.requests);
@@ -2794,7 +3272,7 @@ export default function App() {
     rows.forEach((row, idx) => {
       const newId = `${prefix}${String(startNumber + idx).padStart(3, '0')}`;
       const reviewerResolution = resolveEffectiveReviewer(
-        row.assignedReviewer || 'Marcus Vance',
+        row.assignedReviewer || defaultReviewerName,
         state.teamMembers,
       );
       const auditEntry = createAuditEvent(
@@ -2881,8 +3359,9 @@ export default function App() {
     }
   };
 
-  // System Backup Export / Restore
+  // System Backup Export / Restore (Admin Only)
   const handleDownloadBackup = () => {
+    if (currentUser.role !== 'Admin') return;
     downloadSystemBackupJson(state, `${currentUser.name} (${currentUser.employeeId})`);
     const auditEntry = createAuditEvent(
       'SYS-BACKUP',
@@ -2902,6 +3381,7 @@ export default function App() {
   };
 
   const handleRestoreBackup = async (restoredState: NexOpsState) => {
+    if (currentUser.role !== 'Admin') return;
     const restoreEvent = createAuditEvent(
       'SYS-RESTORE',
       'Team Updated',
@@ -2934,8 +3414,9 @@ export default function App() {
     );
   };
 
-  // White-Label Branding, Custom Lists & Permission Matrix Handlers
+  // White-Label Branding, Custom Lists & Permission Matrix Handlers (Admin Only)
   const handleUpdateBranding = (nextBranding: CompanyBrandingConfig) => {
+    if (currentUser.role !== 'Admin') return;
     const saved = dataService.branding.saveSync(nextBranding);
     setBranding(saved);
     const auditEntry = createAuditEvent(
@@ -2963,6 +3444,7 @@ export default function App() {
   };
 
   const handleResetBranding = () => {
+    if (currentUser.role !== 'Admin') return;
     const defaults = dataService.branding.resetSync();
     setBranding(defaults);
     void dataService.branding.saveCloud(defaults, currentUser.name).catch(handleCloudWriteError);
@@ -2974,6 +3456,7 @@ export default function App() {
   };
 
   const handleUpdatePermissionMatrix = (nextMatrix: PermissionMatrix) => {
+    if (currentUser.role !== 'Admin') return;
     const normalized = normalizePermissionMatrix(nextMatrix);
     const auditEntry = createAuditEvent(
       'SYS-RBAC-MATRIX',
@@ -3012,8 +3495,24 @@ export default function App() {
           branding={branding}
           allowInitialAdminSetup={!isAdminInitialized}
           onEmailSignIn={handleEmailSignIn}
+          onRegisterUser={handleRegisterUser}
           onResetPassword={handleResetPassword}
           onRegisterInitialAdmin={handleRegisterInitialAdmin}
+        />
+        <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+      </>
+    );
+  }
+
+  // Pending / Rejected Approval Gate: block company workspace & records until Admin approves
+  if (!isApprovedUser) {
+    return (
+      <>
+        <PendingApprovalScreen
+          branding={branding}
+          user={currentUser}
+          onRefreshStatus={handleRefreshApprovalStatus}
+          onSignOut={handleSignOut}
         />
         <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       </>
@@ -3043,6 +3542,7 @@ export default function App() {
           pendingLeavesCount={pendingLeavesCount}
           openActionItemsCount={openActionItemsCount}
           workspaceLinksCount={state.workspaceLinks.length}
+          pendingUsersCount={pendingUsersCount}
           collapsed={sidebarCollapsed}
           onToggleCollapse={() => setSidebarCollapsed((prev) => !prev)}
           mobileOpen={mobileMenuOpen}
@@ -3244,6 +3744,7 @@ export default function App() {
                   <WorkspaceToolsView
                     activeTool={activeWorkspaceTool}
                     onSelectTool={setActiveWorkspaceTool}
+                    activeRole={currentUser.role}
                     currentUser={currentUser}
                     teamMembers={state.teamMembers}
                     departments={branding.departments}
@@ -3263,11 +3764,12 @@ export default function App() {
                   />
                 )}
 
-                {activeSection === 'settings' && (
+                {activeSection === 'settings' && currentUser.role === 'Admin' && (
                   <TeamSettingsView
                     activeRole={currentUser.role}
                     branding={branding}
                     permissionMatrix={state.permissionMatrix}
+                    masterKeyConfig={masterKeyConfig}
                     tableDiagnostics={tableDiagnostics}
                     isCheckingHealth={isCheckingHealth}
                     teamMembers={state.teamMembers}
@@ -3282,6 +3784,11 @@ export default function App() {
                     onUpdateMemberRole={handleUpdateMemberRole}
                     onUpdateMemberDepartment={handleUpdateMemberDepartment}
                     onToggleMemberActive={handleToggleMemberActive}
+                    onApproveUser={handleApproveUser}
+                    onRejectUser={handleRejectUser}
+                    onGenerateMasterKey={handleGenerateMasterKey}
+                    onToggleMasterKeyRequirement={handleToggleMasterKeyRequirement}
+                    onVerifyMasterKey={handleVerifyMasterKey}
                     onProvisionEmployee={handleProvisionEmployee}
                     onDownloadBackup={handleDownloadBackup}
                     onRestoreBackup={handleRestoreBackup}
@@ -3294,7 +3801,7 @@ export default function App() {
         </div>
 
         {/* Create Request Modal */}
-        {createModalOpen && (
+        {createModalOpen && currentUser.role !== 'Viewer' && (
           <CreateRequestModal
             nextRequestId={nextRequestId}
             departments={branding.departments}
@@ -3312,7 +3819,7 @@ export default function App() {
         )}
 
         {/* CSV Bulk Import Modal */}
-        {importModalOpen && (
+        {importModalOpen && currentUser.role !== 'Viewer' && (
           <ImportRequestsModal
             nextRequestId={nextRequestId}
             departments={branding.departments}

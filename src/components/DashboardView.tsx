@@ -151,7 +151,10 @@ export function DashboardView({
     {
       label: 'Total Operational Requests',
       value: totalRequests,
-      trend: '+14% vs prior cycle',
+      trend:
+        totalRequests === 0
+          ? 'Clean workspace'
+          : `${requests.filter((r) => r.status === 'Submitted').length} awaiting review`,
       trendPositive: true,
       icon: FileText,
       accent: 'text-indigo-600',

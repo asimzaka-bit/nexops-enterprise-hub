@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { ChangeEvent, FormEvent, useMemo, useRef, useState } from 'react';
 import { TeamMember } from '../types/nexops';
+import { isSuperAdminEmail } from '../utils/storage';
 import { RoleBadge } from './StatusIndicator';
 import { UserAvatar } from './UserAvatar';
 
@@ -53,14 +54,15 @@ export function UserProfileModal({
   const [signOffError, setSignOffError] = useState<string | null>(null);
 
   const canDelegateApprovals =
-    user.role === 'Manager / QA Reviewer' || user.role === 'Admin';
+    user.role === 'Editor' || user.role === 'Admin';
   const eligibleDelegates = useMemo(
     () =>
       teamMembers.filter(
         (m) =>
           m.active &&
+          ((m.approvalStatus ?? 'approved') === 'approved' || isSuperAdminEmail(m.email)) &&
           m.id !== user.id &&
-          (m.role === 'Manager / QA Reviewer' || m.role === 'Admin'),
+          (m.role === 'Editor' || m.role === 'Admin'),
       ),
     [teamMembers, user.id],
   );
@@ -120,7 +122,7 @@ export function UserProfileModal({
   const handleSaveDelegation = (e: FormEvent) => {
     e.preventDefault();
     if (outOfOffice && !delegateId) {
-      setDelegationError('Select an active backup Manager or Admin before enabling Out-of-Office.');
+      setDelegationError('Select an active backup Editor or Admin before enabling Out-of-Office.');
       return;
     }
     setDelegationError(null);
@@ -416,7 +418,7 @@ export function UserProfileModal({
                   htmlFor="delegate-approver-select"
                   className="block text-xs font-semibold text-slate-700"
                 >
-                  Backup Manager / Delegate Approver
+                  Backup Editor / Delegate Approver
                 </label>
                 <select
                   id="delegate-approver-select"
@@ -429,7 +431,7 @@ export function UserProfileModal({
                   className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-900 focus:border-indigo-500 focus:outline-none disabled:bg-slate-50"
                 >
                   {eligibleDelegates.length === 0 ? (
-                    <option value="">No active backup Managers or Admins available</option>
+                    <option value="">No active backup Editors or Admins available</option>
                   ) : (
                     eligibleDelegates.map((m) => (
                       <option key={m.id} value={m.id}>

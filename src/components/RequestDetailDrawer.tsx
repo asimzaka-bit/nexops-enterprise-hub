@@ -137,14 +137,15 @@ export function RequestDetailDrawer({
   const stage1Done = Boolean(request.stage1Approval);
   const stage2Done = Boolean(request.stage2Approval) || request.status === 'Approved';
 
-  const canVerifyChecklist =
-    activeRole === 'Admin' || activeRole === 'Manager / QA Reviewer';
-  const isReviewer = activeRole === 'Admin' || activeRole === 'Manager / QA Reviewer';
   const isAdmin = activeRole === 'Admin';
-  const isStaff = activeRole === 'Staff / Contributor';
+  const isEditor = activeRole === 'Editor';
+  const isViewer = activeRole === 'Viewer';
+
+  const canVerifyChecklist = isAdmin || isEditor;
+  const isReviewer = isAdmin || isEditor;
 
   const canStaffSubmit =
-    (isStaff || activeRole === 'Admin') &&
+    (isEditor || isAdmin) &&
     (request.status === 'Draft' || request.status === 'Revision Required');
 
   const canReviewActions =
@@ -180,7 +181,7 @@ export function RequestDetailDrawer({
     }
     if (isTwoTier && !stage1Done) {
       setValidationError(
-        'Two-Tier Approval Enforced: Complete Stage 1 (Manager / QA Review) before Executive final approval.',
+        'Two-Tier Approval Enforced: Complete Stage 1 (Editor / QA Review) before Executive final approval.',
       );
       return;
     }
@@ -328,7 +329,7 @@ export function RequestDetailDrawer({
           </div>
 
           <div className="flex shrink-0 flex-wrap items-center gap-2">
-            {canEscalate && (
+            {canEscalate && !isViewer && (
               <button
                 type="button"
                 onClick={() => onEscalateRequest(request.id)}
@@ -338,15 +339,17 @@ export function RequestDetailDrawer({
                 <span>Escalate to Admin</span>
               </button>
             )}
-            <button
-              type="button"
-              onClick={() => onDuplicateRequest(request)}
-              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-800 transition-colors hover:border-slate-400 hover:bg-slate-50 whitespace-nowrap"
-            >
-              <Copy className="h-3.5 w-3.5" />
-              <span className="hidden md:inline">Duplicate as Template</span>
-              <span className="md:hidden">Clone</span>
-            </button>
+            {!isViewer && (
+              <button
+                type="button"
+                onClick={() => onDuplicateRequest(request)}
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-800 transition-colors hover:border-slate-400 hover:bg-slate-50 whitespace-nowrap"
+              >
+                <Copy className="h-3.5 w-3.5" />
+                <span className="hidden md:inline">Duplicate as Template</span>
+                <span className="md:hidden">Clone</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={() => onExportReport(request.id)}
@@ -573,7 +576,7 @@ export function RequestDetailDrawer({
 
               {!canVerifyChecklist && (
                 <p className="mt-2.5 text-[11px] text-slate-500">
-                  Read-only for Staff role. Switch to Manager / QA Reviewer or Admin to verify
+                  Read-only for Viewer role. Editor or Admin access is required to verify
                   checklist gates.
                 </p>
               )}
@@ -766,7 +769,7 @@ export function RequestDetailDrawer({
                           : 'border-amber-200 bg-white text-slate-800'
                       }`}
                     >
-                      <p className="font-bold">1. Manager / QA Review</p>
+                      <p className="font-bold">1. Editor / QA Review</p>
                       {request.stage1Approval ? (
                         <p className="mt-0.5 text-[10px] text-emerald-700">
                           Signed by {request.stage1Approval.actorName} ·{' '}
@@ -818,27 +821,37 @@ export function RequestDetailDrawer({
                 </div>
               )}
 
-              <div className="mt-3">
-                <label
-                  htmlFor="workflow-remark"
-                  className="block text-xs font-semibold text-slate-700"
-                >
-                  Review Remarks / Audit Note
-                </label>
-                <textarea
-                  id="workflow-remark"
-                  rows={3}
-                  value={remark}
-                  onChange={(e) => {
-                    setRemark(e.target.value);
-                    if (validationError) setValidationError(null);
-                  }}
-                  placeholder="Enter QA findings, mandatory revision instructions, or response notes..."
-                  className="mt-1.5 w-full rounded-lg border border-slate-200 p-2.5 text-xs text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none"
-                />
-              </div>
+              {isViewer ? (
+                <div className="mt-3 flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs font-medium text-slate-600">
+                  <Lock className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                  <span>
+                    Read-only access (Viewer). You can inspect records and export reports, while
+                    edits and approvals require Editor or Admin permissions.
+                  </span>
+                </div>
+              ) : (
+                <>
+                  <div className="mt-3">
+                    <label
+                      htmlFor="workflow-remark"
+                      className="block text-xs font-semibold text-slate-700"
+                    >
+                      Review Remarks / Audit Note
+                    </label>
+                    <textarea
+                      id="workflow-remark"
+                      rows={3}
+                      value={remark}
+                      onChange={(e) => {
+                        setRemark(e.target.value);
+                        if (validationError) setValidationError(null);
+                      }}
+                      placeholder="Enter QA findings, mandatory revision instructions, or response notes..."
+                      className="mt-1.5 w-full rounded-lg border border-slate-200 p-2.5 text-xs text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none"
+                    />
+                  </div>
 
-              <div className="mt-3 flex flex-wrap gap-2">
+                  <div className="mt-3 flex flex-wrap gap-2">
                 {/* Staff Submit / Resubmit */}
                 {canStaffSubmit && (
                   <button
@@ -883,7 +896,7 @@ export function RequestDetailDrawer({
                           className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-indigo-700 whitespace-nowrap"
                         >
                           <ShieldCheck className="h-3.5 w-3.5" />
-                          <span>Stage 1: Manager / QA Sign-Off</span>
+                          <span>Stage 1: Editor / QA Sign-Off</span>
                         </button>
                       ) : isAdmin ? (
                         <button
@@ -933,7 +946,7 @@ export function RequestDetailDrawer({
                   </>
                 )}
 
-                {/* Always allow posting an audit comment */}
+                {/* Allow Editor / Admin to post an audit comment */}
                 <button
                   type="button"
                   onClick={handlePostComment}
@@ -943,6 +956,8 @@ export function RequestDetailDrawer({
                   <span>Add Comment</span>
                 </button>
               </div>
+                </>
+              )}
 
               {request.status === 'Approved' && (
                 <div className="mt-3 flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800">

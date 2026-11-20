@@ -90,6 +90,7 @@ export function AssetsInventoryView({
   onExportSuccess,
   onInspectRequest,
 }: AssetsInventoryViewProps) {
+  const canManageAssets = activeRole === 'Admin' || activeRole === 'Editor';
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<AssetCategory | 'All'>('All');
   const [statusFilter, setStatusFilter] = useState<AssetStatus | 'All'>('All');
@@ -460,14 +461,16 @@ export function AssetsInventoryView({
             <span>Export Asset Ledger CSV</span>
           </button>
 
-          <button
-            type="button"
-            onClick={openRegisterModal}
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 text-xs font-semibold text-white transition-colors hover:bg-indigo-700 whitespace-nowrap"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            <span>Register New Asset</span>
-          </button>
+          {canManageAssets && (
+            <button
+              type="button"
+              onClick={openRegisterModal}
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 text-xs font-semibold text-white transition-colors hover:bg-indigo-700 whitespace-nowrap"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              <span>Register New Asset</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -479,16 +482,18 @@ export function AssetsInventoryView({
               No assets match your current filters
             </p>
             <p className="mt-1 text-xs text-slate-500">
-              Clear active filters or register a new hardware unit, license pool, or field kit.
+              Clear active filters{canManageAssets ? ' or register a new hardware unit, license pool, or field kit' : ''}.
             </p>
-            <button
-              type="button"
-              onClick={openRegisterModal}
-              className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-indigo-700"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              <span>Register New Asset</span>
-            </button>
+            {canManageAssets && (
+              <button
+                type="button"
+                onClick={openRegisterModal}
+                className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-indigo-700"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                <span>Register New Asset</span>
+              </button>
+            )}
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -553,22 +558,26 @@ export function AssetsInventoryView({
                       <td className="px-3 py-3.5">{renderStatusLabel(asset.status)}</td>
                       <td className="py-3.5 pr-5 pl-3 text-right whitespace-nowrap">
                         <div className="inline-flex items-center justify-end gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => openTransferModal(asset)}
-                            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700"
-                          >
-                            <ArrowLeftRight className="h-3.5 w-3.5" />
-                            <span>Assign/Transfer</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => openMaintenanceModal(asset)}
-                            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:border-amber-300 hover:bg-amber-50 hover:text-amber-800"
-                          >
-                            <Wrench className="h-3.5 w-3.5" />
-                            <span>Log Maintenance</span>
-                          </button>
+                          {canManageAssets && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => openTransferModal(asset)}
+                                className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700"
+                              >
+                                <ArrowLeftRight className="h-3.5 w-3.5" />
+                                <span>Assign/Transfer</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => openMaintenanceModal(asset)}
+                                className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:border-amber-300 hover:bg-amber-50 hover:text-amber-800"
+                              >
+                                <Wrench className="h-3.5 w-3.5" />
+                                <span>Log Maintenance</span>
+                              </button>
+                            </>
+                          )}
                           <button
                             type="button"
                             onClick={() => setHistoryTarget(asset)}

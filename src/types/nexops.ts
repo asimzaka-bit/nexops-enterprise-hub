@@ -264,6 +264,12 @@ export interface TableSyncStatus {
 export type WorkspaceToolType = 'gmail' | 'docs' | 'sheets' | 'forms';
 export type WorkspaceDocToolType = 'docs' | 'sheets' | 'forms';
 
+export interface WorkspaceEmailAttachmentMeta {
+  name: string;
+  size: number;
+  mimeType: string;
+}
+
 export interface WorkspaceEmailLog {
   id: string;
   senderEmail: string;
@@ -272,6 +278,7 @@ export interface WorkspaceEmailLog {
   ccRecipients: string;
   subject: string;
   body: string;
+  attachments?: WorkspaceEmailAttachmentMeta[];
   deliveryMethod: 'Gmail API' | 'Mail Client (mailto)';
   gmailMessageId?: string;
   status: 'Sent' | 'Dispatched via Mail Client';
@@ -289,6 +296,79 @@ export interface WorkspaceSavedLink {
   addedBy: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface DocStudioContent {
+  html: string;
+  defaultFont: string;
+  updatedAt: string;
+  updatedBy?: string;
+}
+
+export type SheetNumberFormat = 'auto' | 'number' | 'currency' | 'percent' | 'date';
+
+export interface SheetCellStyle {
+  bold?: boolean;
+  italic?: boolean;
+  align?: 'left' | 'center' | 'right';
+  bgColor?: string;
+  textColor?: string;
+  border?: boolean;
+  numberFormat?: SheetNumberFormat;
+}
+
+export interface SheetCellData {
+  raw: string;
+  style?: SheetCellStyle;
+}
+
+export interface SheetTabItem {
+  id: string;
+  name: string;
+  rows: number;
+  cols: number;
+  cells: Record<string, SheetCellData>;
+}
+
+export interface SheetStudioContent {
+  sheets: SheetTabItem[];
+  activeSheetId: string;
+  updatedAt: string;
+  updatedBy?: string;
+}
+
+export type FormQuestionType =
+  | 'short_answer'
+  | 'paragraph'
+  | 'multiple_choice'
+  | 'checkboxes'
+  | 'dropdown'
+  | 'file_upload'
+  | 'date_time';
+
+export interface FormQuestionItem {
+  id: string;
+  title: string;
+  type: FormQuestionType;
+  required: boolean;
+  options?: string[];
+  description?: string;
+}
+
+export interface FormSubmissionItem {
+  id: string;
+  submittedBy: string;
+  submittedAt: string;
+  answers: Record<string, string | string[]>;
+}
+
+export interface FormStudioContent {
+  title: string;
+  description: string;
+  questions: FormQuestionItem[];
+  responses: FormSubmissionItem[];
+  updatedAt: string;
+  updatedBy?: string;
 }
 
 export type NavSection =

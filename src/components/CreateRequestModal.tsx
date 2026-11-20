@@ -95,7 +95,7 @@ export function CreateRequestModal({
     templateSource ? templateSource.description : '',
   );
   const [deliverableUrl, setDeliverableUrl] = useState(
-    templateSource ? templateSource.deliverableUrl : 'https://internal.nexops-corp.example/specs/',
+    templateSource ? templateSource.deliverableUrl : '',
   );
   const [selectedProjectId, setSelectedProjectId] = useState<string>(
     templateSource?.projectId ?? '',
@@ -437,7 +437,7 @@ export function CreateRequestModal({
                   {priority === 'High' || priority === 'Urgent'
                     ? `${priority} priority`
                     : `above ${formatCurrency(approvalBudgetThresholdUsd, 'USD')} eq.`}
-                  , it requires <strong>Stage 1 (Manager / QA Review)</strong> followed by{' '}
+                  , it requires <strong>Stage 1 (Editor / QA Review)</strong> followed by{' '}
                   <strong>Stage 2 (Executive / Admin Final Sign-Off)</strong>.
                 </span>
               </div>
@@ -475,7 +475,7 @@ export function CreateRequestModal({
               type="url"
               value={deliverableUrl}
               onChange={(e) => setDeliverableUrl(e.target.value)}
-              placeholder="https://internal.nexops-corp.example/docs/..."
+              placeholder="https://docs.google.com/document/d/..."
               className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 font-mono text-xs text-slate-900 focus:border-indigo-500 focus:outline-none"
             />
           </div>

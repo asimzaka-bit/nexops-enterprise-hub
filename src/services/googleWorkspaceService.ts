@@ -8,7 +8,11 @@ import {
   User,
 } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { WorkspaceDocToolType } from '../types/nexops';
+import {
+  FormQuestionItem,
+  FormSubmissionItem,
+  WorkspaceDocToolType,
+} from '../types/nexops';
 
 export const WORKSPACE_SCOPES = [
   'https://www.googleapis.com/auth/gmail.send',
@@ -94,13 +98,71 @@ export async function disconnectGoogleWorkspace(): Promise<void> {
 // Gmail API Helpers
 // ---------------------------------------------------------------------------
 
+function bytesToBase64(bytes: Uint8Array): string {
+  const chunkSize = 0x8000;
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    let part = '';
+    for (let j = 0; j < chunk.length; j += 1) {
+      part += String.fromCharCode(chunk[j]);
+    }
+    binary += part;
+  }
+  return btoa(binary);
+}
+
+function wrapBase6476(b64: string): string {
+  return b64.replace(/.{1,76}/g, '$&\r\n').replace(/\r\n$/, '');
+}
+
 function encodeBase64Url(str: string): string {
   const bytes = new TextEncoder().encode(str);
-  let binary = '';
-  for (let i = 0; i < bytes.length; i += 1) {
-    binary += String.fromCharCode(bytes[i]);
+  return bytesToBase64(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function encodeUtf8HeaderWord(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  return `=?UTF-8?B?${bytesToBase64(bytes)}?=`;
+}
+
+function escapeHtmlText(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function formatBodyToSafeHtml(rawBody: string): string {
+  // Convert markdown links [label](https://...) and bare https?:// URLs into clickable <a> tags
+  const tokenRegex = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<>"']+)/g;
+  let result = '';
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = tokenRegex.exec(rawBody)) !== null) {
+    if (match.index > lastIndex) {
+      result += escapeHtmlText(rawBody.slice(lastIndex, match.index));
+    }
+    if (match[1] && match[2]) {
+      const safeLabel = escapeHtmlText(match[1]);
+      const safeHref = escapeHtmlText(match[2]);
+      result += `<a href="${safeHref}" target="_blank" rel="noopener noreferrer" style="color:#0B57D0;text-decoration:underline;">${safeLabel}</a>`;
+    } else if (match[3]) {
+      const safeHref = escapeHtmlText(match[3]);
+      result += `<a href="${safeHref}" target="_blank" rel="noopener noreferrer" style="color:#0B57D0;text-decoration:underline;">${safeHref}</a>`;
+    }
+    lastIndex = match.index + match[0].length;
   }
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+  if (lastIndex < rawBody.length) {
+    result += escapeHtmlText(rawBody.slice(lastIndex));
+  }
+
+  const withBreaks = result.replace(/\r?\n/g, '<br />');
+  return `<div style="font-family:Calibri,'Segoe UI',Arial,sans-serif;font-size:14px;line-height:1.55;color:#1F1F1F;">${withBreaks}</div>`;
 }
 
 export interface SendGmailPayload {
@@ -110,6 +172,14 @@ export interface SendGmailPayload {
   cc?: string;
   subject: string;
   body: string;
+  attachments?: File[];
+}
+
+export interface GmailAttachmentMeta {
+  filename: string;
+  mimeType: string;
+  size: number;
+  attachmentId?: string;
 }
 
 export interface GmailRecentMessage {
@@ -125,6 +195,7 @@ export interface GmailRecentMessage {
   isUnread: boolean;
   isStarred: boolean;
   bodyText?: string;
+  attachments?: GmailAttachmentMeta[];
 }
 
 export interface GmailLabelItem {
@@ -170,9 +241,29 @@ function stripHtmlTags(html: string): string {
 }
 
 interface GmailMimePart {
+  filename?: string;
   mimeType?: string;
-  body?: { data?: string };
+  body?: { data?: string; size?: number; attachmentId?: string };
   parts?: GmailMimePart[];
+}
+
+function extractGmailAttachments(payload?: GmailMimePart): GmailAttachmentMeta[] {
+  if (!payload) return [];
+  const list: GmailAttachmentMeta[] = [];
+  if (payload.filename && payload.filename.trim()) {
+    list.push({
+      filename: payload.filename.trim(),
+      mimeType: payload.mimeType || 'application/octet-stream',
+      size: payload.body?.size ?? 0,
+      attachmentId: payload.body?.attachmentId,
+    });
+  }
+  if (payload.parts) {
+    for (const part of payload.parts) {
+      list.push(...extractGmailAttachments(part));
+    }
+  }
+  return list;
 }
 
 function extractGmailBodyText(payload?: GmailMimePart): string {
@@ -193,7 +284,7 @@ function extractGmailBodyText(payload?: GmailMimePart): string {
   if (payload.mimeType === 'text/html' && payload.body?.data) {
     return stripHtmlTags(decodeBase64UrlUtf8(payload.body.data));
   }
-  if (payload.body?.data) {
+  if (payload.body?.data && !payload.filename) {
     return decodeBase64UrlUtf8(payload.body.data).trim();
   }
   return '';
@@ -207,19 +298,75 @@ export async function sendEmailViaGmailApi(
     throw new Error('Connect your Google account first to send emails via Gmail API.');
   }
 
-  const lines = [
+  const encoder = new TextEncoder();
+  const attachments = payload.attachments ?? [];
+  const altBoundary = `nexops_alt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const mixedBoundary = `nexops_mix_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+  const plainBase64 = wrapBase6476(bytesToBase64(encoder.encode(payload.body)));
+  const htmlBase64 = wrapBase6476(bytesToBase64(encoder.encode(formatBodyToSafeHtml(payload.body))));
+
+  const alternativeSection = [
+    `Content-Type: multipart/alternative; boundary="${altBoundary}"`,
+    '',
+    `--${altBoundary}`,
+    'Content-Type: text/plain; charset="UTF-8"',
+    'Content-Transfer-Encoding: base64',
+    '',
+    plainBase64,
+    '',
+    `--${altBoundary}`,
+    'Content-Type: text/html; charset="UTF-8"',
+    'Content-Transfer-Encoding: base64',
+    '',
+    htmlBase64,
+    '',
+    `--${altBoundary}--`,
+  ];
+
+  const baseHeaders = [
     `From: "${payload.fromName.replace(/"/g, '')}" <${payload.fromEmail}>`,
     `To: ${payload.to.trim()}`,
     ...(payload.cc && payload.cc.trim() ? [`Cc: ${payload.cc.trim()}`] : []),
-    `Subject: =?UTF-8?B?${btoa(unescape(encodeURIComponent(payload.subject.trim())))}?=`,
+    `Subject: ${encodeUtf8HeaderWord(payload.subject.trim())}`,
     'MIME-Version: 1.0',
-    'Content-Type: text/plain; charset="UTF-8"',
-    'Content-Transfer-Encoding: 8bit',
-    '',
-    payload.body,
   ];
 
-  const raw = encodeBase64Url(lines.join('\r\n'));
+  let mimeLines: string[];
+
+  if (attachments.length === 0) {
+    mimeLines = [...baseHeaders, ...alternativeSection];
+  } else {
+    const attachmentParts: string[] = [];
+    for (const file of attachments) {
+      const buffer = await file.arrayBuffer();
+      const b64 = wrapBase6476(bytesToBase64(new Uint8Array(buffer)));
+      const safeFileName = file.name.replace(/["\r\n]/g, '_');
+      const mimeType = file.type || 'application/octet-stream';
+      attachmentParts.push(
+        `--${mixedBoundary}`,
+        `Content-Type: ${mimeType}; name="${safeFileName}"`,
+        'Content-Transfer-Encoding: base64',
+        `Content-Disposition: attachment; filename="${safeFileName}"`,
+        '',
+        b64,
+        '',
+      );
+    }
+
+    mimeLines = [
+      ...baseHeaders,
+      `Content-Type: multipart/mixed; boundary="${mixedBoundary}"`,
+      '',
+      `--${mixedBoundary}`,
+      ...alternativeSection,
+      '',
+      ...attachmentParts,
+      `--${mixedBoundary}--`,
+    ];
+  }
+
+  const raw = encodeBase64Url(mimeLines.join('\r\n'));
 
   const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
     method: 'POST',
@@ -392,6 +539,7 @@ export async function fetchGmailMessageDetail(messageId: string): Promise<GmailR
     headers.find((h) => h.name.toLowerCase() === name.toLowerCase())?.value ?? '';
 
   const extractedBody = extractGmailBodyText(data.payload) || data.snippet || '';
+  const extractedAttachments = extractGmailAttachments(data.payload);
 
   return {
     id: data.id,
@@ -406,6 +554,7 @@ export async function fetchGmailMessageDetail(messageId: string): Promise<GmailR
     isUnread: labels.includes('UNREAD'),
     isStarred: labels.includes('STARRED'),
     bodyText: extractedBody,
+    attachments: extractedAttachments,
   };
 }
 
@@ -440,12 +589,12 @@ export function getGoogleEmbedUrl(
   if (toolType === 'docs' && fileId) {
     return mode === 'preview'
       ? `https://docs.google.com/document/d/${fileId}/preview`
-      : `https://docs.google.com/document/d/${fileId}/edit?rm=minimal`;
+      : `https://docs.google.com/document/d/${fileId}/edit?rm=full`;
   }
   if (toolType === 'sheets' && fileId) {
     return mode === 'preview'
       ? `https://docs.google.com/spreadsheets/d/${fileId}/preview`
-      : `https://docs.google.com/spreadsheets/d/${fileId}/edit?rm=minimal`;
+      : `https://docs.google.com/spreadsheets/d/${fileId}/edit?rm=full`;
   }
   if (toolType === 'forms') {
     if (url.includes('/forms/d/e/')) {
@@ -458,7 +607,7 @@ export function getGoogleEmbedUrl(
     if (fileId) {
       return mode === 'preview'
         ? `https://docs.google.com/forms/d/${fileId}/viewform?embedded=true`
-        : `https://docs.google.com/forms/d/${fileId}/edit?embedded=true`;
+        : `https://docs.google.com/forms/d/${fileId}/edit`;
     }
   }
   return url;
@@ -653,4 +802,395 @@ export async function fetchGoogleResourceMetadata(
       ...items.slice(0, 6).map((it, idx) => `${idx + 1}. ${it.title || 'Untitled item'}`),
     ],
   };
+}
+
+// ---------------------------------------------------------------------------
+// Interactive Docs / Sheets / Forms Live API Sync Helpers
+// ---------------------------------------------------------------------------
+
+export async function fetchGoogleDocPlainText(documentId: string): Promise<{
+  title: string;
+  text: string;
+}> {
+  const token = getGoogleWorkspaceAccessToken();
+  if (!token) {
+    throw new Error('Connect Google Workspace first to pull live Google Doc content.');
+  }
+  const safeId = encodeURIComponent(documentId.trim());
+  const res = await fetch(`https://docs.googleapis.com/v1/documents/${safeId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const data = (await res.json()) as {
+    title?: string;
+    body?: {
+      content?: {
+        paragraph?: {
+          elements?: { textRun?: { content?: string } }[];
+        };
+      }[];
+    };
+    error?: { message?: string };
+  };
+  if (!res.ok) {
+    throw new Error(data.error?.message || `Google Docs API error (${res.status}).`);
+  }
+  const lines: string[] = [];
+  for (const block of data.body?.content ?? []) {
+    if (block.paragraph?.elements) {
+      const line = block.paragraph.elements.map((el) => el.textRun?.content ?? '').join('');
+      if (line) lines.push(line);
+    }
+  }
+  return {
+    title: data.title || 'Untitled Document',
+    text: lines.join('').trim(),
+  };
+}
+
+export async function syncTextToGoogleDoc(documentId: string, plainText: string): Promise<void> {
+  const token = getGoogleWorkspaceAccessToken();
+  if (!token) {
+    throw new Error('Connect Google Workspace first to push changes to Google Docs.');
+  }
+  const safeId = encodeURIComponent(documentId.trim());
+  const docRes = await fetch(`https://docs.googleapis.com/v1/documents/${safeId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const docData = (await docRes.json()) as {
+    body?: { content?: { endIndex?: number }[] };
+    error?: { message?: string };
+  };
+  if (!docRes.ok) {
+    throw new Error(docData.error?.message || `Google Docs API error (${docRes.status}).`);
+  }
+
+  const content = docData.body?.content ?? [];
+  const lastEndIndex = content[content.length - 1]?.endIndex ?? 2;
+  const requests: Record<string, unknown>[] = [];
+  if (lastEndIndex > 2) {
+    requests.push({
+      deleteContentRange: {
+        range: {
+          startIndex: 1,
+          endIndex: lastEndIndex - 1,
+        },
+      },
+    });
+  }
+  if (plainText.trim()) {
+    requests.push({
+      insertText: {
+        location: { index: 1 },
+        text: plainText,
+      },
+    });
+  }
+  if (requests.length === 0) return;
+
+  const updateRes = await fetch(
+    `https://docs.googleapis.com/v1/documents/${safeId}:batchUpdate`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ requests }),
+    },
+  );
+  if (!updateRes.ok) {
+    const errData = (await updateRes.json().catch(() => ({}))) as { error?: { message?: string } };
+    throw new Error(errData.error?.message || `Google Docs sync failed (${updateRes.status}).`);
+  }
+}
+
+export async function fetchGoogleSheetValues(spreadsheetId: string): Promise<{
+  title: string;
+  sheetName: string;
+  values: string[][];
+}> {
+  const token = getGoogleWorkspaceAccessToken();
+  if (!token) {
+    throw new Error('Connect Google Workspace first to pull live Google Sheet values.');
+  }
+  const safeId = encodeURIComponent(spreadsheetId.trim());
+  const metaRes = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${safeId}?fields=properties.title,sheets.properties.title`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
+  const metaData = (await metaRes.json()) as {
+    properties?: { title?: string };
+    sheets?: { properties?: { title?: string } }[];
+    error?: { message?: string };
+  };
+  if (!metaRes.ok) {
+    throw new Error(metaData.error?.message || `Google Sheets API error (${metaRes.status}).`);
+  }
+  const sheetName = metaData.sheets?.[0]?.properties?.title || 'Sheet1';
+  const range = encodeURIComponent(`${sheetName}!A1:Z100`);
+  const valRes = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${safeId}/values/${range}?valueRenderOption=FORMULA`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
+  const valData = (await valRes.json()) as {
+    values?: (string | number | boolean)[][];
+    error?: { message?: string };
+  };
+  if (!valRes.ok) {
+    throw new Error(valData.error?.message || `Google Sheets values error (${valRes.status}).`);
+  }
+  return {
+    title: metaData.properties?.title || 'Spreadsheet',
+    sheetName,
+    values: (valData.values ?? []).map((row) => row.map((cell) => String(cell ?? ''))),
+  };
+}
+
+export async function updateGoogleSheetValues(
+  spreadsheetId: string,
+  sheetName: string,
+  values: string[][],
+): Promise<void> {
+  const token = getGoogleWorkspaceAccessToken();
+  if (!token) {
+    throw new Error('Connect Google Workspace first to push values to Google Sheets.');
+  }
+  const safeId = encodeURIComponent(spreadsheetId.trim());
+  const range = encodeURIComponent(`${sheetName}!A1`);
+  const res = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${safeId}/values/${range}?valueInputOption=USER_ENTERED`,
+    {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ values }),
+    },
+  );
+  if (!res.ok) {
+    const errData = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
+    throw new Error(errData.error?.message || `Google Sheets update failed (${res.status}).`);
+  }
+}
+
+export async function fetchGoogleFormStructure(formId: string): Promise<{
+  title: string;
+  description: string;
+  questions: FormQuestionItem[];
+}> {
+  const token = getGoogleWorkspaceAccessToken();
+  if (!token) {
+    throw new Error('Connect Google Workspace first to read Google Form questions.');
+  }
+  const safeId = encodeURIComponent(formId.trim());
+  const res = await fetch(`https://forms.googleapis.com/v1/forms/${safeId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const data = (await res.json()) as {
+    info?: { title?: string; description?: string };
+    items?: {
+      itemId?: string;
+      title?: string;
+      description?: string;
+      questionItem?: {
+        question?: {
+          required?: boolean;
+          textQuestion?: { paragraph?: boolean };
+          choiceQuestion?: { type?: 'RADIO' | 'CHECKBOX' | 'DROP_DOWN'; options?: { value?: string }[] };
+          dateQuestion?: unknown;
+          timeQuestion?: unknown;
+          fileUploadQuestion?: unknown;
+        };
+      };
+    }[];
+    error?: { message?: string };
+  };
+  if (!res.ok) {
+    throw new Error(data.error?.message || `Google Forms API error (${res.status}).`);
+  }
+
+  const questions: FormQuestionItem[] = (data.items ?? []).map((item, idx) => {
+    const q = item.questionItem?.question;
+    let type: FormQuestionItem['type'] = 'short_answer';
+    let options: string[] | undefined;
+
+    if (q?.textQuestion?.paragraph) type = 'paragraph';
+    else if (q?.choiceQuestion) {
+      if (q.choiceQuestion.type === 'CHECKBOX') type = 'checkboxes';
+      else if (q.choiceQuestion.type === 'DROP_DOWN') type = 'dropdown';
+      else type = 'multiple_choice';
+      options = (q.choiceQuestion.options ?? [])
+        .map((o) => o.value || '')
+        .filter(Boolean);
+    } else if (q?.dateQuestion || q?.timeQuestion) {
+      type = 'date_time';
+    } else if (q?.fileUploadQuestion) {
+      type = 'file_upload';
+    }
+
+    return {
+      id: item.itemId || `gq-${Date.now()}-${idx}`,
+      title: item.title || `Question ${idx + 1}`,
+      description: item.description,
+      type,
+      required: Boolean(q?.required),
+      options,
+    };
+  });
+
+  return {
+    title: data.info?.title || 'Google Form',
+    description: data.info?.description || '',
+    questions,
+  };
+}
+
+export async function syncQuestionsToGoogleForm(
+  formId: string,
+  title: string,
+  description: string,
+  questions: FormQuestionItem[],
+): Promise<void> {
+  const token = getGoogleWorkspaceAccessToken();
+  if (!token) {
+    throw new Error('Connect Google Workspace first to push questions to Google Forms.');
+  }
+  const safeId = encodeURIComponent(formId.trim());
+  const existingRes = await fetch(`https://forms.googleapis.com/v1/forms/${safeId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const existingData = (await existingRes.json()) as {
+    items?: unknown[];
+    error?: { message?: string };
+  };
+  if (!existingRes.ok) {
+    throw new Error(existingData.error?.message || `Google Forms API error (${existingRes.status}).`);
+  }
+
+  const existingCount = existingData.items?.length ?? 0;
+  const requests: Record<string, unknown>[] = [
+    {
+      updateFormInfo: {
+        info: {
+          title: title.trim() || 'NexOps Form',
+          description: description.trim(),
+        },
+        updateMask: 'title,description',
+      },
+    },
+  ];
+
+  // Clear existing items from end to start so batchUpdate cleanly reflects our studio list
+  for (let i = existingCount - 1; i >= 0; i -= 1) {
+    requests.push({ deleteItem: { location: { index: i } } });
+  }
+
+  questions.forEach((q, idx) => {
+    let questionPayload: Record<string, unknown>;
+    if (q.type === 'paragraph') {
+      questionPayload = { required: q.required, textQuestion: { paragraph: true } };
+    } else if (
+      q.type === 'multiple_choice' ||
+      q.type === 'checkboxes' ||
+      q.type === 'dropdown'
+    ) {
+      const choiceType =
+        q.type === 'checkboxes' ? 'CHECKBOX' : q.type === 'dropdown' ? 'DROP_DOWN' : 'RADIO';
+      const opts = (q.options && q.options.length > 0 ? q.options : ['Option 1']).map((v) => ({
+        value: v,
+      }));
+      questionPayload = {
+        required: q.required,
+        choiceQuestion: { type: choiceType, options: opts },
+      };
+    } else if (q.type === 'date_time') {
+      questionPayload = {
+        required: q.required,
+        dateQuestion: { includeTime: true, includeYear: true },
+      };
+    } else {
+      questionPayload = { required: q.required, textQuestion: { paragraph: false } };
+    }
+
+    requests.push({
+      createItem: {
+        item: {
+          title: q.title.trim() || `Question ${idx + 1}`,
+          ...(q.description ? { description: q.description } : {}),
+          questionItem: {
+            question: questionPayload,
+          },
+        },
+        location: { index: idx },
+      },
+    });
+  });
+
+  const batchRes = await fetch(`https://forms.googleapis.com/v1/forms/${safeId}:batchUpdate`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ requests }),
+  });
+  if (!batchRes.ok) {
+    const errData = (await batchRes.json().catch(() => ({}))) as { error?: { message?: string } };
+    throw new Error(errData.error?.message || `Google Forms sync failed (${batchRes.status}).`);
+  }
+}
+
+export async function fetchGoogleFormResponses(formId: string): Promise<FormSubmissionItem[]> {
+  const token = getGoogleWorkspaceAccessToken();
+  if (!token) {
+    throw new Error('Connect Google Workspace first to pull live Google Form responses.');
+  }
+  const safeId = encodeURIComponent(formId.trim());
+  const res = await fetch(`https://forms.googleapis.com/v1/forms/${safeId}/responses`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const data = (await res.json()) as {
+    responses?: {
+      responseId?: string;
+      respondentEmail?: string;
+      lastSubmittedTime?: string;
+      answers?: Record<
+        string,
+        {
+          questionId?: string;
+          textAnswers?: { answers?: { value?: string }[] };
+        }
+      >;
+    }[];
+    error?: { message?: string };
+  };
+  if (!res.ok) {
+    if (res.status === 403) {
+      throw new Error(
+        'Google Forms responses endpoint requires responses.readonly scope. Showing in-app captured responses.',
+      );
+    }
+    throw new Error(data.error?.message || `Google Forms responses error (${res.status}).`);
+  }
+
+  return (data.responses ?? []).map((r, idx) => {
+    const mappedAnswers: Record<string, string | string[]> = {};
+    if (r.answers) {
+      Object.entries(r.answers).forEach(([qKey, ans]) => {
+        const vals = (ans.textAnswers?.answers ?? []).map((a) => a.value || '').filter(Boolean);
+        mappedAnswers[qKey] = vals.length > 1 ? vals : vals[0] || '';
+      });
+    }
+    return {
+      id: r.responseId || `gfr-${idx}`,
+      submittedBy: r.respondentEmail || 'Google Form Respondent',
+      submittedAt: r.lastSubmittedTime || new Date().toISOString(),
+      answers: mappedAnswers,
+    };
+  });
 }

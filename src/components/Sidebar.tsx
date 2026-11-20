@@ -46,6 +46,7 @@ interface SidebarProps {
   pendingLeavesCount?: number;
   openActionItemsCount?: number;
   workspaceLinksCount?: number;
+  pendingUsersCount?: number;
   collapsed: boolean;
   onToggleCollapse: () => void;
   mobileOpen: boolean;
@@ -90,6 +91,7 @@ export function Sidebar({
   pendingLeavesCount,
   openActionItemsCount,
   workspaceLinksCount,
+  pendingUsersCount,
   collapsed,
   onToggleCollapse,
   mobileOpen,
@@ -148,12 +150,16 @@ export function Sidebar({
       label: 'Audit & Compliance',
       icon: FileSpreadsheet,
     },
-    {
-      id: 'settings',
-      label: 'Team & Settings',
-      icon: Users,
-      adminNotice: activeRole !== 'Admin',
-    },
+    ...(activeRole === 'Admin'
+      ? [
+          {
+            id: 'settings' as NavSection,
+            label: 'Admin Panel & Settings',
+            icon: Users,
+            badge: pendingUsersCount,
+          },
+        ]
+      : []),
   ];
 
   const handleNavigate = (section: NavSection) => {

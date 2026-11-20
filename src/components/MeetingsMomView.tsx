@@ -83,7 +83,7 @@ export function MeetingsMomView({
   onCompleteActionItem,
   onInspectRequest,
 }: MeetingsMomViewProps) {
-  const canManage = activeRole === 'Admin' || activeRole === 'Manager / QA Reviewer';
+  const canManage = activeRole === 'Admin' || activeRole === 'Editor';
 
   const [searchQuery, setSearchQuery] = useState('');
   const [deptFilter, setDeptFilter] = useState<string>('All');
@@ -327,7 +327,7 @@ export function MeetingsMomView({
           <span>
             Viewing Meeting Minutes in read-only mode as <strong>{activeRole}</strong>. Logging new
             MoM records or converting action items to operational requests requires{' '}
-            <strong>Manager / QA Reviewer</strong> or <strong>Admin</strong> permissions.
+            <strong>Editor</strong> or <strong>Admin</strong> permissions.
           </span>
         </div>
       )}
@@ -738,7 +738,7 @@ export function MeetingsMomView({
                   type="text"
                   value={attendeesInput}
                   onChange={(e) => setAttendeesInput(e.target.value)}
-                  placeholder="Marcus Vance, Nadia Patel, David Kim"
+                  placeholder="Comma-separated attendee names"
                   className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
                 />
               </div>

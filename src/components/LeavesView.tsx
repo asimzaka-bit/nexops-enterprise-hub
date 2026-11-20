@@ -73,8 +73,11 @@ export function LeavesView({
   onCreateLeave,
   onDecisionLeave,
 }: LeavesViewProps) {
+  const isViewer = activeRole === 'Viewer';
+  const canSubmitLeave = !isViewer;
   const canApproveLeaves =
-    activeRole === 'Admin' || Boolean(permissionMatrix[activeRole]?.approve_leaves);
+    !isViewer &&
+    (activeRole === 'Admin' || Boolean(permissionMatrix[activeRole]?.approve_leaves));
 
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<LeaveStatus | 'All'>('All');
@@ -308,14 +311,16 @@ export function LeavesView({
           </select>
         </div>
 
-        <button
-          type="button"
-          onClick={handleOpenCreate}
-          className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 text-xs font-semibold text-white transition-colors hover:bg-indigo-700 whitespace-nowrap"
-        >
-          <Plus className="h-3.5 w-3.5" />
-          <span>Apply for Leave / Time Off</span>
-        </button>
+        {canSubmitLeave && (
+          <button
+            type="button"
+            onClick={handleOpenCreate}
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 text-xs font-semibold text-white transition-colors hover:bg-indigo-700 whitespace-nowrap"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            <span>Apply for Leave / Time Off</span>
+          </button>
+        )}
       </div>
 
       {/* Leaves Registry Table */}
@@ -332,7 +337,9 @@ export function LeavesView({
           </div>
           {!canApproveLeaves && (
             <span className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-600">
-              Submission access · Manager/Admin role required for approvals
+              {isViewer
+                ? 'Read-only access (Viewer)'
+                : 'Submission access · Editor/Admin permission required for approvals'}
             </span>
           )}
         </div>

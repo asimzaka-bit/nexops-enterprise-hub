@@ -5,6 +5,7 @@ import {
   Clock,
   Copy,
   FileEdit,
+  FileText,
   Forward,
   Inbox,
   Info,
@@ -13,6 +14,7 @@ import {
   LogOut,
   Maximize2,
   Minimize2,
+  Paperclip,
   Pencil,
   Plus,
   RefreshCw,
@@ -24,7 +26,17 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  ClipboardEvent,
+  DragEvent,
+  FormEvent,
+  ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   createGoogleDoc,
   createGoogleForm,
@@ -35,6 +47,7 @@ import {
   fetchGoogleResourceMetadata,
   fetchRecentGmailMessages,
   getGoogleEmbedUrl,
+  GmailAttachmentMeta,
   GmailFolderKey,
   GmailLabelItem,
   GmailRecentMessage,
@@ -43,8 +56,10 @@ import {
 } from '../services/googleWorkspaceService';
 import {
   Department,
+  Role,
   TeamMember,
   WorkspaceDocToolType,
+  WorkspaceEmailAttachmentMeta,
   WorkspaceEmailLog,
   WorkspaceSavedLink,
   WorkspaceToolType,
@@ -57,10 +72,14 @@ import {
   GoogleGColorIcon,
   GoogleSheetsColorIcon,
 } from './GoogleWorkspaceIcons';
+import { DocsStudioEditor } from './workspace/DocsStudioEditor';
+import { FormsStudioEditor } from './workspace/FormsStudioEditor';
+import { SheetsStudioEditor } from './workspace/SheetsStudioEditor';
 
 interface WorkspaceToolsViewProps {
   activeTool: WorkspaceToolType;
   onSelectTool: (tool: WorkspaceToolType) => void;
+  activeRole: Role;
   currentUser: TeamMember;
   teamMembers: TeamMember[];
   departments: string[];
@@ -92,6 +111,7 @@ type PendingConfirmation =
       body: string;
       fromEmail: string;
       fromName: string;
+      attachments: File[];
     }
   | {
       kind: 'create_google_doc';
@@ -121,6 +141,7 @@ interface UnifiedMailRow {
   isStarred: boolean;
   labels: string[];
   deliveryMethod?: string;
+  attachments?: (GmailAttachmentMeta | WorkspaceEmailAttachmentMeta)[];
 }
 
 const TOOL_TABS: {
@@ -248,9 +269,63 @@ function formatGmailShortDate(raw: string): string {
   return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
+function formatFileSize(bytes: number): string {
+  if (bytes <= 0) return '0 B';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function renderLinkedEmailBody(text: string): ReactNode[] {
+  const tokenRegex = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<>"']+)/g;
+  const parts: ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  let keyIdx = 0;
+
+  while ((match = tokenRegex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index));
+    }
+    if (match[1] && match[2]) {
+      parts.push(
+        <a
+          key={`lnk-${keyIdx++}`}
+          href={match[2]}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-medium text-[#0B57D0] underline hover:text-[#0842A0]"
+        >
+          {match[1]}
+        </a>,
+      );
+    } else if (match[3]) {
+      parts.push(
+        <a
+          key={`lnk-${keyIdx++}`}
+          href={match[3]}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-medium text-[#0B57D0] underline hover:text-[#0842A0]"
+        >
+          {match[3]}
+        </a>,
+      );
+    }
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+
+  return parts;
+}
+
 export function WorkspaceToolsView({
   activeTool,
   onSelectTool,
+  activeRole,
   currentUser,
   teamMembers,
   departments,
@@ -268,6 +343,8 @@ export function WorkspaceToolsView({
   onDeleteWorkspaceLink,
   onNotify,
 }: WorkspaceToolsViewProps) {
+  const isViewer = activeRole === 'Viewer';
+
   // =========================================================================
   // 1. GMAIL AUTHENTIC CLIENT STATE
   // =========================================================================
@@ -297,7 +374,15 @@ export function WorkspaceToolsView({
   const [mailCc, setMailCc] = useState('');
   const [mailSubject, setMailSubject] = useState('');
   const [mailBody, setMailBody] = useState('');
+  const [mailAttachments, setMailAttachments] = useState<File[]>([]);
+  const [isDraggingFiles, setIsDraggingFiles] = useState(false);
+  const [showInsertLinkPopover, setShowInsertLinkPopover] = useState(false);
+  const [composeLinkText, setComposeLinkText] = useState('');
+  const [composeLinkUrl, setComposeLinkUrl] = useState('');
   const [sendingMail, setSendingMail] = useState(false);
+
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const bodyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   // =========================================================================
   // 2. GOOGLE DOCS, SHEETS & FORMS WORKSPACE STATE
@@ -321,8 +406,18 @@ export function WorkspaceToolsView({
   const [adHocActiveUrl, setAdHocActiveUrl] = useState<string | null>(null);
 
   const [selectedLinkId, setSelectedLinkId] = useState<string | null>(null);
-  const [embedMode, setEmbedMode] = useState<'edit' | 'preview'>('edit');
+  const [docViewMode, setDocViewMode] = useState<'studio' | 'edit' | 'preview'>(
+    isViewer ? 'preview' : 'studio',
+  );
   const [viewerFullscreen, setViewerFullscreen] = useState(false);
+
+  useEffect(() => {
+    if (isViewer) {
+      setDocViewMode((prev) => (prev === 'edit' ? 'preview' : prev));
+      setComposeOpen(false);
+      setActiveDocPanel('none');
+    }
+  }, [isViewer]);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [liveMetadata, setLiveMetadata] = useState<GoogleResourceMetadata | null>(null);
   const [loadingMetadata, setLoadingMetadata] = useState(false);
@@ -436,7 +531,7 @@ export function WorkspaceToolsView({
       const seenSubjects = new Set(
         mappedGmail.map((m) => `${m.subject}::${m.to}`.toLowerCase()),
       );
-      const nexopsSent: UnifiedMailRow[] = emails
+        const nexopsSent: UnifiedMailRow[] = emails
         .filter((e) => !seenSubjects.has(`${e.subject}::${e.toRecipients}`.toLowerCase()))
         .map((e) => ({
           id: e.id,
@@ -453,6 +548,7 @@ export function WorkspaceToolsView({
           isStarred: starredIds[e.id] ?? false,
           labels: ['SENT'],
           deliveryMethod: e.deliveryMethod,
+          attachments: e.attachments,
         }));
 
       const combined = [...mappedGmail, ...nexopsSent];
@@ -486,6 +582,7 @@ export function WorkspaceToolsView({
                 ...prev,
                 bodyText: full.bodyText || row.snippet,
                 cc: full.cc || row.cc,
+                attachments: full.attachments,
               }
             : prev,
         );
@@ -498,11 +595,13 @@ export function WorkspaceToolsView({
   };
 
   const handleToggleStar = (id: string, current: boolean) => {
+    if (isViewer) return;
     setStarredIds((prev) => ({ ...prev, [id]: !current }));
     setOpenedMessage((prev) => (prev && prev.id === id ? { ...prev, isStarred: !current } : prev));
   };
 
   const handleToggleSnooze = (row: UnifiedMailRow) => {
+    if (isViewer) return;
     setSnoozedMap((prev) => {
       const next = { ...prev };
       if (next[row.id]) {
@@ -534,6 +633,7 @@ export function WorkspaceToolsView({
     body?: string;
     cc?: string;
   }) => {
+    if (isViewer) return;
     if (prefill) {
       if (prefill.to !== undefined) setMailTo(prefill.to);
       if (prefill.cc !== undefined) {
@@ -545,6 +645,135 @@ export function WorkspaceToolsView({
     }
     setComposeOpen(true);
     setComposeMinimized(false);
+  };
+
+  const appendComposeAttachments = useCallback(
+    (incoming: File[]) => {
+      if (isViewer || incoming.length === 0) return;
+      const MAX_TOTAL_BYTES = 18 * 1024 * 1024; // Safe ceiling for Gmail API raw MIME base64
+      setMailAttachments((prev) => {
+        const currentTotal = prev.reduce((acc, f) => acc + f.size, 0);
+        let running = currentTotal;
+        const accepted: File[] = [];
+        for (const f of incoming) {
+          if (running + f.size > MAX_TOTAL_BYTES) {
+            onNotify(
+              'Attachment Size Limit',
+              `"${f.name}" exceeds the 18 MB Gmail API attachment payload ceiling.`,
+              'warning',
+            );
+            continue;
+          }
+          accepted.push(f);
+          running += f.size;
+        }
+        if (accepted.length > 0) {
+          onNotify(
+            `${accepted.length} File${accepted.length === 1 ? '' : 's'} Attached`,
+            accepted.map((a) => a.name).join(', '),
+            'info',
+          );
+        }
+        return [...prev, ...accepted];
+      });
+    },
+    [isViewer, onNotify],
+  );
+
+  const handleComposePaste = (e: ClipboardEvent<HTMLElement>) => {
+    if (isViewer) return;
+    const filesFromClipboard: File[] = [];
+    const stamp = new Date().toTimeString().slice(0, 8).replace(/:/g, '');
+
+    if (e.clipboardData?.files && e.clipboardData.files.length > 0) {
+      for (let i = 0; i < e.clipboardData.files.length; i += 1) {
+        const f = e.clipboardData.files[i];
+        if (!f) continue;
+        if (!f.name || f.name === 'image.png' || f.name === 'blob') {
+          const ext = f.type.split('/')[1]?.replace(/[^a-z0-9]/gi, '') || 'png';
+          filesFromClipboard.push(
+            new File([f], `pasted-file-${stamp}-${i + 1}.${ext}`, {
+              type: f.type || 'image/png',
+            }),
+          );
+        } else {
+          filesFromClipboard.push(f);
+        }
+      }
+    } else if (e.clipboardData?.items) {
+      for (let i = 0; i < e.clipboardData.items.length; i += 1) {
+        const item = e.clipboardData.items[i];
+        if (item.kind === 'file') {
+          const f = item.getAsFile();
+          if (f) {
+            const ext = f.type.split('/')[1]?.replace(/[^a-z0-9]/gi, '') || 'bin';
+            const fileName =
+              f.name && f.name !== 'image.png'
+                ? f.name
+                : `clipboard-paste-${stamp}-${i + 1}.${ext}`;
+            filesFromClipboard.push(
+              new File([f], fileName, { type: f.type || 'application/octet-stream' }),
+            );
+          }
+        }
+      }
+    }
+
+    if (filesFromClipboard.length > 0) {
+      e.preventDefault();
+      appendComposeAttachments(filesFromClipboard);
+    }
+  };
+
+  const handleComposeDragOver = (e: DragEvent<HTMLFormElement>) => {
+    if (isViewer) return;
+    if (e.dataTransfer?.types?.includes('Files')) {
+      e.preventDefault();
+      setIsDraggingFiles(true);
+    }
+  };
+
+  const handleComposeDragLeave = (e: DragEvent<HTMLFormElement>) => {
+    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+      setIsDraggingFiles(false);
+    }
+  };
+
+  const handleComposeDrop = (e: DragEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setIsDraggingFiles(false);
+    if (isViewer) return;
+    if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
+      appendComposeAttachments(Array.from(e.dataTransfer.files));
+    }
+  };
+
+  const handleInsertLinkInCompose = (e: FormEvent) => {
+    e.preventDefault();
+    const rawUrl = composeLinkUrl.trim();
+    if (!rawUrl) return;
+    const normalized =
+      rawUrl.startsWith('http://') || rawUrl.startsWith('https://')
+        ? rawUrl
+        : `https://${rawUrl}`;
+    const snippet = composeLinkText.trim()
+      ? `[${composeLinkText.trim()}](${normalized})`
+      : normalized;
+
+    const textarea = bodyTextareaRef.current;
+    if (textarea && typeof textarea.selectionStart === 'number') {
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const before = mailBody.slice(0, start);
+      const after = mailBody.slice(end);
+      const spacer = before && !before.endsWith(' ') && !before.endsWith('\n') ? ' ' : '';
+      setMailBody(`${before}${spacer}${snippet} ${after}`);
+    } else {
+      setMailBody((prev) => (prev ? `${prev}\n${snippet}` : snippet));
+    }
+    setComposeLinkText('');
+    setComposeLinkUrl('');
+    setShowInsertLinkPopover(false);
   };
 
   const handleRequestGmailSend = (e: FormEvent) => {
@@ -578,6 +807,7 @@ export function WorkspaceToolsView({
       body: mailBody.trim(),
       fromEmail: googleEmail || currentUser.email,
       fromName: googleDisplayName || currentUser.name,
+      attachments: mailAttachments,
     });
   };
 
@@ -586,6 +816,14 @@ export function WorkspaceToolsView({
       onNotify(
         'To & Subject Required',
         'Fill in at least Recipient (To) and Subject before opening your mail app.',
+        'warning',
+      );
+      return;
+    }
+    if (mailAttachments.length > 0) {
+      onNotify(
+        'Verify Gmail Account to Send Attachments',
+        'Standard mailto: links cannot send attached files. Click "Sign in with Google" to transmit attachments via Gmail API.',
         'warning',
       );
       return;
@@ -675,18 +913,50 @@ export function WorkspaceToolsView({
     setViewerFullscreen(false);
   }, [selectedLink?.id, activeTool, adHocActiveUrl]);
 
+  const selectedStudioDocId = adHocActiveUrl
+    ? `adhoc-${btoa(unescape(encodeURIComponent(adHocActiveUrl))).replace(/[^a-zA-Z0-9]/g, '').slice(0, 24)}`
+    : selectedLink?.id || `default-${docTool}`;
+  const isGoogleHttpUrl = Boolean(
+    activeDocumentUrl &&
+      (activeDocumentUrl.startsWith('https://') || activeDocumentUrl.startsWith('http://')),
+  );
+
+  useEffect(() => {
+    if (isViewer) {
+      setDocViewMode(isGoogleHttpUrl ? 'preview' : 'studio');
+    } else if (!isGoogleHttpUrl) {
+      setDocViewMode('studio');
+    }
+  }, [isViewer, isGoogleHttpUrl, selectedLink?.id, activeTool]);
+
   const handleQuickCreateInApp = () => {
+    if (isViewer) return;
     const dateStamp = new Date().toLocaleDateString([], { month: 'short', day: 'numeric' });
     const defaultTitle = `NexOps ${docMeta.singular} — ${dateStamp}`;
 
     if (!googleToken) {
-      // Prompt cleanly in-app to verify Google or paste a link (never open external tab)
-      setActiveDocPanel('create_api');
-      setCreateTitle(defaultTitle);
+      // Immediately create an interactive NexOps Studio Doc / Sheet / Form right inside the app!
+      const now = new Date().toISOString();
+      const id = `lnk-${Date.now()}`;
+      const newLink: WorkspaceSavedLink = {
+        id,
+        toolType: docTool,
+        title: defaultTitle,
+        url: `nexops://studio/${docTool}/${id}`,
+        department: currentUser.department || departments[0] || 'Operations',
+        notes: `Interactive ${docMeta.singular} Studio`,
+        addedBy: currentUser.name,
+        createdAt: now,
+        updatedAt: now,
+      };
+      onSaveWorkspaceLink(newLink);
+      setAdHocActiveUrl(null);
+      setSelectedLinkId(newLink.id);
+      setDocViewMode('studio');
       onNotify(
-        'Google Verification Required for Instant Creation',
-        'Verify your Google account above to create a live Google file directly inside NexOps, or save an existing link.',
-        'info',
+        `${docMeta.singular} Studio Created`,
+        'Opened full interactive toolbar editor directly inside NexOps.',
+        'success',
       );
       return;
     }
@@ -702,6 +972,7 @@ export function WorkspaceToolsView({
 
   const handleRequestCreateGoogleDoc = (e: FormEvent) => {
     e.preventDefault();
+    if (isViewer) return;
     if (!createTitle.trim()) {
       onNotify(
         'Document Title Required',
@@ -730,6 +1001,7 @@ export function WorkspaceToolsView({
 
   const handleSavePastedLink = (e: FormEvent) => {
     e.preventDefault();
+    if (isViewer) return;
     const cleanTitle = pasteTitle.trim();
     const cleanUrl = pasteUrl.trim();
     if (!cleanTitle) {
@@ -793,7 +1065,16 @@ export function WorkspaceToolsView({
           cc: confirmation.cc,
           subject: confirmation.subject,
           body: confirmation.body,
+          attachments: confirmation.attachments,
         });
+
+        const attachmentMeta: WorkspaceEmailAttachmentMeta[] = confirmation.attachments.map(
+          (f) => ({
+            name: f.name,
+            size: f.size,
+            mimeType: f.type || 'application/octet-stream',
+          }),
+        );
 
         const emailLog: WorkspaceEmailLog = {
           id: `eml-${Date.now()}`,
@@ -803,6 +1084,7 @@ export function WorkspaceToolsView({
           ccRecipients: confirmation.cc,
           subject: confirmation.subject,
           body: confirmation.body,
+          attachments: attachmentMeta.length > 0 ? attachmentMeta : undefined,
           deliveryMethod: 'Gmail API',
           gmailMessageId: sentRes.id,
           status: 'Sent',
@@ -813,6 +1095,7 @@ export function WorkspaceToolsView({
         setMailCc('');
         setMailSubject('');
         setMailBody('');
+        setMailAttachments([]);
         setComposeOpen(false);
         if (gmailFolder === 'sent') {
           void loadMailboxFolder('sent', gmailSearchSubmitted, null);
@@ -842,7 +1125,7 @@ export function WorkspaceToolsView({
         onSaveWorkspaceLink(savedLink);
         setAdHocActiveUrl(null);
         setSelectedLinkId(savedLink.id);
-        setEmbedMode('edit');
+        setDocViewMode('studio');
         setCreateTitle('');
         setCreateNotes('');
         setActiveDocPanel('none');
@@ -1060,14 +1343,20 @@ export function WorkspaceToolsView({
           <div className="flex flex-col md:flex-row min-h-[610px]">
             {/* Left Gmail Sub-Navigation Panel */}
             <aside className="w-full shrink-0 border-b border-slate-200/80 bg-[#F6F8FC] p-3 md:w-56 md:border-r md:border-b-0">
-              <button
-                type="button"
-                onClick={() => handleOpenCompose()}
-                className="mb-3 inline-flex h-12 items-center gap-3 rounded-2xl bg-[#C2E7FF] px-5 text-sm font-semibold text-[#001D35] shadow-xs transition-all hover:shadow-md"
-              >
-                <Pencil className="h-4 w-4" />
-                <span>Compose</span>
-              </button>
+              {!isViewer ? (
+                <button
+                  type="button"
+                  onClick={() => handleOpenCompose()}
+                  className="mb-3 inline-flex h-12 items-center gap-3 rounded-2xl bg-[#C2E7FF] px-5 text-sm font-semibold text-[#001D35] shadow-xs transition-all hover:shadow-md"
+                >
+                  <Pencil className="h-4 w-4" />
+                  <span>Compose</span>
+                </button>
+              ) : (
+                <div className="mb-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] font-semibold text-slate-600">
+                  Read-Only Mail Access
+                </div>
+              )}
 
               <div className="space-y-0.5">
                 {[
@@ -1222,70 +1511,76 @@ export function WorkspaceToolsView({
                         <ArrowLeft className="h-4 w-4" />
                         <span>Back</span>
                       </button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleToggleStar(openedMessage.id, openedMessage.isStarred)
-                        }
-                        title="Toggle Star"
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-full hover:bg-slate-100"
-                      >
-                        <Star
-                          className={`h-4 w-4 ${
-                            openedMessage.isStarred
-                              ? 'fill-[#F4B400] text-[#F4B400]'
-                              : 'text-[#444746]'
-                          }`}
-                        />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleToggleSnooze(openedMessage)}
-                        title="Snooze for Follow-up"
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[#444746] hover:bg-slate-100"
-                      >
-                        <Clock
-                          className={`h-4 w-4 ${
-                            snoozedMap[openedMessage.id] ? 'text-[#0B57D0]' : ''
-                          }`}
-                        />
-                      </button>
+                      {!isViewer && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleToggleStar(openedMessage.id, openedMessage.isStarred)
+                            }
+                            title="Toggle Star"
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-full hover:bg-slate-100"
+                          >
+                            <Star
+                              className={`h-4 w-4 ${
+                                openedMessage.isStarred
+                                  ? 'fill-[#F4B400] text-[#F4B400]'
+                                  : 'text-[#444746]'
+                              }`}
+                            />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleToggleSnooze(openedMessage)}
+                            title="Snooze for Follow-up"
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[#444746] hover:bg-slate-100"
+                          >
+                            <Clock
+                              className={`h-4 w-4 ${
+                                snoozedMap[openedMessage.id] ? 'text-[#0B57D0]' : ''
+                              }`}
+                            />
+                          </button>
+                        </>
+                      )}
                     </div>
 
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleOpenCompose({
-                            to: openedMessage.senderEmail || openedMessage.to,
-                            subject: openedMessage.subject.startsWith('Re:')
-                              ? openedMessage.subject
-                              : `Re: ${openedMessage.subject}`,
-                            body: `\n\n--- Original Message ---\nFrom: ${openedMessage.senderDisplay}\nDate: ${openedMessage.dateRaw}\n\n${openedMessage.bodyText || openedMessage.snippet}`,
-                          })
-                        }
-                        className="inline-flex h-8 items-center gap-1.5 rounded-full border border-slate-200 px-3 text-xs font-semibold text-[#444746] hover:bg-slate-50"
-                      >
-                        <Reply className="h-3.5 w-3.5" />
-                        <span>Reply</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleOpenCompose({
-                            to: '',
-                            subject: openedMessage.subject.startsWith('Fwd:')
-                              ? openedMessage.subject
-                              : `Fwd: ${openedMessage.subject}`,
-                            body: `\n\n--- Forwarded Message ---\nFrom: ${openedMessage.senderDisplay}\nSubject: ${openedMessage.subject}\n\n${openedMessage.bodyText || openedMessage.snippet}`,
-                          })
-                        }
-                        className="inline-flex h-8 items-center gap-1.5 rounded-full border border-slate-200 px-3 text-xs font-semibold text-[#444746] hover:bg-slate-50"
-                      >
-                        <Forward className="h-3.5 w-3.5" />
-                        <span>Forward</span>
-                      </button>
-                    </div>
+                    {!isViewer && (
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleOpenCompose({
+                              to: openedMessage.senderEmail || openedMessage.to,
+                              subject: openedMessage.subject.startsWith('Re:')
+                                ? openedMessage.subject
+                                : `Re: ${openedMessage.subject}`,
+                              body: `\n\n--- Original Message ---\nFrom: ${openedMessage.senderDisplay}\nDate: ${openedMessage.dateRaw}\n\n${openedMessage.bodyText || openedMessage.snippet}`,
+                            })
+                          }
+                          className="inline-flex h-8 items-center gap-1.5 rounded-full border border-slate-200 px-3 text-xs font-semibold text-[#444746] hover:bg-slate-50"
+                        >
+                          <Reply className="h-3.5 w-3.5" />
+                          <span>Reply</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleOpenCompose({
+                              to: '',
+                              subject: openedMessage.subject.startsWith('Fwd:')
+                                ? openedMessage.subject
+                                : `Fwd: ${openedMessage.subject}`,
+                              body: `\n\n--- Forwarded Message ---\nFrom: ${openedMessage.senderDisplay}\nSubject: ${openedMessage.subject}\n\n${openedMessage.bodyText || openedMessage.snippet}`,
+                            })
+                          }
+                          className="inline-flex h-8 items-center gap-1.5 rounded-full border border-slate-200 px-3 text-xs font-semibold text-[#444746] hover:bg-slate-50"
+                        >
+                          <Forward className="h-3.5 w-3.5" />
+                          <span>Forward</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   {/* Full Email Subject + Sender Metadata + Body */}
@@ -1339,8 +1634,39 @@ export function WorkspaceToolsView({
                         <span>Loading full email body from Gmail...</span>
                       </div>
                     ) : (
-                      <div className="whitespace-pre-wrap text-sm leading-relaxed text-[#1F1F1F]">
-                        {openedMessage.bodyText || openedMessage.snippet || '(No message content)'}
+                      <div className="space-y-4">
+                        <div className="whitespace-pre-wrap text-sm leading-relaxed text-[#1F1F1F]">
+                          {renderLinkedEmailBody(
+                            openedMessage.bodyText || openedMessage.snippet || '(No message content)',
+                          )}
+                        </div>
+
+                        {openedMessage.attachments && openedMessage.attachments.length > 0 && (
+                          <div className="border-t border-slate-100 pt-3">
+                            <p className="mb-2 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                              Attachments ({openedMessage.attachments.length})
+                            </p>
+                            <div className="flex flex-wrap gap-2">
+                              {openedMessage.attachments.map((att, idx) => {
+                                const fileName = 'filename' in att ? att.filename : att.name;
+                                return (
+                                  <span
+                                    key={`${fileName}-${idx}`}
+                                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-medium text-slate-700"
+                                  >
+                                    <Paperclip className="h-3.5 w-3.5 text-[#0B57D0]" />
+                                    <span>{fileName}</span>
+                                    {att.size > 0 && (
+                                      <span className="font-mono text-[10px] text-slate-500">
+                                        ({formatFileSize(att.size)})
+                                      </span>
+                                    )}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -1409,7 +1735,9 @@ export function WorkspaceToolsView({
                           ? 'Click "Sign in with Google / Verify Gmail Account" above to connect your real Gmail inbox, starred mail, drafts, and labels.'
                           : gmailSearchSubmitted
                             ? `No messages matched "${gmailSearchSubmitted}".`
-                            : 'Use Compose on the left to send a corporate email directly via Gmail.'}
+                            : isViewer
+                              ? 'This folder is currently empty (Viewer read-only access).'
+                              : 'Use Compose on the left to send a corporate email directly via Gmail.'}
                       </p>
                     </div>
                   ) : (
@@ -1422,34 +1750,38 @@ export function WorkspaceToolsView({
                           }`}
                         >
                           {/* Star Toggle */}
-                          <button
-                            type="button"
-                            onClick={() => handleToggleStar(row.id, row.isStarred)}
-                            aria-label="Toggle star"
-                            className="shrink-0 rounded-full p-1 hover:bg-slate-200/70"
-                          >
-                            <Star
-                              className={`h-4 w-4 ${
-                                row.isStarred
-                                  ? 'fill-[#F4B400] text-[#F4B400]'
-                                  : 'text-slate-400 group-hover:text-slate-600'
-                              }`}
-                            />
-                          </button>
+                          {!isViewer && (
+                            <button
+                              type="button"
+                              onClick={() => handleToggleStar(row.id, row.isStarred)}
+                              aria-label="Toggle star"
+                              className="shrink-0 rounded-full p-1 hover:bg-slate-200/70"
+                            >
+                              <Star
+                                className={`h-4 w-4 ${
+                                  row.isStarred
+                                    ? 'fill-[#F4B400] text-[#F4B400]'
+                                    : 'text-slate-400 group-hover:text-slate-600'
+                                }`}
+                              />
+                            </button>
+                          )}
 
                           {/* Snooze Toggle */}
-                          <button
-                            type="button"
-                            onClick={() => handleToggleSnooze(row)}
-                            title={snoozedMap[row.id] ? 'Unsnooze' : 'Snooze for follow-up'}
-                            className="hidden shrink-0 rounded-full p-1 text-slate-400 hover:bg-slate-200/70 hover:text-[#0B57D0] sm:inline-flex"
-                          >
-                            <Clock
-                              className={`h-3.5 w-3.5 ${
-                                snoozedMap[row.id] ? 'text-[#0B57D0]' : ''
-                              }`}
-                            />
-                          </button>
+                          {!isViewer && (
+                            <button
+                              type="button"
+                              onClick={() => handleToggleSnooze(row)}
+                              title={snoozedMap[row.id] ? 'Unsnooze' : 'Snooze for follow-up'}
+                              className="hidden shrink-0 rounded-full p-1 text-slate-400 hover:bg-slate-200/70 hover:text-[#0B57D0] sm:inline-flex"
+                            >
+                              <Clock
+                                className={`h-3.5 w-3.5 ${
+                                  snoozedMap[row.id] ? 'text-[#0B57D0]' : ''
+                                }`}
+                              />
+                            </button>
+                          )}
 
                           {/* Clickable Row Content */}
                           <button
@@ -1556,7 +1888,23 @@ export function WorkspaceToolsView({
           </div>
 
           {!composeMinimized && (
-            <form onSubmit={handleRequestGmailSend} className="flex flex-col">
+            <form
+              onSubmit={handleRequestGmailSend}
+              onPaste={handleComposePaste}
+              onDragOver={handleComposeDragOver}
+              onDragLeave={handleComposeDragLeave}
+              onDrop={handleComposeDrop}
+              className={`relative flex flex-col ${
+                isDraggingFiles ? 'ring-2 ring-inset ring-[#0B57D0] bg-blue-50/30' : ''
+              }`}
+            >
+              {isDraggingFiles && (
+                <div className="pointer-events-none absolute inset-0 z-20 flex flex-col items-center justify-center bg-[#EDF2FA]/90 text-xs font-bold text-[#0B57D0]">
+                  <Paperclip className="mb-1.5 h-6 w-6" />
+                  <span>Drop files here to attach to email</span>
+                </div>
+              )}
+
               {/* From Strip */}
               <div className="flex items-center justify-between border-b border-slate-100 px-4 py-1.5 text-[11px] text-[#5F6368]">
                 <span>
@@ -1654,15 +2002,86 @@ export function WorkspaceToolsView({
                 />
               </div>
 
-              {/* Message Body */}
+              {/* Message Body (Supports Ctrl+V File/Screenshot Paste) */}
               <textarea
-                rows={composeExpanded ? 12 : 8}
+                ref={bodyTextareaRef}
+                rows={composeExpanded ? 11 : 7}
                 required
                 value={mailBody}
                 onChange={(e) => setMailBody(e.target.value)}
-                placeholder="Write your corporate email..."
+                onPaste={handleComposePaste}
+                placeholder="Write your corporate email... (Paste files/screenshots with Ctrl+V or drag & drop files here)"
                 className="w-full resize-none px-4 py-3 text-xs leading-relaxed text-[#1F1F1F] focus:outline-none"
               />
+
+              {/* Attached Files Chips */}
+              {mailAttachments.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 border-t border-slate-100 bg-slate-50/70 px-4 py-2 max-h-24 overflow-y-auto">
+                  {mailAttachments.map((file, idx) => (
+                    <span
+                      key={`${file.name}-${file.size}-${idx}`}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-800 shadow-2xs"
+                    >
+                      <FileText className="h-3.5 w-3.5 text-[#0B57D0] shrink-0" />
+                      <span className="max-w-[160px] truncate">{file.name}</span>
+                      <span className="font-mono text-[10px] text-slate-500">
+                        ({formatFileSize(file.size)})
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setMailAttachments((prev) => prev.filter((_, i) => i !== idx))
+                        }
+                        title="Remove attachment"
+                        className="ml-0.5 rounded-full p-0.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {/* Inline Insert Link Popover */}
+              {showInsertLinkPopover && (
+                <div className="border-t border-slate-200 bg-[#F8FAFD] px-4 py-2.5 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-slate-700">
+                      Insert Clickable Link into Email
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowInsertLinkPopover(false)}
+                      className="text-slate-400 hover:text-slate-600"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-12">
+                    <input
+                      type="text"
+                      value={composeLinkText}
+                      onChange={(e) => setComposeLinkText(e.target.value)}
+                      placeholder="Link label (optional)"
+                      className="h-8 rounded-lg border border-slate-200 bg-white px-2.5 text-xs focus:border-[#0B57D0] focus:outline-none sm:col-span-5"
+                    />
+                    <input
+                      type="text"
+                      value={composeLinkUrl}
+                      onChange={(e) => setComposeLinkUrl(e.target.value)}
+                      placeholder="https://..."
+                      className="h-8 rounded-lg border border-slate-200 bg-white px-2.5 font-mono text-xs focus:border-[#0B57D0] focus:outline-none sm:col-span-5"
+                    />
+                    <button
+                      type="button"
+                      onClick={(e) => handleInsertLinkInCompose(e)}
+                      className="h-8 rounded-lg bg-[#0B57D0] px-2.5 text-xs font-semibold text-white hover:bg-[#0842A0] sm:col-span-2"
+                    >
+                      Add
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Templates Strip */}
               <div className="flex flex-wrap items-center gap-1.5 border-t border-slate-100 px-4 py-2">
@@ -1690,9 +2109,23 @@ export function WorkspaceToolsView({
                 </button>
               </div>
 
-              {/* Bottom Send Bar */}
-              <div className="flex items-center justify-between border-t border-slate-100 px-4 py-2.5">
-                <div className="flex items-center gap-2">
+              {/* Hidden Multi-File Input */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                onChange={(e) => {
+                  if (e.target.files && e.target.files.length > 0) {
+                    appendComposeAttachments(Array.from(e.target.files));
+                    e.target.value = '';
+                  }
+                }}
+                className="hidden"
+              />
+
+              {/* Bottom Send + Attachment + Insert Link Bar */}
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 px-4 py-2.5">
+                <div className="flex items-center gap-1.5">
                   <button
                     type="submit"
                     disabled={sendingMail || !googleToken}
@@ -1701,7 +2134,7 @@ export function WorkspaceToolsView({
                         ? 'Send directly via Gmail API'
                         : 'Verify your Google account first to send via Gmail API'
                     }
-                    className="inline-flex h-9 items-center gap-2 rounded-full bg-[#0B57D0] px-5 text-xs font-semibold text-white transition-colors hover:bg-[#0842A0] disabled:cursor-not-allowed disabled:opacity-50"
+                    className="inline-flex h-9 items-center gap-2 rounded-full bg-[#0B57D0] px-4 text-xs font-semibold text-white transition-colors hover:bg-[#0842A0] disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {sendingMail ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -1709,6 +2142,29 @@ export function WorkspaceToolsView({
                       <Send className="h-3.5 w-3.5" />
                     )}
                     <span>Send</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    title="Attach PDF, Word, Excel, Image, or any file (or paste with Ctrl+V)"
+                    className="inline-flex h-9 items-center gap-1.5 rounded-full border border-slate-200 px-3 text-xs font-semibold text-[#444746] hover:bg-slate-100"
+                  >
+                    <Paperclip className="h-3.5 w-3.5 text-[#0B57D0]" />
+                    <span>Attach</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowInsertLinkPopover((prev) => !prev)}
+                    title="Insert clickable hyperlink"
+                    className={`inline-flex h-9 w-9 items-center justify-center rounded-full border transition-colors ${
+                      showInsertLinkPopover
+                        ? 'border-[#0B57D0] bg-[#E8F0FE] text-[#0B57D0]'
+                        : 'border-slate-200 text-[#444746] hover:bg-slate-100'
+                    }`}
+                  >
+                    <Link2 className="h-3.5 w-3.5" />
                   </button>
 
                   <button
@@ -1727,6 +2183,7 @@ export function WorkspaceToolsView({
                     setMailCc('');
                     setMailSubject('');
                     setMailBody('');
+                    setMailAttachments([]);
                     setComposeOpen(false);
                   }}
                   title="Discard draft"
@@ -1767,40 +2224,46 @@ export function WorkspaceToolsView({
                 </div>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleQuickCreateInApp}
-                  disabled={creatingDoc}
-                  className={`inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-xs font-semibold shadow-xs transition-colors disabled:opacity-60 ${docMeta.primaryBtnClass}`}
-                >
-                  {creatingDoc ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Plus className="h-4 w-4" />
-                  )}
-                  <span>+ Create New</span>
-                </button>
+              {!isViewer ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleQuickCreateInApp}
+                    disabled={creatingDoc}
+                    className={`inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-xs font-semibold shadow-xs transition-colors disabled:opacity-60 ${docMeta.primaryBtnClass}`}
+                  >
+                    {creatingDoc ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Plus className="h-4 w-4" />
+                    )}
+                    <span>+ Create New</span>
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={() =>
-                    setActiveDocPanel((prev) => (prev === 'add_link' ? 'none' : 'add_link'))
-                  }
-                  className={`inline-flex h-9 items-center gap-1.5 rounded-full border px-3.5 text-xs font-semibold transition-colors ${
-                    activeDocPanel === 'add_link'
-                      ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
-                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                  }`}
-                >
-                  <Link2 className="h-3.5 w-3.5" />
-                  <span>Save Team Link</span>
-                </button>
-              </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setActiveDocPanel((prev) => (prev === 'add_link' ? 'none' : 'add_link'))
+                    }
+                    className={`inline-flex h-9 items-center gap-1.5 rounded-full border px-3.5 text-xs font-semibold transition-colors ${
+                      activeDocPanel === 'add_link'
+                        ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
+                        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    <Link2 className="h-3.5 w-3.5" />
+                    <span>Save Team Link</span>
+                  </button>
+                </div>
+              ) : (
+                <span className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-600">
+                  Read-Only Viewer Mode
+                </span>
+              )}
             </div>
 
             {/* Expandable In-App Create Panel (when not verified yet or customizing details) */}
-            {activeDocPanel === 'create_api' && (
+            {!isViewer && activeDocPanel === 'create_api' && (
               <div className="mt-4 border-t border-slate-100 pt-4 space-y-3">
                 {!googleToken && (
                   <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-blue-100 bg-[#EDF2FA] px-4 py-3">
@@ -1873,7 +2336,7 @@ export function WorkspaceToolsView({
             )}
 
             {/* Expandable Form: Save Existing Link to Team Directory */}
-            {activeDocPanel === 'add_link' && (
+            {!isViewer && activeDocPanel === 'add_link' && (
               <form
                 onSubmit={handleSavePastedLink}
                 className="mt-4 grid grid-cols-1 gap-3 border-t border-slate-100 pt-4 sm:grid-cols-12"
@@ -2020,29 +2483,31 @@ export function WorkspaceToolsView({
                   Live Embedded {docMeta.singular} Workspace
                 </h3>
                 <p className="mt-1.5 max-w-md text-xs leading-relaxed text-slate-500">
-                  Create a new {docMeta.singular} directly inside NexOps, select a saved company
-                  document from the switcher bar above, or paste any Google {docMeta.singular} URL
-                  to open its embedded editor here.
+                  {isViewer
+                    ? `Select a shared company ${docMeta.singular} from the switcher bar above, or paste a Google URL to preview it in read-only mode.`
+                    : `Create a new ${docMeta.singular} directly inside NexOps, select a saved company document from the switcher bar above, or paste any Google ${docMeta.singular} URL to open its embedded editor here.`}
                 </p>
-                <div className="mt-5 flex flex-wrap items-center justify-center gap-2.5">
-                  <button
-                    type="button"
-                    onClick={handleQuickCreateInApp}
-                    disabled={creatingDoc}
-                    className={`inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-xs font-semibold ${docMeta.primaryBtnClass}`}
-                  >
-                    <Plus className="h-4 w-4" />
-                    <span>+ Create New {docMeta.singular}</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveDocPanel('add_link')}
-                    className="inline-flex h-9 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-4 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                  >
-                    <Link2 className="h-3.5 w-3.5" />
-                    <span>Save Team {docMeta.singular} Link</span>
-                  </button>
-                </div>
+                {!isViewer && (
+                  <div className="mt-5 flex flex-wrap items-center justify-center gap-2.5">
+                    <button
+                      type="button"
+                      onClick={handleQuickCreateInApp}
+                      disabled={creatingDoc}
+                      className={`inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-xs font-semibold ${docMeta.primaryBtnClass}`}
+                    >
+                      <Plus className="h-4 w-4" />
+                      <span>+ Create New {docMeta.singular}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveDocPanel('add_link')}
+                      className="inline-flex h-9 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-4 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                    >
+                      <Link2 className="h-3.5 w-3.5" />
+                      <span>Save Team {docMeta.singular} Link</span>
+                    </button>
+                  </div>
+                )}
               </div>
             ) : (
               <>
@@ -2068,33 +2533,77 @@ export function WorkspaceToolsView({
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
-                    {/* Edit / Preview Toggle */}
-                    <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5">
-                      <button
-                        type="button"
-                        onClick={() => setEmbedMode('edit')}
-                        className={`rounded-md px-2.5 py-1 text-[11px] font-semibold ${
-                          embedMode === 'edit'
-                            ? 'bg-[#0B57D0] text-white'
-                            : 'text-slate-600 hover:text-slate-900'
-                        }`}
-                      >
-                        Edit Mode
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setEmbedMode('preview')}
-                        className={`rounded-md px-2.5 py-1 text-[11px] font-semibold ${
-                          embedMode === 'preview'
-                            ? 'bg-[#0B57D0] text-white'
-                            : 'text-slate-600 hover:text-slate-900'
-                        }`}
-                      >
-                        {docTool === 'forms' ? 'Fill Form' : 'Preview'}
-                      </button>
-                    </div>
+                    {/* Interactive Toolbar / Full Google Editor / Preview Switcher */}
+                    {isViewer ? (
+                      <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5">
+                        <button
+                          type="button"
+                          onClick={() => setDocViewMode('studio')}
+                          className={`rounded-md px-2.5 py-1 text-[11px] font-semibold ${
+                            docViewMode === 'studio'
+                              ? 'bg-slate-800 text-white'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          Read-Only Studio
+                        </button>
+                        {isGoogleHttpUrl && (
+                          <button
+                            type="button"
+                            onClick={() => setDocViewMode('preview')}
+                            className={`rounded-md px-2.5 py-1 text-[11px] font-semibold ${
+                              docViewMode === 'preview'
+                                ? 'bg-slate-800 text-white'
+                                : 'text-slate-600 hover:text-slate-900'
+                            }`}
+                          >
+                            Google Preview
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5">
+                        <button
+                          type="button"
+                          onClick={() => setDocViewMode('studio')}
+                          className={`rounded-md px-2.5 py-1 text-[11px] font-semibold ${
+                            docViewMode === 'studio'
+                              ? 'bg-[#0B57D0] text-white'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          Interactive Toolbar
+                        </button>
+                        {isGoogleHttpUrl && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => setDocViewMode('edit')}
+                              className={`rounded-md px-2.5 py-1 text-[11px] font-semibold ${
+                                docViewMode === 'edit'
+                                  ? 'bg-[#0B57D0] text-white'
+                                  : 'text-slate-600 hover:text-slate-900'
+                              }`}
+                            >
+                              Full Google Editor
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setDocViewMode('preview')}
+                              className={`rounded-md px-2.5 py-1 text-[11px] font-semibold ${
+                                docViewMode === 'preview'
+                                  ? 'bg-[#0B57D0] text-white'
+                                  : 'text-slate-600 hover:text-slate-900'
+                              }`}
+                            >
+                              {docTool === 'forms' ? 'Fill Form' : 'Preview'}
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    )}
 
-                    {googleToken && (
+                    {googleToken && isGoogleHttpUrl && (
                       <button
                         type="button"
                         onClick={() => void handleInspectLiveMetadata()}
@@ -2132,6 +2641,7 @@ export function WorkspaceToolsView({
 
                     {selectedLink &&
                       !adHocActiveUrl &&
+                      !isViewer &&
                       (currentUser.role === 'Admin' ||
                         selectedLink.addedBy === currentUser.name) && (
                         <button
@@ -2188,33 +2698,92 @@ export function WorkspaceToolsView({
                   </div>
                 )}
 
-                {/* Full-Height Live Embedded Iframe */}
-                <div className="relative flex-1 bg-slate-100">
-                  <iframe
-                    key={`${activeDocumentUrl}-${embedMode}`}
-                    src={getGoogleEmbedUrl(docTool, activeDocumentUrl, embedMode)}
-                    title={activeDocumentTitle}
-                    className={
-                      viewerFullscreen
-                        ? 'h-full min-h-[calc(100vh-92px)] w-full border-0 bg-white'
-                        : 'h-[calc(100vh-300px)] min-h-[620px] w-full border-0 bg-white'
-                    }
-                    allow="clipboard-read; clipboard-write"
-                  />
-                </div>
+                {/* Main Content: Interactive Studio Editor OR Full Live Google Iframe */}
+                {docViewMode === 'studio' || !isGoogleHttpUrl ? (
+                  <div className="flex-1">
+                    {docTool === 'docs' && (
+                      <DocsStudioEditor
+                        docId={selectedStudioDocId}
+                        title={activeDocumentTitle}
+                        googleFileId={
+                          (!adHocActiveUrl ? selectedLink?.googleFileId : undefined) ||
+                          extractGoogleFileId('docs', activeDocumentUrl)
+                        }
+                        googleToken={googleToken}
+                        readOnly={isViewer}
+                        actorName={currentUser.name}
+                        onNotify={onNotify}
+                      />
+                    )}
+                    {docTool === 'sheets' && (
+                      <SheetsStudioEditor
+                        docId={selectedStudioDocId}
+                        title={activeDocumentTitle}
+                        googleFileId={
+                          (!adHocActiveUrl ? selectedLink?.googleFileId : undefined) ||
+                          extractGoogleFileId('sheets', activeDocumentUrl)
+                        }
+                        googleToken={googleToken}
+                        readOnly={isViewer}
+                        actorName={currentUser.name}
+                        onNotify={onNotify}
+                      />
+                    )}
+                    {docTool === 'forms' && (
+                      <FormsStudioEditor
+                        docId={selectedStudioDocId}
+                        title={activeDocumentTitle}
+                        documentUrl={activeDocumentUrl}
+                        googleFileId={
+                          (!adHocActiveUrl ? selectedLink?.googleFileId : undefined) ||
+                          extractGoogleFileId('forms', activeDocumentUrl)
+                        }
+                        googleToken={googleToken}
+                        readOnly={isViewer}
+                        actorName={currentUser.name}
+                        actorEmail={currentUser.email}
+                        onNotify={onNotify}
+                      />
+                    )}
+                  </div>
+                ) : (
+                  <>
+                    <div className="relative flex-1 bg-slate-100">
+                      <iframe
+                        key={`${activeDocumentUrl}-${docViewMode}`}
+                        src={getGoogleEmbedUrl(
+                          docTool,
+                          activeDocumentUrl,
+                          docViewMode === 'preview' ? 'preview' : 'edit',
+                        )}
+                        title={activeDocumentTitle}
+                        className={
+                          viewerFullscreen
+                            ? 'h-full min-h-[calc(100vh-92px)] w-full border-0 bg-white'
+                            : 'h-[calc(100vh-300px)] min-h-[620px] w-full border-0 bg-white'
+                        }
+                        allow="clipboard-read; clipboard-write"
+                      />
+                    </div>
 
-                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-slate-50 px-4 py-2 text-[11px] text-slate-500">
-                  <span>
-                    Embed URL:{' '}
-                    <code className="font-mono text-slate-700">
-                      {getGoogleEmbedUrl(docTool, activeDocumentUrl, embedMode)}
-                    </code>
-                  </span>
-                  <span>
-                    Ensure Google file sharing allows link access if an embedded document prompts for
-                    permissions.
-                  </span>
-                </div>
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-slate-50 px-4 py-2 text-[11px] text-slate-500">
+                      <span>
+                        Embed URL:{' '}
+                        <code className="font-mono text-slate-700">
+                          {getGoogleEmbedUrl(
+                            docTool,
+                            activeDocumentUrl,
+                            docViewMode === 'preview' ? 'preview' : 'edit',
+                          )}
+                        </code>
+                      </span>
+                      <span>
+                        Ensure Google file sharing allows link access if an embedded document
+                        prompts for permissions.
+                      </span>
+                    </div>
+                  </>
+                )}
               </>
             )}
           </div>
@@ -2269,6 +2838,14 @@ export function WorkspaceToolsView({
                       <span className="font-semibold text-slate-700">Subject:</span>{' '}
                       {confirmation.subject}
                     </p>
+                    {confirmation.attachments.length > 0 && (
+                      <p>
+                        <span className="font-semibold text-slate-700">Attachments:</span>{' '}
+                        {confirmation.attachments
+                          .map((f) => `${f.name} (${formatFileSize(f.size)})`)
+                          .join(', ')}
+                      </p>
+                    )}
                   </div>
                 )}
 

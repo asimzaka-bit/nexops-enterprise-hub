@@ -41,7 +41,7 @@
  *   id TEXT PRIMARY KEY,
  *   request_id TEXT NOT NULL,
  *   actor_name TEXT NOT NULL,
- *   actor_role TEXT NOT NULL CHECK (actor_role IN ('Admin', 'Manager / QA Reviewer', 'Staff / Contributor')),
+ *   actor_role TEXT NOT NULL CHECK (actor_role IN ('Admin', 'Editor', 'Viewer', 'Manager / QA Reviewer', 'Staff / Contributor')),
  *   action_type TEXT NOT NULL CHECK (action_type IN ('Created', 'Status Changed', 'Checklist Updated', 'Comment Added', 'Team Updated')),
  *   details TEXT NOT NULL,
  *   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -136,19 +136,35 @@
  *   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
  * );
  *
- * -- 8. User Profiles & Avatars Table + Storage Bucket
+ * -- 8. User Profiles, RBAC Roles & Admin Approval Status Table + Storage Bucket
  * CREATE TABLE IF NOT EXISTS public.profiles (
  *   id TEXT PRIMARY KEY,
- *   email TEXT,
+ *   email TEXT UNIQUE,
  *   full_name TEXT,
  *   employee_id TEXT,
- *   role TEXT,
+ *   role TEXT NOT NULL DEFAULT 'viewer' CHECK (role IN ('viewer', 'editor', 'admin')),
+ *   approval_status TEXT NOT NULL DEFAULT 'pending' CHECK (approval_status IN ('pending', 'approved', 'rejected')),
+ *   is_super_admin BOOLEAN NOT NULL DEFAULT false,
+ *   active BOOLEAN NOT NULL DEFAULT true,
+ *   approved_by TEXT,
+ *   approved_at TIMESTAMPTZ,
  *   department TEXT,
  *   title TEXT,
  *   sign_off_title TEXT,
  *   avatar_url TEXT,
  *   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
  * );
+ *
+ * ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS approval_status TEXT NOT NULL DEFAULT 'pending';
+ * ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS is_super_admin BOOLEAN NOT NULL DEFAULT false;
+ * ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT true;
+ * ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS approved_by TEXT;
+ * ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ;
+ *
+ * -- Ensure permanent Super Admin profile
+ * UPDATE public.profiles
+ * SET role = 'admin', approval_status = 'approved', is_super_admin = true, active = true
+ * WHERE LOWER(email) = 'asim.zaka@mmpakistan.com';
  *
  * INSERT INTO storage.buckets (id, name, public)
  * VALUES ('avatars', 'avatars', true)
@@ -241,20 +257,11 @@
  */
 
 import { createClient, Session, SupabaseClient, User } from '@supabase/supabase-js';
-import {
-  createSeedState,
-  DEFAULT_PERMISSION_MATRIX,
-  INITIAL_ANNOUNCEMENTS,
-  INITIAL_ASSETS,
-  INITIAL_LEAVES,
-  INITIAL_MEETINGS,
-  INITIAL_PROJECTS,
-  INITIAL_REQUESTS,
-  INITIAL_SOPS,
-} from '../data/seedData';
+import { createSeedState, DEFAULT_PERMISSION_MATRIX } from '../data/seedData';
 import {
   AppNotification,
   ApprovalStageSignOff,
+  ApprovalStatus,
   AssetCategory,
   AssetCondition,
   AssetHistoryEntry,
@@ -273,6 +280,7 @@ import {
   LeaveRequest,
   LeaveStatus,
   LeaveType,
+  MasterKeyConfig,
   MeetingActionItem,
   MeetingMinute,
   NexOpsState,
@@ -292,11 +300,20 @@ import {
   WorkspaceEmailLog,
   WorkspaceSavedLink,
 } from '../types/nexops';
-import { normalizePermissionMatrix } from '../utils/storage';
+import {
+  fromDbRole,
+  isSuperAdminEmail,
+  normalizeApprovalStatus,
+  normalizePermissionMatrix,
+  normalizeRole,
+  SUPER_ADMIN_EMAIL,
+  toDbRole,
+} from '../utils/storage';
 
-const STORAGE_KEY = 'nexops_enterprise_hub_state_v2';
+const STORAGE_KEY = 'nexops_enterprise_hub_state_v3';
 const AUTH_SESSION_KEY = 'nexops_enterprise_auth_session_v1';
 const BRANDING_STORAGE_KEY = 'nexops_enterprise_branding_v1';
+const MASTER_KEY_STORAGE_KEY = 'nexops_enterprise_master_key_v1';
 const REQUEST_PROJECTS_MAP_KEY = 'nexops_enterprise_request_projects_v1';
 const REQUEST_ASSETS_MAP_KEY = 'nexops_enterprise_request_assets_v1';
 const REQUEST_META_MAP_KEY = 'nexops_enterprise_request_meta_v1';
@@ -371,11 +388,31 @@ async function saveLocalCredential(email: string, password: string): Promise<voi
   }
 }
 
-function isLegacyDemoAdmin(member: TeamMember): boolean {
+function isLegacyDemoMember(member: TeamMember): boolean {
+  const email = (member.email ?? '').toLowerCase();
   return (
-    member.id === 'usr-admin-01' &&
-    member.email.toLowerCase() === 'elena.rostova@nexops-corp.example'
+    email.endsWith('@nexops-corp.example') ||
+    ['usr-admin-01', 'usr-qa-01', 'usr-staff-01', 'usr-ops-02', 'usr-fin-03', 'usr-eng-04', 'usr-qa-05'].includes(
+      member.id,
+    )
   );
+}
+
+function enforceMemberInvariants(member: TeamMember, idx = 0): TeamMember {
+  const isSuper = isSuperAdminEmail(member.email) || Boolean(member.isSuperAdmin);
+  const role: Role = isSuper ? 'Admin' : normalizeRole(member.role);
+  const approvalStatus: ApprovalStatus = isSuper
+    ? 'approved'
+    : normalizeApprovalStatus(member.approvalStatus ?? 'approved', member.email);
+  return {
+    ...member,
+    role,
+    approvalStatus,
+    isSuperAdmin: isSuper,
+    active: isSuper ? true : member.active !== false,
+    employeeId: member.employeeId || `NX-EMP-${String(1001 + idx * 4)}`,
+    signOffTitle: member.signOffTitle || member.title || role,
+  };
 }
 
 function readWorkspaceState(): NexOpsState {
@@ -393,41 +430,46 @@ function readWorkspaceState(): NexOpsState {
       return seed;
     }
     const normalizedMembers = parsed.teamMembers
-      .filter((m) => !isLegacyDemoAdmin(m))
-      .map((m, idx) => ({
-        ...m,
-        employeeId: m.employeeId || `EMP-${String(101 + idx * 3).padStart(3, '0')}`,
-        signOffTitle: m.signOffTitle || m.title || m.role,
-      }));
-    const normalizedProjects: CompanyProject[] =
-      Array.isArray(parsed.projects) && parsed.projects.length > 0
-        ? parsed.projects.map((p) => ({
-            ...p,
-            currency: p.currency ?? 'USD',
-            estimatedBudget: typeof p.estimatedBudget === 'number' ? p.estimatedBudget : 25000,
-            actualSpend: typeof p.actualSpend === 'number' ? p.actualSpend : 0,
-          }))
-        : structuredClone(INITIAL_PROJECTS);
-    const normalizedAssets: CompanyAsset[] =
-      Array.isArray(parsed.assets) && parsed.assets.length > 0
-        ? parsed.assets
-        : structuredClone(INITIAL_ASSETS);
-    const normalizedSops: SopDocument[] =
-      Array.isArray(parsed.sops) && parsed.sops.length > 0
-        ? parsed.sops
-        : structuredClone(INITIAL_SOPS);
-    const normalizedLeaves: LeaveRequest[] = Array.isArray(parsed.leaves)
-      ? parsed.leaves
-      : structuredClone(INITIAL_LEAVES);
+      .filter((m) => !isLegacyDemoMember(m))
+      .map((m, idx) => enforceMemberInvariants(m, idx));
+
+    const normalizedProjects: CompanyProject[] = Array.isArray(parsed.projects)
+      ? parsed.projects.map((p) => ({
+          ...p,
+          currency: p.currency ?? 'USD',
+          estimatedBudget: typeof p.estimatedBudget === 'number' ? p.estimatedBudget : 0,
+          actualSpend: typeof p.actualSpend === 'number' ? p.actualSpend : 0,
+        }))
+      : [];
+    const normalizedAssets: CompanyAsset[] = Array.isArray(parsed.assets) ? parsed.assets : [];
+    const normalizedSops: SopDocument[] = Array.isArray(parsed.sops)
+      ? parsed.sops.map((s) => ({
+          ...s,
+          acknowledgments: Array.isArray(s.acknowledgments)
+            ? s.acknowledgments.map((ack) => ({ ...ack, role: normalizeRole(ack.role) }))
+            : [],
+        }))
+      : [];
+    const normalizedLeaves: LeaveRequest[] = Array.isArray(parsed.leaves) ? parsed.leaves : [];
     const normalizedAnnouncements: CompanyAnnouncement[] = Array.isArray(parsed.announcements)
-      ? parsed.announcements
-      : structuredClone(INITIAL_ANNOUNCEMENTS);
+      ? parsed.announcements.map((a) => ({
+          ...a,
+          publishedByRole: normalizeRole(a.publishedByRole),
+        }))
+      : [];
     const normalizedMeetings: MeetingMinute[] = Array.isArray(parsed.meetings)
       ? parsed.meetings
-      : structuredClone(INITIAL_MEETINGS);
+      : [];
 
     return {
       ...parsed,
+      activeRole: normalizeRole(parsed.activeRole),
+      requests: parsed.requests.map((r) => ({
+        ...r,
+        auditTrail: Array.isArray(r.auditTrail)
+          ? r.auditTrail.map((a) => ({ ...a, actorRole: normalizeRole(a.actorRole) }))
+          : [],
+      })),
       projects: normalizedProjects,
       assets: normalizedAssets,
       sops: normalizedSops,
@@ -437,6 +479,10 @@ function readWorkspaceState(): NexOpsState {
       workspaceEmails: Array.isArray(parsed.workspaceEmails) ? parsed.workspaceEmails : [],
       workspaceLinks: Array.isArray(parsed.workspaceLinks) ? parsed.workspaceLinks : [],
       teamMembers: normalizedMembers,
+      globalAuditLogs: Array.isArray(parsed.globalAuditLogs)
+        ? parsed.globalAuditLogs.map((a) => ({ ...a, actorRole: normalizeRole(a.actorRole) }))
+        : [],
+      notifications: Array.isArray(parsed.notifications) ? parsed.notifications : [],
       permissionMatrix: normalizePermissionMatrix(parsed.permissionMatrix),
     };
   } catch {
@@ -608,20 +654,15 @@ function defaultTitleForRole(role: Role): string {
   switch (role) {
     case 'Admin':
       return 'Operations Administrator';
-    case 'Manager / QA Reviewer':
-      return 'QA & Approval Reviewer';
+    case 'Editor':
+      return 'Operations Editor';
     default:
-      return 'Operations Contributor';
+      return 'Workspace Viewer';
   }
 }
 
-const VALID_ROLES: Role[] = ['Admin', 'Manager / QA Reviewer', 'Staff / Contributor'];
-
 function resolveRole(raw: unknown): Role {
-  if (typeof raw === 'string' && VALID_ROLES.includes(raw as Role)) {
-    return raw as Role;
-  }
-  return 'Staff / Contributor';
+  return normalizeRole(raw);
 }
 
 function deriveEmployeeCode(seedStr: string): string {
@@ -637,6 +678,7 @@ export function buildMemberFromSupabaseUser(
   existingMembers: TeamMember[] = [],
 ): TeamMember {
   const email = (user.email ?? '').trim() || `user-${user.id.slice(0, 6)}@nexops.local`;
+  const isSuper = isSuperAdminEmail(email);
   const existing = existingMembers.find(
     (m) => m.id === user.id || m.email.toLowerCase() === email.toLowerCase(),
   );
@@ -649,7 +691,16 @@ export function buildMemberFromSupabaseUser(
       .split('@')[0]
       .replace(/[._-]+/g, ' ')
       .replace(/\b\w/g, (ch) => ch.toUpperCase());
-  const role: Role = meta.role ? resolveRole(meta.role) : existing?.role ?? 'Staff / Contributor';
+  const role: Role = isSuper
+    ? 'Admin'
+    : existing?.role
+      ? resolveRole(existing.role)
+      : meta.role
+        ? resolveRole(meta.role)
+        : 'Viewer';
+  const approvalStatus: ApprovalStatus = isSuper
+    ? 'approved'
+    : existing?.approvalStatus ?? normalizeApprovalStatus(meta.approval_status, email);
   const department =
     (typeof meta.department === 'string' && meta.department.trim()) ||
     existing?.department ||
@@ -657,7 +708,7 @@ export function buildMemberFromSupabaseUser(
   const title =
     (typeof meta.title === 'string' && meta.title.trim()) ||
     existing?.title ||
-    defaultTitleForRole(role);
+    (isSuper ? 'Primary Super Administrator' : defaultTitleForRole(role));
   const signOffTitle =
     (typeof meta.sign_off_title === 'string' && meta.sign_off_title.trim()) ||
     existing?.signOffTitle ||
@@ -677,11 +728,15 @@ export function buildMemberFromSupabaseUser(
     name: rawName,
     email,
     role,
+    approvalStatus,
+    isSuperAdmin: isSuper || Boolean(existing?.isSuperAdmin),
+    approvedBy: existing?.approvedBy,
+    approvedAt: existing?.approvedAt,
     department,
     title,
     signOffTitle,
     avatarUrl,
-    active: existing?.active ?? true,
+    active: isSuper ? true : existing?.active ?? true,
     lastActive: new Date().toISOString(),
     outOfOffice: existing?.outOfOffice,
     delegateApproverId: existing?.delegateApproverId,
@@ -809,6 +864,11 @@ interface NexOpsProfileDbRow {
   full_name?: string | null;
   employee_id?: string | null;
   role?: string | null;
+  approval_status?: string | null;
+  is_super_admin?: boolean | null;
+  active?: boolean | null;
+  approved_by?: string | null;
+  approved_at?: string | null;
   department?: string | null;
   title?: string | null;
   sign_off_title?: string | null;
@@ -876,7 +936,7 @@ function mapDbAudit(row: NexOpsAuditDbRow, teamMembers: TeamMember[]): AuditEven
     requestId: row.request_id,
     timestamp: row.created_at,
     actorName: row.actor_name,
-    actorRole: row.actor_role,
+    actorRole: normalizeRole(row.actor_role),
     actorSignOffTitle: actorMatch?.signOffTitle,
     actionType: row.action_type,
     details: row.details,
@@ -1174,28 +1234,19 @@ function mapDbRequest(
 
   let projectLink: RequestProjectLink | undefined = projectLinksMap[row.id];
   if (!projectLink) {
-    const seedMatch = INITIAL_REQUESTS.find((r) => r.id === row.id);
-    if (seedMatch?.projectId && seedMatch.projectCode && seedMatch.projectName) {
-      projectLink = {
-        projectId: seedMatch.projectId,
-        projectCode: seedMatch.projectCode,
-        projectName: seedMatch.projectName,
-      };
-    } else {
-      for (const ev of requestAudits) {
-        const match = ev.details.match(/\[Project:\s*([A-Z0-9-]+)\]/i);
-        if (match) {
-          const foundProj = projects.find(
-            (p) => p.code.toLowerCase() === match[1].toLowerCase(),
-          );
-          if (foundProj) {
-            projectLink = {
-              projectId: foundProj.id,
-              projectCode: foundProj.code,
-              projectName: foundProj.name,
-            };
-            break;
-          }
+    for (const ev of requestAudits) {
+      const match = ev.details.match(/\[Project:\s*([A-Z0-9-]+)\]/i);
+      if (match) {
+        const foundProj = projects.find(
+          (p) => p.code.toLowerCase() === match[1].toLowerCase(),
+        );
+        if (foundProj) {
+          projectLink = {
+            projectId: foundProj.id,
+            projectCode: foundProj.code,
+            projectName: foundProj.name,
+          };
+          break;
         }
       }
     }
@@ -1221,18 +1272,13 @@ function mapDbRequest(
     }
   }
 
-  const seedMatch = INITIAL_REQUESTS.find((r) => r.id === row.id);
   const storedMeta = metaMap[row.id];
 
   // Hydrate Stage 1 / Stage 2 approval metadata from synced map or audit trail tags
   let stage1Approval: ApprovalStageSignOff | undefined =
-    storedMeta?.stage1Approval === null
-      ? undefined
-      : storedMeta?.stage1Approval ?? seedMatch?.stage1Approval;
+    storedMeta?.stage1Approval === null ? undefined : storedMeta?.stage1Approval;
   let stage2Approval: ApprovalStageSignOff | undefined =
-    storedMeta?.stage2Approval === null
-      ? undefined
-      : storedMeta?.stage2Approval ?? seedMatch?.stage2Approval;
+    storedMeta?.stage2Approval === null ? undefined : storedMeta?.stage2Approval;
 
   if (!stage1Approval && row.status !== 'Draft' && row.status !== 'Revision Required') {
     const s1Ev = [...requestAudits]
@@ -1261,16 +1307,12 @@ function mapDbRequest(
     }
   }
 
-  let currency: CurrencyCode | undefined = storedMeta?.currency ?? seedMatch?.currency;
+  let currency: CurrencyCode | undefined = storedMeta?.currency;
   let estimatedCost: number | undefined =
-    typeof storedMeta?.estimatedCost === 'number'
-      ? storedMeta.estimatedCost
-      : seedMatch?.estimatedCost;
+    typeof storedMeta?.estimatedCost === 'number' ? storedMeta.estimatedCost : undefined;
   let actualSpend: number | undefined =
-    typeof storedMeta?.actualSpend === 'number'
-      ? storedMeta.actualSpend
-      : seedMatch?.actualSpend;
-  let momCode: string | undefined = storedMeta?.momCode ?? seedMatch?.momCode;
+    typeof storedMeta?.actualSpend === 'number' ? storedMeta.actualSpend : undefined;
+  let momCode: string | undefined = storedMeta?.momCode;
 
   for (const ev of requestAudits) {
     if (!currency || typeof estimatedCost !== 'number') {
@@ -1294,8 +1336,8 @@ function mapDbRequest(
     category: row.category,
     department: row.department,
     submittedBy: row.submitted_by,
-    submitterId: submitterMatch?.id ?? 'usr-staff-01',
-    assignedReviewer: storedMeta?.assignedReviewer ?? seedMatch?.assignedReviewer ?? 'Marcus Vance',
+    submitterId: submitterMatch?.id ?? '',
+    assignedReviewer: storedMeta?.assignedReviewer ?? '',
     delegatedFromReviewer: storedMeta?.delegatedFromReviewer,
     priority: row.priority,
     status: row.status,
@@ -1393,6 +1435,7 @@ export const SYSTEM_STATE_KEYS = {
   TEAM_DIRECTORY: 'team_directory',
   REQUEST_META: 'request_meta',
   WORKSPACE_GMAIL_PREFS: 'workspace_gmail_prefs',
+  MASTER_KEY: 'master_key_config',
 } as const;
 
 interface SyncedRequestMetaBundle {
@@ -1506,9 +1549,144 @@ export interface ProvisionEmployeePayload {
   title?: string;
 }
 
+async function hashMasterKeySecret(rawKey: string): Promise<string> {
+  const input = `nexops-master-key::${rawKey.trim()}`;
+  if (typeof window !== 'undefined' && window.crypto?.subtle) {
+    const encoded = new TextEncoder().encode(input);
+    const digest = await window.crypto.subtle.digest('SHA-256', encoded);
+    return Array.from(new Uint8Array(digest))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+  }
+  let hash = 2166136261;
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `fnv-${(hash >>> 0).toString(16)}`;
+}
+
+function readMasterKeyConfigSync(): MasterKeyConfig | null {
+  try {
+    const raw = localStorage.getItem(MASTER_KEY_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<MasterKeyConfig>;
+    if (!parsed || typeof parsed.keyHash !== 'string' || !parsed.keyHash) return null;
+    return {
+      keyHash: parsed.keyHash,
+      keyHint: typeof parsed.keyHint === 'string' ? parsed.keyHint : '****',
+      requireForSensitiveActions: Boolean(parsed.requireForSensitiveActions),
+      updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : new Date().toISOString(),
+      updatedBy: typeof parsed.updatedBy === 'string' ? parsed.updatedBy : 'System Admin',
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeMasterKeyConfigSync(config: MasterKeyConfig | null): void {
+  try {
+    if (!config) {
+      localStorage.removeItem(MASTER_KEY_STORAGE_KEY);
+    } else {
+      localStorage.setItem(MASTER_KEY_STORAGE_KEY, JSON.stringify(config));
+    }
+  } catch {
+    // Ignore storage quota restrictions
+  }
+}
+
+function mapProfileRowToMember(row: NexOpsProfileDbRow, existing?: TeamMember): TeamMember {
+  const email = (row.email ?? existing?.email ?? '').trim();
+  const isSuper = isSuperAdminEmail(email) || Boolean(row.is_super_admin);
+  const role: Role = isSuper
+    ? 'Admin'
+    : row.role
+      ? fromDbRole(row.role)
+      : existing?.role ?? 'Viewer';
+  const approvalStatus: ApprovalStatus = isSuper
+    ? 'approved'
+    : normalizeApprovalStatus(row.approval_status ?? existing?.approvalStatus ?? 'pending', email);
+  const name = (row.full_name ?? existing?.name ?? email.split('@')[0] ?? 'Team Member').trim();
+  const title = (row.title ?? existing?.title ?? (isSuper ? 'Primary Super Administrator' : defaultTitleForRole(role))).trim();
+  return {
+    id: row.id,
+    employeeId: (row.employee_id ?? existing?.employeeId ?? deriveEmployeeCode(row.id || email)).trim(),
+    name,
+    email,
+    role,
+    approvalStatus,
+    isSuperAdmin: isSuper,
+    approvedBy: row.approved_by ?? existing?.approvedBy,
+    approvedAt: row.approved_at ?? existing?.approvedAt,
+    department: (row.department ?? existing?.department ?? DEFAULT_DEPARTMENTS[0]).trim(),
+    title,
+    signOffTitle: (row.sign_off_title ?? existing?.signOffTitle ?? title).trim(),
+    avatarUrl:
+      row.avatar_url === null
+        ? undefined
+        : row.avatar_url || existing?.avatarUrl,
+    active: isSuper ? true : row.active ?? existing?.active ?? true,
+    lastActive: row.updated_at || existing?.lastActive || new Date().toISOString(),
+    outOfOffice: existing?.outOfOffice,
+    delegateApproverId: existing?.delegateApproverId,
+    delegateApproverName: existing?.delegateApproverName,
+  };
+}
+
+async function upsertProfileRecord(member: TeamMember): Promise<void> {
+  if (!supabase) return;
+  const isSuper = isSuperAdminEmail(member.email) || Boolean(member.isSuperAdmin);
+  const role: Role = isSuper ? 'Admin' : normalizeRole(member.role);
+  const approvalStatus: ApprovalStatus = isSuper
+    ? 'approved'
+    : normalizeApprovalStatus(member.approvalStatus ?? 'pending', member.email);
+  const payload = {
+    id: member.id,
+    email: member.email.trim().toLowerCase(),
+    full_name: member.name,
+    employee_id: member.employeeId,
+    role: toDbRole(role),
+    approval_status: approvalStatus,
+    is_super_admin: isSuper,
+    active: isSuper ? true : member.active,
+    approved_by: member.approvedBy ?? null,
+    approved_at: member.approvedAt ?? null,
+    department: member.department,
+    title: member.title,
+    sign_off_title: member.signOffTitle,
+    avatar_url: member.avatarUrl ?? null,
+    updated_at: new Date().toISOString(),
+  };
+
+  const { error } = await supabase.from('profiles').upsert(payload, { onConflict: 'id' });
+  if (error) {
+    // Fallback if optional RBAC columns have not yet been migrated in Supabase
+    const { error: legacyErr } = await supabase.from('profiles').upsert(
+      {
+        id: payload.id,
+        email: payload.email,
+        full_name: payload.full_name,
+        employee_id: payload.employee_id,
+        role: payload.role,
+        department: payload.department,
+        title: payload.title,
+        sign_off_title: payload.sign_off_title,
+        avatar_url: payload.avatar_url,
+        updated_at: payload.updated_at,
+      },
+      { onConflict: 'id' },
+    );
+    if (legacyErr) {
+      throw legacyErr;
+    }
+  }
+}
+
 export interface FullWorkspaceFetchResult {
   state: NexOpsState;
   branding: CompanyBrandingConfig;
+  masterKeyConfig: MasterKeyConfig | null;
   diagnostics: TableSyncStatus[];
   cloudHealthy: boolean;
 }
@@ -1518,6 +1696,55 @@ export const dataService = {
 
   isSupabaseConfigured(): boolean {
     return Boolean(supabase);
+  },
+
+  masterKey: {
+    loadSync(): MasterKeyConfig | null {
+      return readMasterKeyConfigSync();
+    },
+
+    async saveConfig(config: MasterKeyConfig, updatedBy?: string): Promise<MasterKeyConfig> {
+      writeMasterKeyConfigSync(config);
+      if (supabase) {
+        await dataService.systemState.upsertKey(SYSTEM_STATE_KEYS.MASTER_KEY, config, updatedBy);
+      }
+      return config;
+    },
+
+    async generateNewKey(
+      actorName: string,
+      requireForSensitiveActions = true,
+    ): Promise<{ plainKey: string; config: MasterKeyConfig }> {
+      const randomBytes = new Uint8Array(12);
+      if (typeof window !== 'undefined' && window.crypto?.getRandomValues) {
+        window.crypto.getRandomValues(randomBytes);
+      } else {
+        for (let i = 0; i < randomBytes.length; i += 1) {
+          randomBytes[i] = Math.floor(Math.random() * 256);
+        }
+      }
+      const hex = Array.from(randomBytes)
+        .map((b) => b.toString(16).padStart(2, '0').toUpperCase())
+        .join('');
+      const plainKey = `NXMK-${hex.slice(0, 6)}-${hex.slice(6, 12)}-${hex.slice(12, 18)}-${hex.slice(18, 24)}`;
+      const keyHash = await hashMasterKeySecret(plainKey);
+      const config: MasterKeyConfig = {
+        keyHash,
+        keyHint: `...${plainKey.slice(-6)}`,
+        requireForSensitiveActions,
+        updatedAt: new Date().toISOString(),
+        updatedBy: actorName,
+      };
+      await dataService.masterKey.saveConfig(config, actorName);
+      return { plainKey, config };
+    },
+
+    async verifyKey(plainKey: string, configOverride?: MasterKeyConfig | null): Promise<boolean> {
+      const config = configOverride ?? readMasterKeyConfigSync();
+      if (!config || !config.keyHash) return false;
+      const candidateHash = await hashMasterKeySecret(plainKey);
+      return candidateHash === config.keyHash;
+    },
   },
 
   branding: {
@@ -1564,6 +1791,7 @@ export const dataService = {
       return {
         state: localSnapshot,
         branding: localBranding,
+        masterKeyConfig: readMasterKeyConfigSync(),
         diagnostics: buildOfflineDiagnostics(localSnapshot),
         cloudHealthy: false,
       };
@@ -1608,6 +1836,15 @@ export const dataService = {
       ? writeBrandingConfig(normalizeBrandingCandidate(brandingRow.payload, localBranding))
       : localBranding;
 
+    const masterKeyRow = sysMap.get(SYSTEM_STATE_KEYS.MASTER_KEY);
+    const masterKeyConfig =
+      masterKeyRow && masterKeyRow.payload && typeof masterKeyRow.payload === 'object'
+        ? (masterKeyRow.payload as MasterKeyConfig)
+        : readMasterKeyConfigSync();
+    if (masterKeyConfig) {
+      writeMasterKeyConfigSync(masterKeyConfig);
+    }
+
     const permRow = sysMap.get(SYSTEM_STATE_KEYS.PERMISSION_MATRIX);
     const permissionMatrix = permRow
       ? normalizePermissionMatrix(permRow.payload)
@@ -1621,31 +1858,32 @@ export const dataService = {
 
     const baseMembers: TeamMember[] =
       sysMap.get(SYSTEM_STATE_KEYS.TEAM_DIRECTORY) &&
-      Array.isArray(sysMap.get(SYSTEM_STATE_KEYS.TEAM_DIRECTORY)?.payload) &&
-      (sysMap.get(SYSTEM_STATE_KEYS.TEAM_DIRECTORY)?.payload as TeamMember[]).length > 0
-        ? (sysMap.get(SYSTEM_STATE_KEYS.TEAM_DIRECTORY)?.payload as TeamMember[]).filter(
-            (m) => !isLegacyDemoAdmin(m),
-          )
+      Array.isArray(sysMap.get(SYSTEM_STATE_KEYS.TEAM_DIRECTORY)?.payload)
+        ? (sysMap.get(SYSTEM_STATE_KEYS.TEAM_DIRECTORY)?.payload as TeamMember[])
+            .filter((m) => !isLegacyDemoMember(m))
+            .map((m, idx) => enforceMemberInvariants(m, idx))
         : localSnapshot.teamMembers;
 
-    // Merge avatar_url and profile fields from `profiles` table
+    // Merge all rows from `profiles` table (authoritative DB role + approval_status + avatar_url)
     const profileRows = !profileRes.error ? ((profileRes.data ?? []) as NexOpsProfileDbRow[]) : [];
-    const teamMembers: TeamMember[] = baseMembers.map((member) => {
-      const matchedProfile = profileRows.find(
-        (p) =>
-          p.id === member.id ||
-          (p.email && p.email.trim().toLowerCase() === member.email.trim().toLowerCase()),
-      );
-      if (!matchedProfile) return member;
-      return {
-        ...member,
-        avatarUrl:
-          matchedProfile.avatar_url === null
-            ? undefined
-            : matchedProfile.avatar_url || member.avatarUrl,
-        signOffTitle: matchedProfile.sign_off_title || member.signOffTitle,
-      };
-    });
+    const mergedByKey = new Map<string, TeamMember>();
+    for (const member of baseMembers) {
+      mergedByKey.set(member.email.trim().toLowerCase() || member.id, member);
+    }
+    for (const pRow of profileRows) {
+      const key = (pRow.email ?? '').trim().toLowerCase() || pRow.id;
+      const existing =
+        mergedByKey.get(key) ??
+        baseMembers.find((m) => m.id === pRow.id || m.email.toLowerCase() === key);
+      if (existing && isLegacyDemoMember(existing)) continue;
+      const mapped = mapProfileRowToMember(pRow, existing);
+      if (!isLegacyDemoMember(mapped)) {
+        mergedByKey.set((mapped.email ?? '').trim().toLowerCase() || mapped.id, mapped);
+      }
+    }
+    const teamMembers: TeamMember[] = Array.from(mergedByKey.values()).map((m, idx) =>
+      enforceMemberInvariants(m, idx),
+    );
 
     const metaBundleRow = sysMap.get(SYSTEM_STATE_KEYS.REQUEST_META);
     if (metaBundleRow && metaBundleRow.payload && typeof metaBundleRow.payload === 'object') {
@@ -1811,6 +2049,7 @@ export const dataService = {
     return {
       state: hydrated,
       branding,
+      masterKeyConfig,
       diagnostics,
       cloudHealthy,
     };
@@ -2004,7 +2243,13 @@ export const dataService = {
 
     hasLocalAdminSync(membersOverride?: TeamMember[]): boolean {
       const members = membersOverride ?? readWorkspaceState().teamMembers;
-      return members.some((m) => m.role === 'Admin' && m.active && !isLegacyDemoAdmin(m));
+      return members.some(
+        (m) =>
+          (isSuperAdminEmail(m.email) || m.role === 'Admin') &&
+          m.active &&
+          (m.approvalStatus ?? 'approved') === 'approved' &&
+          !isLegacyDemoMember(m),
+      );
     },
 
     async checkAdminInitialized(membersOverride?: TeamMember[]): Promise<boolean> {
@@ -2013,6 +2258,14 @@ export const dataService = {
       }
       if (supabase) {
         try {
+          const { data: profileAdmins, error: profErr } = await supabase
+            .from('profiles')
+            .select('id,email,role')
+            .or(`role.eq.admin,role.eq.Admin,email.ilike.${SUPER_ADMIN_EMAIL}`)
+            .limit(1);
+          if (!profErr && Array.isArray(profileAdmins) && profileAdmins.length > 0) {
+            return true;
+          }
           const { data, error } = await supabase
             .from('nexops_audit_logs')
             .select('id')
@@ -2028,13 +2281,75 @@ export const dataService = {
       return false;
     },
 
+    async refreshUserProfile(
+      userId: string,
+      email?: string,
+      fallbackMember?: TeamMember,
+    ): Promise<TeamMember | null> {
+      const local = readWorkspaceState();
+      const localMatch =
+        local.teamMembers.find(
+          (m) =>
+            m.id === userId ||
+            (email && m.email.trim().toLowerCase() === email.trim().toLowerCase()),
+        ) ?? fallbackMember;
+
+      if (!supabase) {
+        return localMatch ? enforceMemberInvariants(localMatch) : null;
+      }
+
+      try {
+        let row: NexOpsProfileDbRow | null = null;
+        const { data: byId } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', userId)
+          .maybeSingle();
+        if (byId) {
+          row = byId as NexOpsProfileDbRow;
+        } else if (email) {
+          const { data: byEmail } = await supabase
+            .from('profiles')
+            .select('*')
+            .ilike('email', email.trim())
+            .maybeSingle();
+          if (byEmail) {
+            row = byEmail as NexOpsProfileDbRow;
+          }
+        }
+
+        if (!row) {
+          return localMatch ? enforceMemberInvariants(localMatch) : null;
+        }
+        const mapped = enforceMemberInvariants(mapProfileRowToMember(row, localMatch));
+        const nextMembers = local.teamMembers.some(
+          (m) => m.id === mapped.id || m.email.toLowerCase() === mapped.email.toLowerCase(),
+        )
+          ? local.teamMembers.map((m) =>
+              m.id === mapped.id || m.email.toLowerCase() === mapped.email.toLowerCase()
+                ? mapped
+                : m,
+            )
+          : [mapped, ...local.teamMembers];
+        writeWorkspaceState({
+          ...local,
+          activeRole: mapped.role,
+          teamMembers: nextMembers,
+        });
+        return mapped;
+      } catch {
+        return localMatch ? enforceMemberInvariants(localMatch) : null;
+      }
+    },
+
     async signInWithEmail(email: string, password: string, rememberSession = true) {
-      const cleanEmail = email.trim();
+      const cleanEmail = email.trim().toLowerCase();
       if (!cleanEmail || !password.trim()) {
         throw new Error('Corporate email and password are required.');
       }
 
       const local = readWorkspaceState();
+      const isSuper = isSuperAdminEmail(cleanEmail);
 
       // Official Supabase Email & Password Sign-In
       if (supabase) {
@@ -2047,17 +2362,62 @@ export const dataService = {
           throw new Error('Supabase authentication succeeded without user profile.');
         }
 
+        // Query authoritative profile row from Supabase `profiles`
+        let dbProfileRow: NexOpsProfileDbRow | null = null;
+        try {
+          const { data: byId } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', data.user.id)
+            .maybeSingle();
+          if (byId) {
+            dbProfileRow = byId as NexOpsProfileDbRow;
+          } else {
+            const { data: byEmail } = await supabase
+              .from('profiles')
+              .select('*')
+              .ilike('email', cleanEmail)
+              .maybeSingle();
+            if (byEmail) {
+              dbProfileRow = byEmail as NexOpsProfileDbRow;
+            }
+          }
+        } catch {
+          // Proceed with auth metadata if profile query fails
+        }
+
         const existingMatch = local.teamMembers.find(
-          (m) => m.id === data.user?.id || m.email.toLowerCase() === cleanEmail.toLowerCase(),
+          (m) => m.id === data.user?.id || m.email.toLowerCase() === cleanEmail,
         );
-        if (existingMatch && !existingMatch.active) {
+
+        let member: TeamMember;
+        if (dbProfileRow) {
+          member = enforceMemberInvariants(
+            mapProfileRowToMember(dbProfileRow, existingMatch ?? buildMemberFromSupabaseUser(data.user, local.teamMembers)),
+          );
+        } else {
+          const base = buildMemberFromSupabaseUser(data.user, local.teamMembers);
+          member = enforceMemberInvariants({
+            ...base,
+            role: isSuper ? 'Admin' : existingMatch?.role ?? 'Viewer',
+            approvalStatus: isSuper ? 'approved' : existingMatch?.approvalStatus ?? 'pending',
+            isSuperAdmin: isSuper,
+            active: isSuper ? true : existingMatch?.active ?? true,
+          });
+          await upsertProfileRecord(member).catch(() => {});
+        }
+
+        if (isSuper) {
+          await upsertProfileRecord(member).catch(() => {});
+        }
+
+        if (!isSuper && member.approvalStatus === 'approved' && !member.active) {
           await supabase.auth.signOut();
           throw new Error(
-            `Account for ${existingMatch.name} has been deactivated. Contact your System Administrator.`,
+            `Account for ${member.name} has been deactivated. Contact your System Administrator.`,
           );
         }
 
-        const member = buildMemberFromSupabaseUser(data.user, local.teamMembers);
         const updatedMembers = local.teamMembers.some(
           (m) => m.id === member.id || m.email.toLowerCase() === member.email.toLowerCase(),
         )
@@ -2084,8 +2444,11 @@ export const dataService = {
           userName: member.name,
           userEmail: member.email,
           userRole: member.role,
+          approvalStatus: member.approvalStatus,
+          isSuperAdmin: member.isSuperAdmin,
           userDepartment: member.department,
           userTitle: member.title,
+          avatarUrl: member.avatarUrl,
         };
         dataService.auth.saveSessionSync(session);
         return { user: member, session };
@@ -2093,21 +2456,22 @@ export const dataService = {
 
       // Offline corporate credential verification when Supabase env vars are absent
       const match = local.teamMembers.find(
-        (m) => m.email.toLowerCase() === cleanEmail.toLowerCase(),
+        (m) => m.email.toLowerCase() === cleanEmail,
       );
       if (!match) {
         throw new Error(
-          'Invalid corporate credentials. Contact your System Administrator to provision an account.',
+          'Invalid corporate credentials. Create an account or contact your System Administrator.',
         );
       }
-      if (!match.active) {
+      const normalizedMatch = enforceMemberInvariants(match);
+      if (!isSuper && normalizedMatch.approvalStatus === 'approved' && !normalizedMatch.active) {
         throw new Error(
-          `Account for ${match.name} is currently deactivated. Contact your System Administrator.`,
+          `Account for ${normalizedMatch.name} is currently deactivated. Contact your System Administrator.`,
         );
       }
 
       const creds = readLocalCredentials();
-      const storedHash = creds[cleanEmail.toLowerCase()];
+      const storedHash = creds[cleanEmail];
       const enteredHash = await hashCredentialSecret(cleanEmail, password);
       if (!storedHash || storedHash !== enteredHash) {
         throw new Error('Invalid corporate email or password.');
@@ -2115,29 +2479,210 @@ export const dataService = {
 
       const now = new Date().toISOString();
       const updatedMembers = local.teamMembers.map((m) =>
-        m.id === match.id ? { ...m, lastActive: now } : m,
+        m.id === normalizedMatch.id ? { ...normalizedMatch, lastActive: now } : m,
       );
       writeWorkspaceState({
         ...local,
-        activeRole: match.role,
+        activeRole: normalizedMatch.role,
         teamMembers: updatedMembers,
       });
 
       const session: AuthSession = {
         isAuthenticated: true,
-        userId: match.id,
+        userId: normalizedMatch.id,
         rememberSession,
         signedInAt: now,
         authProvider: 'local',
-        employeeId: match.employeeId,
-        userName: match.name,
-        userEmail: match.email,
-        userRole: match.role,
-        userDepartment: match.department,
-        userTitle: match.title,
+        employeeId: normalizedMatch.employeeId,
+        userName: normalizedMatch.name,
+        userEmail: normalizedMatch.email,
+        userRole: normalizedMatch.role,
+        approvalStatus: normalizedMatch.approvalStatus,
+        isSuperAdmin: normalizedMatch.isSuperAdmin,
+        userDepartment: normalizedMatch.department,
+        userTitle: normalizedMatch.title,
+        avatarUrl: normalizedMatch.avatarUrl,
       };
       dataService.auth.saveSessionSync(session);
-      return { user: { ...match, lastActive: now }, session };
+      return { user: { ...normalizedMatch, lastActive: now }, session };
+    },
+
+    async registerUser(
+      payload: {
+        fullName: string;
+        email: string;
+        employeeId?: string;
+        password: string;
+        department: Department;
+      },
+      rememberSession = true,
+    ): Promise<
+      | { status: 'signed_in'; user: TeamMember; session: AuthSession }
+      | { status: 'confirmation_required'; email: string; user: TeamMember }
+    > {
+      const cleanName = payload.fullName.trim();
+      const cleanEmail = payload.email.trim().toLowerCase();
+      const cleanEmployeeId =
+        payload.employeeId?.trim().toUpperCase() || deriveEmployeeCode(cleanEmail);
+
+      if (!cleanName) throw new Error('Full Name is required.');
+      if (!cleanEmail || !cleanEmail.includes('@')) {
+        throw new Error('A valid corporate email address is required.');
+      }
+      if (payload.password.trim().length < 8) {
+        throw new Error('Password must be at least 8 characters.');
+      }
+
+      const isSuper = isSuperAdminEmail(cleanEmail);
+      const assignedRole: Role = isSuper ? 'Admin' : 'Viewer';
+      const approvalStatus: ApprovalStatus = isSuper ? 'approved' : 'pending';
+      const assignedTitle = isSuper ? 'Primary Super Administrator' : defaultTitleForRole(assignedRole);
+      const now = new Date().toISOString();
+      const local = readWorkspaceState();
+
+      if (supabase) {
+        const { data, error } = await supabase.auth.signUp({
+          email: cleanEmail,
+          password: payload.password,
+          options: {
+            emailRedirectTo:
+              typeof window !== 'undefined' ? window.location.origin : undefined,
+            data: {
+              full_name: cleanName,
+              name: cleanName,
+              employee_id: cleanEmployeeId,
+              department: payload.department,
+              role: toDbRole(assignedRole),
+              approval_status: approvalStatus,
+              is_super_admin: isSuper,
+              title: assignedTitle,
+              sign_off_title: assignedTitle,
+            },
+          },
+        });
+        if (error) throw error;
+        if (!data.user) {
+          throw new Error('Registration did not return a user profile.');
+        }
+
+        const newMember: TeamMember = enforceMemberInvariants({
+          id: data.user.id,
+          employeeId: cleanEmployeeId,
+          name: cleanName,
+          email: cleanEmail,
+          role: assignedRole,
+          approvalStatus,
+          isSuperAdmin: isSuper,
+          approvedBy: isSuper ? 'System Bootstrap' : undefined,
+          approvedAt: isSuper ? now : undefined,
+          department: payload.department,
+          title: assignedTitle,
+          signOffTitle: assignedTitle,
+          active: true,
+          lastActive: now,
+        });
+
+        await upsertProfileRecord(newMember).catch(() => {});
+
+        const updatedMembers = [
+          newMember,
+          ...local.teamMembers.filter(
+            (m) => m.id !== newMember.id && m.email.toLowerCase() !== cleanEmail,
+          ),
+        ];
+
+        writeWorkspaceState({
+          ...local,
+          activeRole: newMember.role,
+          teamMembers: updatedMembers,
+        });
+
+        if (isSuper) {
+          const initAudit: AuditEvent = {
+            id: `aud-reg-super-${Date.now()}`,
+            requestId: 'AUTH-PRIMARY-ADMIN',
+            timestamp: now,
+            actorName: newMember.name,
+            actorRole: 'Admin',
+            actorSignOffTitle: newMember.signOffTitle,
+            actionType: 'Team Updated',
+            details: `Super Admin ${newMember.email} registered and verified automatically.`,
+          };
+          void dataService.auditLogs.append(initAudit).catch(() => {});
+        }
+
+        if (!data.session) {
+          return {
+            status: 'confirmation_required',
+            email: cleanEmail,
+            user: newMember,
+          };
+        }
+
+        const session: AuthSession = {
+          isAuthenticated: true,
+          userId: newMember.id,
+          rememberSession,
+          signedInAt: now,
+          authProvider: 'supabase',
+          employeeId: newMember.employeeId,
+          userName: newMember.name,
+          userEmail: newMember.email,
+          userRole: newMember.role,
+          approvalStatus: newMember.approvalStatus,
+          isSuperAdmin: newMember.isSuperAdmin,
+          userDepartment: newMember.department,
+          userTitle: newMember.title,
+        };
+        dataService.auth.saveSessionSync(session);
+        return { status: 'signed_in', user: newMember, session };
+      }
+
+      // Offline local registration
+      if (local.teamMembers.some((m) => m.email.toLowerCase() === cleanEmail)) {
+        throw new Error(`An account already exists for ${cleanEmail}. Please sign in.`);
+      }
+      await saveLocalCredential(cleanEmail, payload.password);
+      const newMember: TeamMember = enforceMemberInvariants({
+        id: `usr-${Date.now()}`,
+        employeeId: cleanEmployeeId,
+        name: cleanName,
+        email: cleanEmail,
+        role: assignedRole,
+        approvalStatus,
+        isSuperAdmin: isSuper,
+        approvedBy: isSuper ? 'System Bootstrap' : undefined,
+        approvedAt: isSuper ? now : undefined,
+        department: payload.department,
+        title: assignedTitle,
+        signOffTitle: assignedTitle,
+        active: true,
+        lastActive: now,
+      });
+
+      writeWorkspaceState({
+        ...local,
+        activeRole: newMember.role,
+        teamMembers: [newMember, ...local.teamMembers],
+      });
+
+      const session: AuthSession = {
+        isAuthenticated: true,
+        userId: newMember.id,
+        rememberSession,
+        signedInAt: now,
+        authProvider: 'local',
+        employeeId: newMember.employeeId,
+        userName: newMember.name,
+        userEmail: newMember.email,
+        userRole: newMember.role,
+        approvalStatus: newMember.approvalStatus,
+        isSuperAdmin: newMember.isSuperAdmin,
+        userDepartment: newMember.department,
+        userTitle: newMember.title,
+      };
+      dataService.auth.saveSessionSync(session);
+      return { status: 'signed_in', user: newMember, session };
     },
 
     async resetPasswordForEmail(email: string): Promise<void> {
@@ -2180,7 +2725,7 @@ export const dataService = {
       }
 
       const cleanName = payload.fullName.trim();
-      const cleanEmail = payload.email.trim();
+      const cleanEmail = payload.email.trim().toLowerCase();
       const cleanEmployeeId = payload.employeeId.trim().toUpperCase();
 
       if (!cleanName) throw new Error('Administrator Full Name is required.');
@@ -2194,7 +2739,8 @@ export const dataService = {
 
       const local = readWorkspaceState();
       const now = new Date().toISOString();
-      const adminTitle = 'Primary System Administrator';
+      const isSuper = isSuperAdminEmail(cleanEmail);
+      const adminTitle = isSuper ? 'Primary Super Administrator' : 'Primary System Administrator';
 
       if (supabase) {
         const { data, error } = await supabase.auth.signUp({
@@ -2208,7 +2754,9 @@ export const dataService = {
               name: cleanName,
               employee_id: cleanEmployeeId,
               department: payload.department,
-              role: 'Admin' as Role,
+              role: 'admin',
+              approval_status: 'approved',
+              is_super_admin: isSuper,
               title: adminTitle,
               sign_off_title: adminTitle,
             },
@@ -2223,12 +2771,18 @@ export const dataService = {
           ...buildMemberFromSupabaseUser(data.user, local.teamMembers),
           employeeId: cleanEmployeeId,
           role: 'Admin',
+          approvalStatus: 'approved',
+          isSuperAdmin: isSuper,
+          approvedBy: 'System Bootstrap',
+          approvedAt: now,
           department: payload.department,
           title: adminTitle,
           signOffTitle: adminTitle,
           active: true,
           lastActive: now,
         };
+
+        await upsertProfileRecord(adminMember).catch(() => {});
 
         const updatedMembers = [
           adminMember,
@@ -2253,11 +2807,9 @@ export const dataService = {
           actorRole: 'Admin',
           actorSignOffTitle: adminMember.signOffTitle,
           actionType: 'Team Updated',
-          details: `Initialized Primary System Administrator ${adminMember.name} (${adminMember.employeeId}, ${adminMember.email}). Registration locked to Admin-only.`,
+          details: `Initialized Primary System Administrator ${adminMember.name} (${adminMember.employeeId}, ${adminMember.email}).`,
         };
-        void dataService.auditLogs.append(initAudit).catch(() => {
-          // Non-blocking if Supabase table policy requires authenticated session
-        });
+        void dataService.auditLogs.append(initAudit).catch(() => {});
 
         if (!data.session) {
           return {
@@ -2277,6 +2829,8 @@ export const dataService = {
           userName: adminMember.name,
           userEmail: adminMember.email,
           userRole: 'Admin',
+          approvalStatus: 'approved',
+          isSuperAdmin: isSuper,
           userDepartment: adminMember.department,
           userTitle: adminMember.title,
         };
@@ -2292,6 +2846,10 @@ export const dataService = {
         name: cleanName,
         email: cleanEmail,
         role: 'Admin',
+        approvalStatus: 'approved',
+        isSuperAdmin: isSuper,
+        approvedBy: 'System Bootstrap',
+        approvedAt: now,
         department: payload.department,
         title: adminTitle,
         signOffTitle: adminTitle,
@@ -2315,6 +2873,8 @@ export const dataService = {
         userName: adminMember.name,
         userEmail: adminMember.email,
         userRole: 'Admin',
+        approvalStatus: 'approved',
+        isSuperAdmin: isSuper,
         userDepartment: adminMember.department,
         userTitle: adminMember.title,
       };
@@ -2331,9 +2891,11 @@ export const dataService = {
       existingMembers?: TeamMember[],
     ): Promise<{ member: TeamMember; emailConfirmationPending: boolean }> {
       const cleanName = payload.fullName.trim();
-      const cleanEmail = payload.email.trim();
+      const cleanEmail = payload.email.trim().toLowerCase();
       const cleanEmpId = payload.employeeId.trim().toUpperCase();
-      const cleanTitle = payload.title?.trim() || defaultTitleForRole(payload.role);
+      const isSuper = isSuperAdminEmail(cleanEmail);
+      const effectiveRole: Role = isSuper ? 'Admin' : normalizeRole(payload.role);
+      const cleanTitle = payload.title?.trim() || defaultTitleForRole(effectiveRole);
 
       if (!cleanName) throw new Error('Employee Full Name is required.');
       if (!cleanEmail || !cleanEmail.includes('@')) {
@@ -2346,7 +2908,7 @@ export const dataService = {
 
       const local = readWorkspaceState();
       const directory = existingMembers ?? local.teamMembers;
-      if (directory.some((m) => m.email.toLowerCase() === cleanEmail.toLowerCase())) {
+      if (directory.some((m) => m.email.toLowerCase() === cleanEmail)) {
         throw new Error(`An employee account already exists for ${cleanEmail}.`);
       }
       if (directory.some((m) => m.employeeId.toLowerCase() === cleanEmpId.toLowerCase())) {
@@ -2377,7 +2939,9 @@ export const dataService = {
               name: cleanName,
               employee_id: cleanEmpId,
               department: payload.department,
-              role: payload.role,
+              role: toDbRole(effectiveRole),
+              approval_status: 'approved',
+              is_super_admin: isSuper,
               title: cleanTitle,
               sign_off_title: cleanTitle,
             },
@@ -2397,13 +2961,19 @@ export const dataService = {
         employeeId: cleanEmpId,
         name: cleanName,
         email: cleanEmail,
-        role: payload.role,
+        role: effectiveRole,
+        approvalStatus: 'approved',
+        isSuperAdmin: isSuper,
+        approvedBy: 'Admin Provisioned',
+        approvedAt: now,
         department: payload.department,
         title: cleanTitle,
         signOffTitle: cleanTitle,
         active: true,
         lastActive: now,
       };
+
+      await upsertProfileRecord(member).catch(() => {});
 
       return { member, emailConfirmationPending };
     },
@@ -2739,6 +3309,17 @@ export const dataService = {
   // 10. System State Key-Value Store (`nexops_system_state`)
   // -------------------------------------------------------------------------
   systemState: {
+    async getKey<T = unknown>(stateKey: string): Promise<T | null> {
+      if (!supabase) return null;
+      const { data, error } = await supabase
+        .from('nexops_system_state')
+        .select('payload')
+        .eq('state_key', stateKey)
+        .maybeSingle();
+      if (error) return null;
+      return (data?.payload as T) ?? null;
+    },
+
     async upsertKey(stateKey: string, payload: unknown, updatedBy?: string): Promise<void> {
       if (!supabase) return;
       const { error } = await supabase.from('nexops_system_state').upsert(
@@ -2751,6 +3332,46 @@ export const dataService = {
         { onConflict: 'state_key' },
       );
       if (error) throw error;
+    },
+  },
+
+  // -------------------------------------------------------------------------
+  // 10b. Workspace Interactive Studio Persistence (Docs / Sheets / Forms)
+  // -------------------------------------------------------------------------
+  workspaceStudio: {
+    loadLocal<T>(toolType: string, docId: string): T | null {
+      try {
+        const raw = localStorage.getItem(`nexops_studio_${toolType}_${docId}`);
+        if (!raw) return null;
+        return JSON.parse(raw) as T;
+      } catch {
+        return null;
+      }
+    },
+
+    async fetchCloud<T>(toolType: string, docId: string): Promise<T | null> {
+      const key = `nexops_studio_${toolType}_${docId}`;
+      const cloud = await dataService.systemState.getKey<T>(key);
+      if (cloud) {
+        try {
+          localStorage.setItem(key, JSON.stringify(cloud));
+        } catch {
+          // Ignore quota error
+        }
+      }
+      return cloud;
+    },
+
+    async save<T>(toolType: string, docId: string, content: T, updatedBy?: string): Promise<void> {
+      const key = `nexops_studio_${toolType}_${docId}`;
+      try {
+        localStorage.setItem(key, JSON.stringify(content));
+      } catch {
+        // Ignore quota error
+      }
+      if (supabase) {
+        await dataService.systemState.upsertKey(key, content, updatedBy).catch(() => {});
+      }
     },
   },
 
@@ -2803,24 +3424,11 @@ export const dataService = {
         throw new Error('Uploaded image to avatars bucket but could not resolve public URL.');
       }
 
-      const now = new Date().toISOString();
-      const { error: profileErr } = await supabase.from('profiles').upsert(
-        {
-          id: user.id,
-          email: user.email,
-          full_name: user.name,
-          employee_id: user.employeeId,
-          role: user.role,
-          department: user.department,
-          title: user.title,
-          sign_off_title: user.signOffTitle,
-          avatar_url: publicUrl,
-          updated_at: now,
-        },
-        { onConflict: 'id' },
-      );
-      if (profileErr) {
-        throw new Error(`Uploaded image, but failed saving avatar_url to profiles table: ${profileErr.message}`);
+      try {
+        await upsertProfileRecord({ ...user, avatarUrl: publicUrl });
+      } catch (profileErr) {
+        const msg = profileErr instanceof Error ? profileErr.message : String(profileErr);
+        throw new Error(`Uploaded image, but failed saving avatar_url to profiles table: ${msg}`);
       }
 
       try {
@@ -2856,24 +3464,11 @@ export const dataService = {
         }
       }
 
-      const now = new Date().toISOString();
-      const { error: profileErr } = await supabase.from('profiles').upsert(
-        {
-          id: user.id,
-          email: user.email,
-          full_name: user.name,
-          employee_id: user.employeeId,
-          role: user.role,
-          department: user.department,
-          title: user.title,
-          sign_off_title: user.signOffTitle,
-          avatar_url: null,
-          updated_at: now,
-        },
-        { onConflict: 'id' },
-      );
-      if (profileErr) {
-        throw new Error(`Failed clearing avatar_url in profiles table: ${profileErr.message}`);
+      try {
+        await upsertProfileRecord({ ...user, avatarUrl: undefined });
+      } catch (profileErr) {
+        const msg = profileErr instanceof Error ? profileErr.message : String(profileErr);
+        throw new Error(`Failed clearing avatar_url in profiles table: ${msg}`);
       }
 
       try {
@@ -2934,15 +3529,18 @@ export const dataService = {
   },
 
   // -------------------------------------------------------------------------
-  // 14. Team Directory & Notifications (synced via `nexops_system_state` + audit logs)
+  // 14. Team Directory, RBAC Roles & Admin Approvals (`profiles` + `nexops_system_state`)
   // -------------------------------------------------------------------------
   team: {
     async updateMember(
-      _memberId: string,
-      _patch: Partial<
+      memberId: string,
+      patch: Partial<
         Pick<
           TeamMember,
           | 'role'
+          | 'approvalStatus'
+          | 'approvedBy'
+          | 'approvedAt'
           | 'department'
           | 'active'
           | 'signOffTitle'
@@ -2957,6 +3555,25 @@ export const dataService = {
     ): Promise<void> {
       if (!supabase) return;
       const tasks: Promise<void>[] = [dataService.auditLogs.append(auditEntry)];
+      const targetMember = nextDirectory?.find((m) => m.id === memberId);
+      if (targetMember) {
+        tasks.push(upsertProfileRecord(targetMember).catch(() => {}));
+      } else {
+        const dbPatch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+        if (patch.role !== undefined) dbPatch.role = toDbRole(patch.role);
+        if (patch.approvalStatus !== undefined) dbPatch.approval_status = patch.approvalStatus;
+        if (patch.approvedBy !== undefined) dbPatch.approved_by = patch.approvedBy;
+        if (patch.approvedAt !== undefined) dbPatch.approved_at = patch.approvedAt;
+        if (patch.department !== undefined) dbPatch.department = patch.department;
+        if (patch.active !== undefined) dbPatch.active = patch.active;
+        if (patch.signOffTitle !== undefined) dbPatch.sign_off_title = patch.signOffTitle;
+        if (patch.avatarUrl !== undefined) dbPatch.avatar_url = patch.avatarUrl;
+        tasks.push(
+          (async () => {
+            await supabase!.from('profiles').update(dbPatch).eq('id', memberId);
+          })(),
+        );
+      }
       if (nextDirectory) {
         tasks.push(
           dataService.systemState.upsertKey(
@@ -2977,26 +3594,7 @@ export const dataService = {
       if (!supabase) return;
       const tasks: Promise<void>[] = [
         dataService.auditLogs.append(auditEntry),
-        (async () => {
-          const { error } = await supabase.from('profiles').upsert(
-            {
-              id: member.id,
-              email: member.email,
-              full_name: member.name,
-              employee_id: member.employeeId,
-              role: member.role,
-              department: member.department,
-              title: member.title,
-              sign_off_title: member.signOffTitle,
-              avatar_url: member.avatarUrl ?? null,
-              updated_at: new Date().toISOString(),
-            },
-            { onConflict: 'id' },
-          );
-          if (error) {
-            // Non-blocking if profiles table hasn't been created yet
-          }
-        })(),
+        upsertProfileRecord(member).catch(() => {}),
       ];
       if (nextDirectory) {
         tasks.push(
