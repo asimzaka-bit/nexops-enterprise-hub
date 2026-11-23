@@ -62,6 +62,13 @@ interface TeamSettingsViewProps {
   onToggleMemberActive: (memberId: string) => void;
   onApproveUser: (memberId: string, assignedRole: Role) => Promise<void> | void;
   onRejectUser: (memberId: string) => Promise<void> | void;
+  onRefreshUsers?: () => Promise<void>;
+  onPreApproveUser?: (payload: {
+    email: string;
+    fullName?: string;
+    department: Department;
+    role: Role;
+  }) => Promise<void>;
   onProvisionEmployee: (payload: ProvisionEmployeePayload) => Promise<void>;
   onDownloadBackup: () => void;
   onRestoreBackup: (restoredState: NexOpsState) => void;
@@ -154,6 +161,8 @@ export function TeamSettingsView({
   onToggleMemberActive,
   onApproveUser,
   onRejectUser,
+  onRefreshUsers,
+  onPreApproveUser,
   onProvisionEmployee,
   onDownloadBackup,
   onRestoreBackup,
@@ -167,6 +176,14 @@ export function TeamSettingsView({
   const [approvalFilter, setApprovalFilter] = useState<ApprovalStatus | 'all'>('all');
   const [draftApprovalRoles, setDraftApprovalRoles] = useState<Record<string, Role>>({});
   const [approvalBusyId, setApprovalBusyId] = useState<string | null>(null);
+  const [refreshingUsers, setRefreshingUsers] = useState(false);
+  const [showPreApproveForm, setShowPreApproveForm] = useState(false);
+  const [preEmail, setPreEmail] = useState('');
+  const [preName, setPreName] = useState('');
+  const [preDept, setPreDept] = useState<Department>(branding.departments[0] ?? 'Operations');
+  const [preRole, setPreRole] = useState<Role>('Viewer');
+  const [preSaving, setPreSaving] = useState(false);
+  const [preError, setPreError] = useState<string | null>(null);
 
   const [draftMatrix, setDraftMatrix] = useState<PermissionMatrix>(permissionMatrix);
 
@@ -443,45 +460,227 @@ export function TeamSettingsView({
                 )}
               </div>
               <p className="mt-0.5 text-xs text-slate-500">
-                Review new user registrations, approve or reject workspace entry, and assign strict
-                RBAC roles (Viewer, Editor, or Admin).
+                Review new user registrations fetched live from Supabase, approve or reject workspace
+                entry, pre-approve employees by email, and assign strict RBAC roles (Viewer or Admin).
               </p>
             </div>
 
-            <div className="flex flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1">
-              {(
-                [
-                  { id: 'all', label: 'All', count: approvalStats.all },
-                  { id: 'pending', label: 'Pending', count: approvalStats.pending },
-                  { id: 'approved', label: 'Approved', count: approvalStats.approved },
-                  { id: 'rejected', label: 'Rejected', count: approvalStats.rejected },
-                ] as const
-              ).map((tab) => {
-                const active = approvalFilter === tab.id;
-                return (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    onClick={() => setApprovalFilter(tab.id)}
-                    className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
-                      active
-                        ? 'bg-slate-900 text-white'
-                        : 'text-slate-600 hover:bg-white hover:text-slate-900'
-                    }`}
-                  >
-                    <span>{tab.label}</span>
-                    <span
-                      className={`font-mono text-[10px] tabular-nums ${
-                        active ? 'text-slate-300' : 'text-slate-400'
+            <div className="flex flex-wrap items-center gap-2">
+              {onRefreshUsers && (
+                <button
+                  type="button"
+                  disabled={refreshingUsers}
+                  onClick={async () => {
+                    setRefreshingUsers(true);
+                    try {
+                      await onRefreshUsers();
+                    } finally {
+                      setRefreshingUsers(false);
+                    }
+                  }}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-60"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${refreshingUsers ? 'animate-spin' : ''}`} />
+                  <span>{refreshingUsers ? 'Syncing...' : 'Refresh Users'}</span>
+                </button>
+              )}
+
+              {onPreApproveUser && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPreError(null);
+                    setShowPreApproveForm((prev) => !prev);
+                  }}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-indigo-600 px-3 text-xs font-semibold text-white transition-colors hover:bg-indigo-700"
+                >
+                  <UserPlus className="h-3.5 w-3.5" />
+                  <span>+ Pre-Approve / Add User by Email</span>
+                </button>
+              )}
+
+              <div className="flex flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1">
+                {(
+                  [
+                    { id: 'all', label: 'All', count: approvalStats.all },
+                    { id: 'pending', label: 'Pending', count: approvalStats.pending },
+                    { id: 'approved', label: 'Approved', count: approvalStats.approved },
+                    { id: 'rejected', label: 'Rejected', count: approvalStats.rejected },
+                  ] as const
+                ).map((tab) => {
+                  const active = approvalFilter === tab.id;
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setApprovalFilter(tab.id)}
+                      className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
+                        active
+                          ? 'bg-slate-900 text-white'
+                          : 'text-slate-600 hover:bg-white hover:text-slate-900'
                       }`}
                     >
-                      {tab.count}
-                    </span>
-                  </button>
-                );
-              })}
+                      <span>{tab.label}</span>
+                      <span
+                        className={`font-mono text-[10px] tabular-nums ${
+                          active ? 'text-slate-300' : 'text-slate-400'
+                        }`}
+                      >
+                        {tab.count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
+
+          {showPreApproveForm && onPreApproveUser && (
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (!preEmail.trim() || !preEmail.includes('@')) {
+                  setPreError('Please enter a valid corporate email address.');
+                  return;
+                }
+                setPreError(null);
+                setPreSaving(true);
+                try {
+                  await onPreApproveUser({
+                    email: preEmail.trim().toLowerCase(),
+                    fullName: preName.trim() || undefined,
+                    department: preDept,
+                    role: preRole,
+                  });
+                  setPreEmail('');
+                  setPreName('');
+                  setPreRole('Viewer');
+                  setShowPreApproveForm(false);
+                } catch (err) {
+                  setPreError(
+                    err instanceof Error ? err.message : 'Failed to pre-approve user in Supabase.',
+                  );
+                } finally {
+                  setPreSaving(false);
+                }
+              }}
+              className="border-b border-slate-200 bg-indigo-50/40 px-6 py-4"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-xs font-bold text-slate-900">
+                    Pre-Approve or Approve User by Email (Cross-Device Supabase Sync)
+                  </h3>
+                  <p className="mt-0.5 text-[11px] text-slate-600">
+                    Add any employee email (e.g., hassanzaka018@gmail.com) and pre-assign their
+                    role. Existing pending users are approved immediately; new users inherit their
+                    approved status and role upon sign-up from any device.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowPreApproveForm(false)}
+                  className="rounded-md p-1 text-slate-400 hover:bg-white hover:text-slate-700"
+                  aria-label="Close pre-approve form"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              {preError && (
+                <p className="mt-2.5 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700">
+                  {preError}
+                </p>
+              )}
+
+              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                <div className="lg:col-span-2">
+                  <label className="block text-[11px] font-semibold text-slate-700">
+                    Corporate Email *
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={preEmail}
+                    onChange={(e) => setPreEmail(e.target.value)}
+                    placeholder="employee@company.com"
+                    className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-900 focus:border-indigo-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-700">
+                    Full Name (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={preName}
+                    onChange={(e) => setPreName(e.target.value)}
+                    placeholder="Hassan Zaka"
+                    className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-900 focus:border-indigo-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-700">
+                    Department
+                  </label>
+                  <select
+                    value={preDept}
+                    onChange={(e) => setPreDept(e.target.value as Department)}
+                    className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-900 focus:border-indigo-500 focus:outline-none"
+                  >
+                    {branding.departments.map((dept) => (
+                      <option key={dept} value={dept}>
+                        {dept}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-700">
+                    Assigned Role
+                  </label>
+                  <select
+                    value={preRole}
+                    onChange={(e) => setPreRole(e.target.value as Role)}
+                    className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-900 focus:border-indigo-500 focus:outline-none"
+                  >
+                    {ASSIGNABLE_ROLES.map((r) => (
+                      <option key={r.value} value={r.value}>
+                        {r.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="mt-3 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowPreApproveForm(false)}
+                  className="h-8 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={preSaving}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 text-xs font-semibold text-white transition-colors hover:bg-emerald-700 disabled:opacity-60"
+                >
+                  {preSaving ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      <span>Saving to Supabase...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="h-3.5 w-3.5" />
+                      <span>Pre-Approve &amp; Save User</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          )}
 
           <div className="overflow-x-auto">
             <table className="w-full min-w-[860px] border-collapse text-left text-sm">

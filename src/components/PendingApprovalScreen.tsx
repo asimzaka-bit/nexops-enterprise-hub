@@ -76,7 +76,7 @@ export function PendingApprovalScreen({
             <p className="mt-2 text-sm leading-relaxed text-slate-600">
               {isRejected
                 ? 'Your access request has been declined by a System Administrator. Company records remain restricted.'
-                : 'Your corporate account is registered and secured, but workspace data access is locked until an Administrator approves your account and assigns your role (Viewer, Editor, or Admin).'}
+                : 'Your corporate account is registered and secured, but workspace data access is locked until an Administrator approves your account and assigns your role (Viewer or Admin).'}
             </p>
           </div>
 

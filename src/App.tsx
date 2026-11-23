@@ -541,50 +541,85 @@ export default function App() {
   }, [activeSection, currentUser.role]);
 
   useEffect(() => {
+    if (
+      activeSection === 'settings' &&
+      currentUser.role === 'Admin' &&
+      authSession?.isAuthenticated &&
+      isApprovedUser &&
+      dataService.isSupabaseConfigured()
+    ) {
+      void dataService.team
+        .fetchProfilesFromCloud()
+        .then((freshMembers) => {
+          setState((prev) => ({
+            ...prev,
+            teamMembers: freshMembers,
+          }));
+        })
+        .catch(() => {});
+    }
+  }, [activeSection, currentUser.role, authSession?.isAuthenticated, isApprovedUser]);
+
+  useEffect(() => {
     if (!authSession?.isAuthenticated || !supabase) return;
 
     const client = supabase;
 
     if (!isApprovedUser) {
+      const checkPendingProfile = () => {
+        void dataService.auth
+          .refreshUserProfile(authSession.userId, authSession.userEmail, currentUser)
+          .then((refreshed) => {
+            if (!refreshed) return;
+            setState((prev) => ({
+              ...prev,
+              teamMembers: prev.teamMembers.some(
+                (m) =>
+                  m.id === refreshed.id ||
+                  m.email.toLowerCase() === refreshed.email.toLowerCase(),
+              )
+                ? prev.teamMembers.map((m) =>
+                    m.id === refreshed.id ||
+                    m.email.toLowerCase() === refreshed.email.toLowerCase()
+                      ? refreshed
+                      : m,
+                  )
+                : [refreshed, ...prev.teamMembers],
+            }));
+            if (
+              refreshed.approvalStatus !== authSession.approvalStatus ||
+              refreshed.role !== authSession.userRole ||
+              refreshed.id !== authSession.userId
+            ) {
+              const nextSession: AuthSession = {
+                ...authSession,
+                userId: refreshed.id,
+                employeeId: refreshed.employeeId,
+                userName: refreshed.name,
+                userDepartment: refreshed.department,
+                userRole: refreshed.role,
+                approvalStatus: refreshed.approvalStatus,
+                isSuperAdmin: refreshed.isSuperAdmin,
+              };
+              dataService.auth.saveSessionSync(nextSession);
+              setAuthSession(nextSession);
+            }
+          });
+      };
+
       const pendingChannel = client
         .channel('nexops-pending-profile-watch')
         .on(
           'postgres_changes',
-          { event: '*', schema: 'public', table: 'profiles' },
-          () => {
-            void dataService.auth
-              .refreshUserProfile(authSession.userId, authSession.userEmail, currentUser)
-              .then((refreshed) => {
-                if (!refreshed) return;
-                setState((prev) => ({
-                  ...prev,
-                  teamMembers: prev.teamMembers.some(
-                    (m) =>
-                      m.id === refreshed.id ||
-                      m.email.toLowerCase() === refreshed.email.toLowerCase(),
-                  )
-                    ? prev.teamMembers.map((m) =>
-                        m.id === refreshed.id ||
-                        m.email.toLowerCase() === refreshed.email.toLowerCase()
-                          ? refreshed
-                          : m,
-                      )
-                    : [refreshed, ...prev.teamMembers],
-                }));
-                const nextSession: AuthSession = {
-                  ...authSession,
-                  userRole: refreshed.role,
-                  approvalStatus: refreshed.approvalStatus,
-                  isSuperAdmin: refreshed.isSuperAdmin,
-                };
-                dataService.auth.saveSessionSync(nextSession);
-                setAuthSession(nextSession);
-              });
-          },
+          { event: '*', schema: 'public', table: 'user_access' },
+          checkPendingProfile,
         )
         .subscribe();
 
+      const pollTimer = window.setInterval(checkPendingProfile, 10000);
+
       return () => {
+        window.clearInterval(pollTimer);
         void client.removeChannel(pendingChannel);
       };
     }
@@ -602,21 +637,21 @@ export default function App() {
       .channel('nexops-live-sync')
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'nexops_requests' },
+        { event: '*', schema: 'public', table: 'operations_data' },
         (payload) => {
           const record = (payload.new ?? payload.old) as
-            | { id?: string; title?: string; status?: RequestStatus; submitted_by?: string }
+            | { id?: string; title?: string; status?: RequestStatus; created_by?: string }
             | undefined;
           if (
             record?.id &&
             payload.eventType === 'INSERT' &&
-            record.submitted_by &&
-            record.submitted_by !== currentUser.name
+            record.created_by &&
+            record.created_by !== currentUser.name
           ) {
             const liveNotif: AppNotification = {
               id: `notif-rt-${Date.now()}`,
               title: `Live Submission: ${record.id}`,
-              message: `${record.submitted_by} submitted "${record.title ?? record.id}" (${record.status ?? 'Submitted'}).`,
+              message: `${record.created_by} submitted "${record.title ?? record.id}" (${record.status ?? 'Submitted'}).`,
               timestamp: new Date().toISOString(),
               read: false,
               requestId: record.id,
@@ -626,7 +661,7 @@ export default function App() {
               ...prev,
               notifications: [liveNotif, ...prev.notifications],
             }));
-            pushToast(`Live Update · ${record.id}`, `${record.submitted_by} submitted a new request.`, 'info');
+            pushToast(`Live Update · ${record.id}`, `${record.created_by} submitted a new request.`, 'info');
           } else if (
             record?.id &&
             payload.eventType === 'UPDATE' &&
@@ -688,7 +723,7 @@ export default function App() {
       )
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'profiles' },
+        { event: '*', schema: 'public', table: 'user_access' },
         () => {
           scheduleRealtimeRefresh();
         },
@@ -1011,11 +1046,23 @@ export default function App() {
 
   const handleRefreshApprovalStatus = async () => {
     if (!authSession) return;
-    const refreshed = await dataService.auth.refreshUserProfile(
-      authSession.userId,
-      authSession.userEmail,
-      currentUser,
-    );
+    let refreshed: TeamMember | null = null;
+    try {
+      refreshed = await dataService.auth.refreshUserProfile(
+        authSession.userId,
+        authSession.userEmail,
+        currentUser,
+        true,
+      );
+    } catch (err) {
+      pushToast(
+        'Unable to Check Cloud Status',
+        err instanceof Error ? err.message : 'Could not reach Supabase profiles table.',
+        'error',
+      );
+      return;
+    }
+
     if (!refreshed) {
       pushToast(
         'Still Pending Admin Approval',
@@ -1044,6 +1091,10 @@ export default function App() {
 
     const updatedSession: AuthSession = {
       ...authSession,
+      userId: refreshed.id,
+      employeeId: refreshed.employeeId,
+      userName: refreshed.name,
+      userDepartment: refreshed.department,
       userRole: refreshed.role,
       approvalStatus: refreshed.approvalStatus,
       isSuperAdmin: refreshed.isSuperAdmin,
@@ -2588,6 +2639,71 @@ export default function App() {
     );
   };
 
+  const handleRefreshUsersFromCloud = async (silent = false) => {
+    if (currentUser.role !== 'Admin') return;
+    try {
+      const freshMembers = await dataService.team.fetchProfilesFromCloud(state.teamMembers);
+      setState((prev) => ({
+        ...prev,
+        teamMembers: freshMembers,
+      }));
+      if (!silent) {
+        const pendingCount = freshMembers.filter(
+          (m) =>
+            !isSuperAdminEmail(m.email) &&
+            (m.approvalStatus ?? (m.active ? 'approved' : 'pending')) === 'pending',
+        ).length;
+        pushToast(
+          'Users Synced from Supabase',
+          `Loaded ${freshMembers.length} registered profiles (${pendingCount} pending approval).`,
+          'success',
+        );
+      }
+    } catch (err) {
+      if (!silent) {
+        handleCloudWriteError(err);
+      }
+    }
+  };
+
+  const handlePreApproveUser = async (payload: {
+    email: string;
+    fullName?: string;
+    department: Department;
+    role: Role;
+  }) => {
+    if (currentUser.role !== 'Admin') {
+      throw new Error('Only verified Admins can pre-approve or add users.');
+    }
+    const { member, alreadyExisted, auditEntry } =
+      await dataService.team.preApproveUserByEmail(
+        payload,
+        currentUser.name,
+        currentUser.role,
+        currentUser.signOffTitle || currentUser.title,
+        state.teamMembers,
+      );
+
+    setState((prev) => ({
+      ...prev,
+      teamMembers: [
+        member,
+        ...prev.teamMembers.filter(
+          (m) =>
+            m.id !== member.id &&
+            m.email.trim().toLowerCase() !== member.email.trim().toLowerCase(),
+        ),
+      ],
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+    }));
+
+    pushToast(
+      alreadyExisted ? `Approved ${member.email}` : `Pre-Approved ${member.email}`,
+      `Assigned ${member.role} access (${member.department}) in Supabase.`,
+      'success',
+    );
+  };
+
   const handleApproveUser = async (memberId: string, assignedRole: Role) => {
     if (currentUser.role !== 'Admin') {
       pushToast('Admin Access Required', 'Only verified Admins can approve pending accounts.', 'error');
@@ -2618,14 +2734,8 @@ export default function App() {
         : m,
     );
 
-    setState((prev) => ({
-      ...prev,
-      teamMembers: nextMembers,
-      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
-    }));
-
-    await dataService.team
-      .updateMember(
+    try {
+      await dataService.team.updateMember(
         memberId,
         {
           role: effectiveRole,
@@ -2636,14 +2746,23 @@ export default function App() {
         },
         auditEntry,
         nextMembers,
-      )
-      .catch(handleCloudWriteError);
+      );
 
-    pushToast(
-      `Approved ${target.name}`,
-      `Assigned ${effectiveRole} access (${target.email}).`,
-      'success',
-    );
+      setState((prev) => ({
+        ...prev,
+        teamMembers: nextMembers,
+        globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+      }));
+
+      pushToast(
+        `Approved ${target.name}`,
+        `Assigned ${effectiveRole} access (${target.email}) in Supabase.`,
+        'success',
+      );
+    } catch (err) {
+      handleCloudWriteError(err);
+      throw err;
+    }
   };
 
   const handleRejectUser = async (memberId: string) => {
@@ -2675,14 +2794,8 @@ export default function App() {
         : m,
     );
 
-    setState((prev) => ({
-      ...prev,
-      teamMembers: nextMembers,
-      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
-    }));
-
-    await dataService.team
-      .updateMember(
+    try {
+      await dataService.team.updateMember(
         memberId,
         {
           approvalStatus: 'rejected',
@@ -2690,14 +2803,23 @@ export default function App() {
         },
         auditEntry,
         nextMembers,
-      )
-      .catch(handleCloudWriteError);
+      );
 
-    pushToast(
-      `Rejected ${target.name}`,
-      `Access denied for ${target.email}.`,
-      'warning',
-    );
+      setState((prev) => ({
+        ...prev,
+        teamMembers: nextMembers,
+        globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+      }));
+
+      pushToast(
+        `Rejected ${target.name}`,
+        `Access denied for ${target.email} in Supabase.`,
+        'warning',
+      );
+    } catch (err) {
+      handleCloudWriteError(err);
+      throw err;
+    }
   };
 
   const handleProvisionEmployee = async (payload: ProvisionEmployeePayload) => {
@@ -4367,6 +4489,8 @@ export default function App() {
                     onToggleMemberActive={handleToggleMemberActive}
                     onApproveUser={handleApproveUser}
                     onRejectUser={handleRejectUser}
+                    onRefreshUsers={() => handleRefreshUsersFromCloud(false)}
+                    onPreApproveUser={handlePreApproveUser}
                     onProvisionEmployee={handleProvisionEmployee}
                     onDownloadBackup={handleDownloadBackup}
                     onRestoreBackup={handleRestoreBackup}

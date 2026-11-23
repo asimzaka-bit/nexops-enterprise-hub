@@ -570,6 +570,10 @@ function saveRequestAssetLink(requestId: string, link?: RequestAssetLink): void 
 }
 
 export type RequestExtendedMeta = {
+  dueDate?: string;
+  deliverableUrl?: string;
+  checklist?: ChecklistItem[];
+  updatedAt?: string;
   currency?: CurrencyCode;
   estimatedCost?: number;
   actualSpend?: number;
@@ -774,17 +778,13 @@ export function buildMemberFromSupabaseUser(
 interface NexOpsRequestDbRow {
   id: string;
   title: string;
+  description: string;
   category: string;
   department: Department;
-  priority: OperationalRequest['priority'];
   status: RequestStatus;
-  due_date: string;
-  description: string;
-  reference_link: string;
-  submitted_by: string;
-  checklist: ChecklistItem[] | string | null;
+  priority: OperationalRequest['priority'];
+  created_by: string;
   created_at: string;
-  updated_at: string;
 }
 
 interface NexOpsAuditDbRow {
@@ -888,17 +888,10 @@ interface NexOpsProfileDbRow {
   email?: string | null;
   full_name?: string | null;
   employee_id?: string | null;
-  role?: string | null;
-  approval_status?: string | null;
-  is_super_admin?: boolean | null;
-  active?: boolean | null;
-  approved_by?: string | null;
-  approved_at?: string | null;
   department?: string | null;
-  title?: string | null;
-  sign_off_title?: string | null;
-  avatar_url?: string | null;
-  updated_at?: string;
+  status?: string | null;
+  role?: string | null;
+  created_at?: string | null;
 }
 
 interface NexOpsWorkspaceEmailDbRow {
@@ -1561,7 +1554,7 @@ function mapDbRequest(
   }
 
   const submitterMatch = teamMembers.find(
-    (m) => m.name.toLowerCase() === row.submitted_by.toLowerCase(),
+    (m) => m.name.toLowerCase() === (row.created_by ?? '').toLowerCase(),
   );
 
   let projectLink: RequestProjectLink | undefined = projectLinksMap[row.id];
@@ -1667,17 +1660,17 @@ function mapDbRequest(
     title: row.title,
     category: row.category,
     department: row.department,
-    submittedBy: row.submitted_by,
+    submittedBy: row.created_by ?? '',
     submitterId: submitterMatch?.id ?? '',
     assignedReviewer: storedMeta?.assignedReviewer ?? '',
     delegatedFromReviewer: storedMeta?.delegatedFromReviewer,
     priority: row.priority,
     status: row.status,
-    dueDate: row.due_date,
+    dueDate: storedMeta?.dueDate ?? (row.created_at ? row.created_at.slice(0, 10) : ''),
     createdAt: row.created_at,
-    updatedAt: row.updated_at,
+    updatedAt: storedMeta?.updatedAt ?? row.created_at,
     description: row.description,
-    deliverableUrl: row.reference_link ?? '',
+    deliverableUrl: storedMeta?.deliverableUrl ?? '',
     projectId: projectLink?.projectId,
     projectCode: projectLink?.projectCode,
     projectName: projectLink?.projectName,
@@ -1690,7 +1683,7 @@ function mapDbRequest(
     momCode,
     stage1Approval,
     stage2Approval,
-    checklist: parseChecklistColumn(row.checklist),
+    checklist: Array.isArray(storedMeta?.checklist) ? storedMeta.checklist : [],
     revisionReason,
     auditTrail: requestAudits,
   };
@@ -1700,17 +1693,13 @@ function toRequestDbRow(req: OperationalRequest): NexOpsRequestDbRow {
   return {
     id: req.id,
     title: req.title,
+    description: req.description,
     category: req.category,
     department: req.department,
-    priority: req.priority,
     status: req.status,
-    due_date: req.dueDate,
-    description: req.description,
-    reference_link: req.deliverableUrl ?? '',
-    submitted_by: req.submittedBy,
-    checklist: req.checklist,
+    priority: req.priority,
+    created_by: req.submittedBy,
     created_at: req.createdAt,
-    updated_at: req.updatedAt,
   };
 }
 
@@ -1742,14 +1731,14 @@ export const SUPABASE_TABLE_REGISTRY: {
   tableName: string;
   moduleName: string;
 }[] = [
-  { tableKey: 'requests', tableName: 'nexops_requests', moduleName: 'Requests & Workflow Queue' },
+  { tableKey: 'requests', tableName: 'operations_data', moduleName: 'Operations Data & Workflow Queue' },
   { tableKey: 'audit_logs', tableName: 'audit_logs', moduleName: 'Activity Audit Trail' },
   { tableKey: 'projects', tableName: 'nexops_projects', moduleName: 'Projects & Clients' },
   { tableKey: 'assets', tableName: 'nexops_assets', moduleName: 'Assets & Inventory' },
   { tableKey: 'sops', tableName: 'nexops_sops', moduleName: 'SOP & Policy Vault' },
   { tableKey: 'leaves', tableName: 'nexops_leaves', moduleName: 'Legacy Leaves Backup' },
   { tableKey: 'moms', tableName: 'nexops_moms', moduleName: 'Meetings & MoM Tracker' },
-  { tableKey: 'profiles', tableName: 'profiles', moduleName: 'User Profiles & Avatars' },
+  { tableKey: 'profiles', tableName: 'user_access', moduleName: 'User Access & Approvals' },
   {
     tableKey: 'workspace_emails',
     tableName: 'nexops_workspace_emails',
@@ -1979,7 +1968,7 @@ function writeMasterKeyConfigSync(config: MasterKeyConfig | null): void {
 
 function mapProfileRowToMember(row: NexOpsProfileDbRow, existing?: TeamMember): TeamMember {
   const email = (row.email ?? existing?.email ?? '').trim();
-  const isSuper = isSuperAdminEmail(email) || Boolean(row.is_super_admin);
+  const isSuper = isSuperAdminEmail(email);
   const role: Role = isSuper
     ? 'Admin'
     : row.role
@@ -1987,9 +1976,9 @@ function mapProfileRowToMember(row: NexOpsProfileDbRow, existing?: TeamMember): 
       : existing?.role ?? 'Viewer';
   const approvalStatus: ApprovalStatus = isSuper
     ? 'approved'
-    : normalizeApprovalStatus(row.approval_status ?? existing?.approvalStatus ?? 'pending', email);
+    : normalizeApprovalStatus(row.status ?? existing?.approvalStatus ?? 'pending', email);
   const name = (row.full_name ?? existing?.name ?? email.split('@')[0] ?? 'Team Member').trim();
-  const title = (row.title ?? existing?.title ?? (isSuper ? 'Primary Super Administrator' : defaultTitleForRole(role))).trim();
+  const title = (existing?.title ?? (isSuper ? 'Primary Super Administrator' : defaultTitleForRole(role))).trim();
   return {
     id: row.id,
     employeeId: (row.employee_id ?? existing?.employeeId ?? deriveEmployeeCode(row.id || email)).trim(),
@@ -1998,17 +1987,14 @@ function mapProfileRowToMember(row: NexOpsProfileDbRow, existing?: TeamMember): 
     role,
     approvalStatus,
     isSuperAdmin: isSuper,
-    approvedBy: row.approved_by ?? existing?.approvedBy,
-    approvedAt: row.approved_at ?? existing?.approvedAt,
+    approvedBy: existing?.approvedBy,
+    approvedAt: existing?.approvedAt,
     department: (row.department ?? existing?.department ?? DEFAULT_DEPARTMENTS[0]).trim(),
     title,
-    signOffTitle: (row.sign_off_title ?? existing?.signOffTitle ?? title).trim(),
-    avatarUrl:
-      row.avatar_url === null
-        ? undefined
-        : row.avatar_url || existing?.avatarUrl,
-    active: isSuper ? true : row.active ?? existing?.active ?? true,
-    lastActive: row.updated_at || existing?.lastActive || new Date().toISOString(),
+    signOffTitle: (existing?.signOffTitle ?? title).trim(),
+    avatarUrl: existing?.avatarUrl,
+    active: isSuper ? true : approvalStatus !== 'rejected' && (existing?.active ?? true),
+    lastActive: row.created_at || existing?.lastActive || new Date().toISOString(),
     outOfOffice: existing?.outOfOffice,
     delegateApproverId: existing?.delegateApproverId,
     delegateApproverName: existing?.delegateApproverName,
@@ -2017,50 +2003,48 @@ function mapProfileRowToMember(row: NexOpsProfileDbRow, existing?: TeamMember): 
 
 async function upsertProfileRecord(member: TeamMember): Promise<void> {
   if (!supabase) return;
-  const isSuper = isSuperAdminEmail(member.email) || Boolean(member.isSuperAdmin);
+  const cleanEmail = member.email.trim().toLowerCase();
+  const isSuper = isSuperAdminEmail(cleanEmail) || Boolean(member.isSuperAdmin);
   const role: Role = isSuper ? 'Admin' : normalizeRole(member.role);
   const approvalStatus: ApprovalStatus = isSuper
     ? 'approved'
-    : normalizeApprovalStatus(member.approvalStatus ?? 'pending', member.email);
+    : normalizeApprovalStatus(member.approvalStatus ?? 'pending', cleanEmail);
+
+  let targetId = member.id;
+  const isPlaceholderId = targetId.startsWith('pre-') || targetId.startsWith('usr-');
+
+  if (cleanEmail) {
+    const { data: existingByEmail } = await supabase
+      .from('user_access')
+      .select('id')
+      .ilike('email', cleanEmail)
+      .maybeSingle();
+
+    if (existingByEmail && existingByEmail.id && existingByEmail.id !== targetId) {
+      const existingIsPlaceholder =
+        existingByEmail.id.startsWith('pre-') || existingByEmail.id.startsWith('usr-');
+      if (isPlaceholderId || !existingIsPlaceholder) {
+        targetId = existingByEmail.id;
+      } else {
+        await supabase.from('user_access').delete().eq('id', existingByEmail.id);
+      }
+    }
+  }
+
   const payload = {
-    id: member.id,
-    email: member.email.trim().toLowerCase(),
+    id: targetId,
+    email: cleanEmail,
     full_name: member.name,
     employee_id: member.employeeId,
-    role: toDbRole(role),
-    approval_status: approvalStatus,
-    is_super_admin: isSuper,
-    active: isSuper ? true : member.active,
-    approved_by: member.approvedBy ?? null,
-    approved_at: member.approvedAt ?? null,
     department: member.department,
-    title: member.title,
-    sign_off_title: member.signOffTitle,
-    avatar_url: member.avatarUrl ?? null,
-    updated_at: new Date().toISOString(),
+    status: approvalStatus,
+    role: toDbRole(role),
+    created_at: member.lastActive || new Date().toISOString(),
   };
 
-  const { error } = await supabase.from('profiles').upsert(payload, { onConflict: 'id' });
+  const { error } = await supabase.from('user_access').upsert(payload, { onConflict: 'id' });
   if (error) {
-    // Fallback if optional RBAC columns have not yet been migrated in Supabase
-    const { error: legacyErr } = await supabase.from('profiles').upsert(
-      {
-        id: payload.id,
-        email: payload.email,
-        full_name: payload.full_name,
-        employee_id: payload.employee_id,
-        role: payload.role,
-        department: payload.department,
-        title: payload.title,
-        sign_off_title: payload.sign_off_title,
-        avatar_url: payload.avatar_url,
-        updated_at: payload.updated_at,
-      },
-      { onConflict: 'id' },
-    );
-    if (legacyErr) {
-      throw legacyErr;
-    }
+    throw error;
   }
 }
 
@@ -2177,7 +2161,7 @@ export const dataService = {
       subtaskRes,
       vaultRes,
     ] = await Promise.all([
-      supabase.from('nexops_requests').select('*').order('created_at', { ascending: false }),
+      supabase.from('operations_data').select('*').order('created_at', { ascending: false }),
       supabase.from('nexops_audit_logs').select('*').order('created_at', { ascending: false }),
       supabase.from('audit_logs').select('*').order('created_at', { ascending: false }),
       supabase.from('nexops_projects').select('*').order('updated_at', { ascending: false }),
@@ -2186,7 +2170,7 @@ export const dataService = {
       supabase.from('nexops_leaves').select('*').order('created_at', { ascending: false }),
       supabase.from('leave_requests').select('*').order('created_at', { ascending: false }),
       supabase.from('nexops_moms').select('*').order('meeting_date', { ascending: false }),
-      supabase.from('profiles').select('*'),
+      supabase.from('user_access').select('*').order('created_at', { ascending: false }),
       supabase.from('nexops_workspace_emails').select('*').order('sent_at', { ascending: false }),
       supabase.from('nexops_workspace_links').select('*').order('updated_at', { ascending: false }),
       supabase.from('nexops_system_state').select('*'),
@@ -2580,7 +2564,7 @@ export const dataService = {
     if (supabase) {
       if (nextState.requests.length > 0) {
         const { error: reqErr } = await supabase
-          .from('nexops_requests')
+          .from('operations_data')
           .upsert(nextState.requests.map(toRequestDbRow), { onConflict: 'id' });
         if (reqErr) throw reqErr;
       }
@@ -2788,8 +2772,8 @@ export const dataService = {
       if (supabase) {
         try {
           const { data: profileAdmins, error: profErr } = await supabase
-            .from('profiles')
-            .select('id,email,role')
+            .from('user_access')
+            .select('id,email,role,status')
             .or(`role.eq.admin,role.eq.Admin,email.ilike.${SUPER_ADMIN_EMAIL}`)
             .limit(1);
           if (!profErr && Array.isArray(profileAdmins) && profileAdmins.length > 0) {
@@ -2814,6 +2798,7 @@ export const dataService = {
       userId: string,
       email?: string,
       fallbackMember?: TeamMember,
+      strictThrow = false,
     ): Promise<TeamMember | null> {
       const local = readWorkspaceState();
       const localMatch =
@@ -2829,19 +2814,21 @@ export const dataService = {
 
       try {
         let row: NexOpsProfileDbRow | null = null;
-        const { data: byId } = await supabase
-          .from('profiles')
+        const { data: byId, error: byIdErr } = await supabase
+          .from('user_access')
           .select('*')
           .eq('id', userId)
           .maybeSingle();
+        if (byIdErr && strictThrow) throw byIdErr;
         if (byId) {
           row = byId as NexOpsProfileDbRow;
         } else if (email) {
-          const { data: byEmail } = await supabase
-            .from('profiles')
+          const { data: byEmail, error: byEmailErr } = await supabase
+            .from('user_access')
             .select('*')
             .ilike('email', email.trim())
             .maybeSingle();
+          if (byEmailErr && strictThrow) throw byEmailErr;
           if (byEmail) {
             row = byEmail as NexOpsProfileDbRow;
           }
@@ -2850,7 +2837,13 @@ export const dataService = {
         if (!row) {
           return localMatch ? enforceMemberInvariants(localMatch) : null;
         }
-        const mapped = enforceMemberInvariants(mapProfileRowToMember(row, localMatch));
+        let mapped = enforceMemberInvariants(mapProfileRowToMember(row, localMatch));
+        // Migrate placeholder pre-approved ID onto authenticated Supabase Auth UUID
+        const isRealAuthId = userId && !userId.startsWith('pre-') && !userId.startsWith('usr-');
+        if (isRealAuthId && mapped.id !== userId && (mapped.id.startsWith('pre-') || mapped.id.startsWith('usr-'))) {
+          mapped = enforceMemberInvariants({ ...mapped, id: userId });
+          await upsertProfileRecord(mapped).catch(() => {});
+        }
         const nextMembers = local.teamMembers.some(
           (m) => m.id === mapped.id || m.email.toLowerCase() === mapped.email.toLowerCase(),
         )
@@ -2866,7 +2859,8 @@ export const dataService = {
           teamMembers: nextMembers,
         });
         return mapped;
-      } catch {
+      } catch (err) {
+        if (strictThrow) throw err;
         return localMatch ? enforceMemberInvariants(localMatch) : null;
       }
     },
@@ -2891,28 +2885,24 @@ export const dataService = {
           throw new Error('Supabase authentication succeeded without user profile.');
         }
 
-        // Query authoritative profile row from Supabase `profiles`
+        // Query authoritative profile row from Supabase `user_access`
         let dbProfileRow: NexOpsProfileDbRow | null = null;
-        try {
-          const { data: byId } = await supabase
-            .from('profiles')
+        const { data: byId } = await supabase
+          .from('user_access')
+          .select('*')
+          .eq('id', data.user.id)
+          .maybeSingle();
+        if (byId) {
+          dbProfileRow = byId as NexOpsProfileDbRow;
+        } else {
+          const { data: byEmail } = await supabase
+            .from('user_access')
             .select('*')
-            .eq('id', data.user.id)
+            .ilike('email', cleanEmail)
             .maybeSingle();
-          if (byId) {
-            dbProfileRow = byId as NexOpsProfileDbRow;
-          } else {
-            const { data: byEmail } = await supabase
-              .from('profiles')
-              .select('*')
-              .ilike('email', cleanEmail)
-              .maybeSingle();
-            if (byEmail) {
-              dbProfileRow = byEmail as NexOpsProfileDbRow;
-            }
+          if (byEmail) {
+            dbProfileRow = byEmail as NexOpsProfileDbRow;
           }
-        } catch {
-          // Proceed with auth metadata if profile query fails
         }
 
         const existingMatch = local.teamMembers.find(
@@ -2922,22 +2912,31 @@ export const dataService = {
         let member: TeamMember;
         if (dbProfileRow) {
           member = enforceMemberInvariants(
-            mapProfileRowToMember(dbProfileRow, existingMatch ?? buildMemberFromSupabaseUser(data.user, local.teamMembers)),
+            mapProfileRowToMember(
+              dbProfileRow,
+              existingMatch ?? buildMemberFromSupabaseUser(data.user, local.teamMembers),
+            ),
           );
+          if (dbProfileRow.id !== data.user.id) {
+            // Migrate pre-approved placeholder row onto real auth UUID while keeping approval & role
+            member = enforceMemberInvariants({ ...member, id: data.user.id });
+            await upsertProfileRecord(member);
+          }
         } else {
           const base = buildMemberFromSupabaseUser(data.user, local.teamMembers);
           member = enforceMemberInvariants({
             ...base,
-            role: isSuper ? 'Admin' : existingMatch?.role ?? 'Viewer',
-            approvalStatus: isSuper ? 'approved' : existingMatch?.approvalStatus ?? 'pending',
+            id: data.user.id,
+            role: isSuper ? 'Admin' : 'Viewer',
+            approvalStatus: isSuper ? 'approved' : 'pending',
             isSuperAdmin: isSuper,
-            active: isSuper ? true : existingMatch?.active ?? true,
+            active: true,
           });
-          await upsertProfileRecord(member).catch(() => {});
+          await upsertProfileRecord(member);
         }
 
         if (isSuper) {
-          await upsertProfileRecord(member).catch(() => {});
+          await upsertProfileRecord(member);
         }
 
         if (!isSuper && member.approvalStatus === 'approved' && !member.active) {
@@ -3070,6 +3069,35 @@ export const dataService = {
       const local = readWorkspaceState();
 
       if (supabase) {
+        // Check if Admin already pre-approved this corporate email in Supabase `user_access`
+        let preApprovedRow: NexOpsProfileDbRow | null = null;
+        try {
+          const { data: existingByEmail } = await supabase
+            .from('user_access')
+            .select('*')
+            .ilike('email', cleanEmail)
+            .maybeSingle();
+          if (existingByEmail) {
+            preApprovedRow = existingByEmail as NexOpsProfileDbRow;
+          }
+        } catch {
+          // Proceed with standard pending registration if pre-lookup isn't readable before sign-in
+        }
+
+        const effectiveRole: Role = isSuper
+          ? 'Admin'
+          : preApprovedRow?.status === 'approved' && preApprovedRow.role
+            ? fromDbRole(preApprovedRow.role)
+            : assignedRole;
+        const effectiveStatus: ApprovalStatus = isSuper
+          ? 'approved'
+          : preApprovedRow?.status === 'approved'
+            ? 'approved'
+            : approvalStatus;
+        const effectiveTitle = isSuper
+          ? 'Primary Super Administrator'
+          : defaultTitleForRole(effectiveRole);
+
         const { data, error } = await supabase.auth.signUp({
           email: cleanEmail,
           password: payload.password,
@@ -3080,12 +3108,12 @@ export const dataService = {
               full_name: cleanName,
               name: cleanName,
               employee_id: cleanEmployeeId,
-              department: payload.department,
-              role: toDbRole(assignedRole),
-              approval_status: approvalStatus,
+              department: preApprovedRow?.department ?? payload.department,
+              role: toDbRole(effectiveRole),
+              approval_status: effectiveStatus,
               is_super_admin: isSuper,
-              title: assignedTitle,
-              sign_off_title: assignedTitle,
+              title: effectiveTitle,
+              sign_off_title: effectiveTitle,
             },
           },
         });
@@ -3099,19 +3127,26 @@ export const dataService = {
           employeeId: cleanEmployeeId,
           name: cleanName,
           email: cleanEmail,
-          role: assignedRole,
-          approvalStatus,
+          role: effectiveRole,
+          approvalStatus: effectiveStatus,
           isSuperAdmin: isSuper,
           approvedBy: isSuper ? 'System Bootstrap' : undefined,
           approvedAt: isSuper ? now : undefined,
-          department: payload.department,
-          title: assignedTitle,
-          signOffTitle: assignedTitle,
+          department: (preApprovedRow?.department ?? payload.department).trim(),
+          title: effectiveTitle,
+          signOffTitle: effectiveTitle,
           active: true,
           lastActive: now,
         });
 
-        await upsertProfileRecord(newMember).catch(() => {});
+        try {
+          await upsertProfileRecord(newMember);
+        } catch (profileErr) {
+          // If email confirmation is required and no session exists yet, RLS/DB trigger will handle it on confirmation or first sign-in
+          if (data.session) {
+            throw profileErr;
+          }
+        }
 
         const updatedMembers = [
           newMember,
@@ -3535,7 +3570,7 @@ export const dataService = {
   },
 
   // -------------------------------------------------------------------------
-  // 2. Operational Requests (`nexops_requests`)
+  // 2. Operational Requests (`operations_data`)
   // -------------------------------------------------------------------------
   requests: {
     async list(): Promise<OperationalRequest[]> {
@@ -3566,6 +3601,10 @@ export const dataService = {
         });
       }
       saveRequestMeta(newRequest.id, {
+        dueDate: newRequest.dueDate,
+        deliverableUrl: newRequest.deliverableUrl,
+        checklist: newRequest.checklist,
+        updatedAt: newRequest.updatedAt,
         currency: newRequest.currency,
         estimatedCost: newRequest.estimatedCost,
         actualSpend: newRequest.actualSpend,
@@ -3581,7 +3620,7 @@ export const dataService = {
       }
 
       const { error: reqError } = await supabase
-        .from('nexops_requests')
+        .from('operations_data')
         .insert(toRequestDbRow(newRequest));
       if (reqError) throw reqError;
 
@@ -3609,20 +3648,23 @@ export const dataService = {
       updatedAt: string,
       auditEntry: AuditEvent,
     ): Promise<void> {
+      saveRequestMeta(requestId, { updatedAt });
       if (!supabase) {
         return;
       }
 
       const { error } = await supabase
-        .from('nexops_requests')
+        .from('operations_data')
         .update({
           priority: 'Urgent',
-          updated_at: updatedAt,
         })
         .eq('id', requestId);
       if (error) throw error;
 
-      await dataService.auditLogs.append(auditEntry);
+      await Promise.all([
+        dataService.auditLogs.append(auditEntry),
+        syncRequestMetaBundleToCloud(auditEntry.actorName),
+      ]);
     },
 
     async updateStatus(
@@ -3633,15 +3675,15 @@ export const dataService = {
       auditEntry: AuditEvent,
       _notification: AppNotification,
     ): Promise<void> {
+      saveRequestMeta(requestId, { updatedAt });
       if (!supabase) {
         return;
       }
 
       const { error } = await supabase
-        .from('nexops_requests')
+        .from('operations_data')
         .update({
           status: nextStatus,
-          updated_at: updatedAt,
         })
         .eq('id', requestId);
       if (error) throw error;
@@ -3657,12 +3699,25 @@ export const dataService = {
       auditEntries: AuditEvent[],
       _notification: AppNotification | null,
     ): Promise<void> {
+      for (const req of newRequests) {
+        saveRequestMeta(req.id, {
+          dueDate: req.dueDate,
+          deliverableUrl: req.deliverableUrl,
+          checklist: req.checklist,
+          updatedAt: req.updatedAt,
+          currency: req.currency,
+          estimatedCost: req.estimatedCost,
+          actualSpend: req.actualSpend,
+          momCode: req.momCode,
+          assignedReviewer: req.assignedReviewer,
+        });
+      }
       if (!supabase || newRequests.length === 0) {
         return;
       }
 
       const { error: reqError } = await supabase
-        .from('nexops_requests')
+        .from('operations_data')
         .insert(newRequests.map(toRequestDbRow));
       if (reqError) throw reqError;
 
@@ -3672,6 +3727,7 @@ export const dataService = {
           .insert(auditEntries.map(toAuditDbRow));
         if (audError) throw audError;
       }
+      await syncRequestMetaBundleToCloud(newRequests[0]?.submittedBy);
     },
 
     async bulkUpdatePriority(
@@ -3680,13 +3736,16 @@ export const dataService = {
       updatedAt: string,
       auditEntries: AuditEvent[],
     ): Promise<void> {
+      for (const id of requestIds) {
+        saveRequestMeta(id, { updatedAt });
+      }
       if (!supabase || requestIds.length === 0) {
         return;
       }
 
       const { error } = await supabase
-        .from('nexops_requests')
-        .update({ priority: nextPriority, updated_at: updatedAt })
+        .from('operations_data')
+        .update({ priority: nextPriority })
         .in('id', requestIds);
       if (error) throw error;
 
@@ -3702,7 +3761,7 @@ export const dataService = {
         supabase.from('task_comments').delete().eq('request_id', requestId),
       ]);
       const { error } = await supabase
-        .from('nexops_requests')
+        .from('operations_data')
         .delete()
         .eq('id', requestId);
       if (error) throw error;
@@ -3713,7 +3772,7 @@ export const dataService = {
   },
 
   // -------------------------------------------------------------------------
-  // 3. QA Verification Checklists (JSONB `checklist` column on `nexops_requests`)
+  // 3. QA Verification Checklists (Synced via `nexops_system_state` request_meta)
   // -------------------------------------------------------------------------
   checklists: {
     async updateRequestChecklist(
@@ -3722,20 +3781,15 @@ export const dataService = {
       updatedAt: string,
       auditEntry: AuditEvent,
     ): Promise<void> {
+      saveRequestMeta(requestId, { checklist: updatedChecklist, updatedAt });
       if (!supabase) {
         return;
       }
 
-      const { error } = await supabase
-        .from('nexops_requests')
-        .update({
-          checklist: updatedChecklist,
-          updated_at: updatedAt,
-        })
-        .eq('id', requestId);
-      if (error) throw error;
-
-      await dataService.auditLogs.append(auditEntry);
+      await Promise.all([
+        syncRequestMetaBundleToCloud(auditEntry.actorName),
+        dataService.auditLogs.append(auditEntry),
+      ]);
     },
   },
 
@@ -4194,9 +4248,153 @@ export const dataService = {
   },
 
   // -------------------------------------------------------------------------
-  // 14. Team Directory, RBAC Roles & Admin Approvals (`profiles` + `nexops_system_state`)
+  // 14. Team Directory, RBAC Roles & Admin Approvals (`user_access` + `nexops_system_state`)
   // -------------------------------------------------------------------------
   team: {
+    async fetchProfilesFromCloud(existingMembers?: TeamMember[]): Promise<TeamMember[]> {
+      const local = readWorkspaceState();
+      const base = (existingMembers ?? local.teamMembers).filter((m) => !isLegacyDemoMember(m));
+      if (!supabase) {
+        return base.map((m, idx) => enforceMemberInvariants(m, idx));
+      }
+
+      const { data, error } = await supabase
+        .from('user_access')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+
+      const rows = (data ?? []) as NexOpsProfileDbRow[];
+      const mergedByKey = new Map<string, TeamMember>();
+      for (const m of base) {
+        const key = m.email.trim().toLowerCase() || m.id;
+        mergedByKey.set(key, enforceMemberInvariants(m));
+      }
+      for (const row of rows) {
+        const key = (row.email ?? '').trim().toLowerCase() || row.id;
+        const existing =
+          mergedByKey.get(key) ??
+          base.find((m) => m.id === row.id || m.email.toLowerCase() === key);
+        const mapped = enforceMemberInvariants(mapProfileRowToMember(row, existing));
+        if (!isLegacyDemoMember(mapped)) {
+          mergedByKey.set((mapped.email ?? '').trim().toLowerCase() || mapped.id, mapped);
+        }
+      }
+
+      const result = Array.from(mergedByKey.values()).map((m, idx) =>
+        enforceMemberInvariants(m, idx),
+      );
+      writeWorkspaceState({
+        ...local,
+        teamMembers: result,
+      });
+      return result;
+    },
+
+    async preApproveUserByEmail(
+      payload: {
+        email: string;
+        fullName?: string;
+        department: Department;
+        role: Role;
+      },
+      actorName: string,
+      actorRole: Role,
+      actorSignOffTitle: string,
+      existingMembers?: TeamMember[],
+    ): Promise<{ member: TeamMember; alreadyExisted: boolean; auditEntry: AuditEvent }> {
+      const cleanEmail = payload.email.trim().toLowerCase();
+      if (!cleanEmail || !cleanEmail.includes('@')) {
+        throw new Error('A valid corporate email address is required.');
+      }
+
+      const isSuper = isSuperAdminEmail(cleanEmail);
+      const effectiveRole: Role = isSuper ? 'Admin' : normalizeRole(payload.role);
+      const now = new Date().toISOString();
+      const local = readWorkspaceState();
+      const directory = existingMembers ?? local.teamMembers;
+
+      let existingRow: NexOpsProfileDbRow | null = null;
+      if (supabase) {
+        const { data: found, error: lookupErr } = await supabase
+          .from('user_access')
+          .select('*')
+          .ilike('email', cleanEmail)
+          .maybeSingle();
+        if (lookupErr) throw lookupErr;
+        if (found) existingRow = found as NexOpsProfileDbRow;
+      }
+
+      const localExisting = directory.find(
+        (m) => m.email.trim().toLowerCase() === cleanEmail,
+      );
+      const alreadyExisted = Boolean(existingRow || localExisting);
+
+      const fallbackName =
+        payload.fullName?.trim() ||
+        existingRow?.full_name ||
+        localExisting?.name ||
+        cleanEmail.split('@')[0];
+
+      const effectiveTitle = isSuper
+        ? 'Primary Super Administrator'
+        : defaultTitleForRole(effectiveRole);
+
+      const member: TeamMember = enforceMemberInvariants({
+        id: existingRow?.id || localExisting?.id || `pre-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        employeeId:
+          existingRow?.employee_id ||
+          localExisting?.employeeId ||
+          deriveEmployeeCode(cleanEmail),
+        name: fallbackName,
+        email: cleanEmail,
+        role: effectiveRole,
+        approvalStatus: 'approved',
+        isSuperAdmin: isSuper,
+        approvedBy: actorName,
+        approvedAt: now,
+        department: payload.department || existingRow?.department || localExisting?.department || DEFAULT_DEPARTMENTS[0],
+        title: effectiveTitle,
+        signOffTitle: localExisting?.signOffTitle || effectiveTitle,
+        avatarUrl: localExisting?.avatarUrl,
+        active: true,
+        lastActive: existingRow?.created_at || now,
+      });
+
+      const auditEntry: AuditEvent = {
+        id: `aud-preapprove-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        requestId: 'TEAM-PREAPPROVE',
+        timestamp: now,
+        actorName,
+        actorRole,
+        actorSignOffTitle,
+        actionType: 'Role Changed',
+        details: alreadyExisted
+          ? `Admin ${actorName} approved & assigned ${effectiveRole} access for ${member.name} (${cleanEmail}).`
+          : `Admin ${actorName} pre-approved ${cleanEmail} (${effectiveRole} · ${member.department}).`,
+      };
+
+      if (supabase) {
+        await upsertProfileRecord(member);
+        const nextDirectory = [
+          member,
+          ...directory.filter(
+            (m) => m.id !== member.id && m.email.trim().toLowerCase() !== cleanEmail,
+          ),
+        ];
+        await Promise.all([
+          dataService.auditLogs.append(auditEntry),
+          dataService.systemState.upsertKey(
+            SYSTEM_STATE_KEYS.TEAM_DIRECTORY,
+            nextDirectory,
+            actorName,
+          ),
+        ]);
+      }
+
+      return { member, alreadyExisted, auditEntry };
+    },
+
     async updateMember(
       memberId: string,
       patch: Partial<
@@ -4222,22 +4420,23 @@ export const dataService = {
       const tasks: Promise<void>[] = [dataService.auditLogs.append(auditEntry)];
       const targetMember = nextDirectory?.find((m) => m.id === memberId);
       if (targetMember) {
-        tasks.push(upsertProfileRecord(targetMember).catch(() => {}));
+        tasks.push(upsertProfileRecord(targetMember));
       } else {
-        const dbPatch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+        const dbPatch: Record<string, unknown> = {};
         if (patch.role !== undefined) dbPatch.role = toDbRole(patch.role);
-        if (patch.approvalStatus !== undefined) dbPatch.approval_status = patch.approvalStatus;
-        if (patch.approvedBy !== undefined) dbPatch.approved_by = patch.approvedBy;
-        if (patch.approvedAt !== undefined) dbPatch.approved_at = patch.approvedAt;
+        if (patch.approvalStatus !== undefined) dbPatch.status = patch.approvalStatus;
         if (patch.department !== undefined) dbPatch.department = patch.department;
-        if (patch.active !== undefined) dbPatch.active = patch.active;
-        if (patch.signOffTitle !== undefined) dbPatch.sign_off_title = patch.signOffTitle;
-        if (patch.avatarUrl !== undefined) dbPatch.avatar_url = patch.avatarUrl;
-        tasks.push(
-          (async () => {
-            await supabase!.from('profiles').update(dbPatch).eq('id', memberId);
-          })(),
-        );
+        if (Object.keys(dbPatch).length > 0) {
+          tasks.push(
+            (async () => {
+              const { error } = await supabase!
+                .from('user_access')
+                .update(dbPatch)
+                .eq('id', memberId);
+              if (error) throw error;
+            })(),
+          );
+        }
       }
       if (nextDirectory) {
         tasks.push(
@@ -4259,7 +4458,7 @@ export const dataService = {
       if (!supabase) return;
       const tasks: Promise<void>[] = [
         dataService.auditLogs.append(auditEntry),
-        upsertProfileRecord(member).catch(() => {}),
+        upsertProfileRecord(member),
       ];
       if (nextDirectory) {
         tasks.push(
