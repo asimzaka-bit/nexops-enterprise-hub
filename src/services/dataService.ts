@@ -2977,6 +2977,7 @@ export const dataService = {
           userDepartment: member.department,
           userTitle: member.title,
           avatarUrl: member.avatarUrl,
+          identityVerified: false,
         };
         dataService.auth.saveSessionSync(session);
         return { user: member, session };
@@ -3030,6 +3031,7 @@ export const dataService = {
         userDepartment: normalizedMatch.department,
         userTitle: normalizedMatch.title,
         avatarUrl: normalizedMatch.avatarUrl,
+        identityVerified: false,
       };
       dataService.auth.saveSessionSync(session);
       return { user: { ...normalizedMatch, lastActive: now }, session };
@@ -3557,6 +3559,58 @@ export const dataService = {
       if (userEmail) {
         await saveLocalCredential(userEmail, newPassword);
       }
+    },
+
+    async updateUserIdentity(
+      currentMember: TeamMember,
+      department: Department,
+      employeeId: string,
+      directoryOverride?: TeamMember[],
+    ): Promise<TeamMember> {
+      const cleanDept = department.trim();
+      const cleanEmpId = employeeId.trim().toUpperCase();
+      if (!cleanDept) {
+        throw new Error('Please select your Department.');
+      }
+      if (!cleanEmpId) {
+        throw new Error('Please enter your Employee ID (e.g., EMP-001).');
+      }
+
+      const now = new Date().toISOString();
+      const updatedMember: TeamMember = enforceMemberInvariants({
+        ...currentMember,
+        department: cleanDept,
+        employeeId: cleanEmpId,
+        lastActive: now,
+      });
+
+      const local = readWorkspaceState();
+      const baseDirectory = directoryOverride ?? local.teamMembers;
+      const cleanEmail = updatedMember.email.trim().toLowerCase();
+      const exists = baseDirectory.some(
+        (m) => m.id === updatedMember.id || (cleanEmail && m.email.trim().toLowerCase() === cleanEmail),
+      );
+      const nextDirectory = exists
+        ? baseDirectory.map((m) =>
+            m.id === updatedMember.id || (cleanEmail && m.email.trim().toLowerCase() === cleanEmail)
+              ? updatedMember
+              : m,
+          )
+        : [updatedMember, ...baseDirectory];
+
+      if (supabase) {
+        await upsertProfileRecord(updatedMember);
+        await dataService.systemState
+          .upsertKey(SYSTEM_STATE_KEYS.TEAM_DIRECTORY, nextDirectory, updatedMember.name)
+          .catch(() => {});
+      }
+
+      writeWorkspaceState({
+        ...local,
+        teamMembers: nextDirectory,
+      });
+
+      return updatedMember;
     },
 
     async signOut() {
@@ -4400,6 +4454,7 @@ export const dataService = {
       patch: Partial<
         Pick<
           TeamMember,
+          | 'employeeId'
           | 'role'
           | 'approvalStatus'
           | 'approvedBy'
@@ -4423,6 +4478,7 @@ export const dataService = {
         tasks.push(upsertProfileRecord(targetMember));
       } else {
         const dbPatch: Record<string, unknown> = {};
+        if (patch.employeeId !== undefined) dbPatch.employee_id = patch.employeeId;
         if (patch.role !== undefined) dbPatch.role = toDbRole(patch.role);
         if (patch.approvalStatus !== undefined) dbPatch.status = patch.approvalStatus;
         if (patch.department !== undefined) dbPatch.department = patch.department;

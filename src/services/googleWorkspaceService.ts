@@ -162,7 +162,7 @@ function formatBodyToSafeHtml(rawBody: string): string {
   }
 
   const withBreaks = result.replace(/\r?\n/g, '<br />');
-  return `<div style="font-family:Calibri,'Segoe UI',Arial,sans-serif;font-size:14px;line-height:1.55;color:#1F1F1F;">${withBreaks}</div>`;
+  return `<div style="font-family:'Calibri','Carlito','Segoe UI',Arial,sans-serif;font-size:14px;line-height:1.55;color:#1F1F1F;">${withBreaks}</div>`;
 }
 
 export interface SendGmailPayload {

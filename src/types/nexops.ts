@@ -585,6 +585,7 @@ export interface AuthSession {
   userDepartment?: Department;
   userTitle?: string;
   avatarUrl?: string;
+  identityVerified?: boolean;
 }
 
 export interface AppNotification {

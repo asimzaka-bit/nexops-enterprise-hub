@@ -6,6 +6,7 @@ import { CreateRequestModal, CreateRequestPayload } from './components/CreateReq
 import { DashboardView } from './components/DashboardView';
 import { ImportedRequestRow, ImportRequestsModal } from './components/ImportRequestsModal';
 import { CreateLeavePayload, LeavesView } from './components/LeavesView';
+import { DepartmentVerificationScreen } from './components/DepartmentVerificationScreen';
 import { InitialAdminPayload, LoginScreen, RegisterUserPayload, SignUpOutcome } from './components/LoginScreen';
 import { CreateMeetingPayload, MeetingsMomView } from './components/MeetingsMomView';
 import { OfficialReportModal } from './components/OfficialReportModal';
@@ -139,6 +140,7 @@ export default function App() {
     dataService.auth.hasLocalAdminSync(dataService.loadStateSync().teamMembers),
   );
   const realtimeTimerRef = useRef<number | null>(null);
+  const isSigningInRef = useRef(false);
 
   // Unified Google Workspace OAuth session state shared across Gmail, Docs, Sheets & Forms
   const [googleToken, setGoogleToken] = useState<string | null>(() =>
@@ -224,7 +226,9 @@ export default function App() {
 
     const applySupabaseUser = (
       sbUser: Parameters<typeof buildMemberFromSupabaseUser>[0],
+      isInitialHydration = false,
     ) => {
+      const savedSession = dataService.auth.loadSessionSync();
       const member = buildMemberFromSupabaseUser(sbUser, dataService.loadStateSync().teamMembers);
       const isNewPendingUser =
         !dataService
@@ -274,21 +278,37 @@ export default function App() {
         void dataService.notifications.create(pendingAdminNotif);
       }
 
+      const matchingSaved =
+        savedSession &&
+        savedSession.isAuthenticated &&
+        (savedSession.userId === member.id ||
+          (savedSession.userEmail &&
+            savedSession.userEmail.toLowerCase() === member.email.toLowerCase()))
+          ? savedSession
+          : null;
+
+      const preservedIdentityVerified = isInitialHydration
+        ? matchingSaved
+          ? matchingSaved.identityVerified ?? true
+          : false
+        : matchingSaved?.identityVerified ?? false;
+
       const nextSession: AuthSession = {
         isAuthenticated: true,
         userId: member.id,
         rememberSession: true,
-        signedInAt: new Date().toISOString(),
+        signedInAt: matchingSaved?.signedInAt ?? new Date().toISOString(),
         authProvider: 'supabase',
-        employeeId: member.employeeId,
-        userName: member.name,
+        employeeId: matchingSaved?.employeeId || member.employeeId,
+        userName: matchingSaved?.userName || member.name,
         userEmail: member.email,
-        userRole: member.role,
-        approvalStatus: member.approvalStatus,
+        userRole: matchingSaved?.userRole || member.role,
+        approvalStatus: matchingSaved?.approvalStatus ?? member.approvalStatus,
         isSuperAdmin: member.isSuperAdmin,
-        userDepartment: member.department,
-        userTitle: member.title,
-        avatarUrl: member.avatarUrl,
+        userDepartment: matchingSaved?.userDepartment || member.department,
+        userTitle: matchingSaved?.userTitle || member.title,
+        avatarUrl: matchingSaved?.avatarUrl || member.avatarUrl,
+        identityVerified: preservedIdentityVerified,
       };
       dataService.auth.saveSessionSync(nextSession);
       setAuthSession(nextSession);
@@ -296,13 +316,14 @@ export default function App() {
 
     void client.auth.getSession().then(({ data }) => {
       if (data.session?.user) {
-        applySupabaseUser(data.session.user);
+        applySupabaseUser(data.session.user, true);
       }
     });
 
     const { data: authListener } = client.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_IN' && session?.user) {
-        applySupabaseUser(session.user);
+        if (isSigningInRef.current) return;
+        applySupabaseUser(session.user, false);
       } else if (event === 'SIGNED_OUT') {
         setAuthSession((prev) => {
           if (prev?.authProvider === 'supabase') {
@@ -487,7 +508,11 @@ export default function App() {
   );
 
   useEffect(() => {
-    if (authSession?.isAuthenticated && isApprovedUser) {
+    if (
+      authSession?.isAuthenticated &&
+      authSession.identityVerified !== false &&
+      isApprovedUser
+    ) {
       void syncFromSupabase(false, dataService.isSupabaseConfigured());
     } else if (authSession?.isAuthenticated && !isApprovedUser) {
       setIsHydrating(false);
@@ -524,7 +549,7 @@ export default function App() {
     } else {
       setIsHydrating(false);
     }
-  }, [authSession?.isAuthenticated, isApprovedUser, syncFromSupabase]);
+  }, [authSession?.isAuthenticated, authSession?.identityVerified, isApprovedUser, syncFromSupabase]);
 
   // Enforce strict role integrity from the authenticated user's profile
   useEffect(() => {
@@ -936,44 +961,104 @@ export default function App() {
     };
   };
 
-  // Authentication Handlers (Production-Only)
+  // Authentication Handlers (Production-Only, 2-Step Login)
   const handleEmailSignIn = async (
     email: string,
     password: string,
     rememberSession: boolean,
   ) => {
-    const { user, session } = await dataService.auth.signInWithEmail(
-      email,
-      password,
-      rememberSession,
-    );
-    setAuthSession(session);
-    if (user.role === 'Admin') {
-      setIsAdminInitialized(true);
-    }
-    setState((prev) => {
-      const exists = prev.teamMembers.some(
-        (m) => m.id === user.id || m.email.toLowerCase() === user.email.toLowerCase(),
+    isSigningInRef.current = true;
+    try {
+      const { user, session } = await dataService.auth.signInWithEmail(
+        email,
+        password,
+        rememberSession,
       );
-      const nextMembers = exists
+      const step1Session: AuthSession = {
+        ...session,
+        identityVerified: false,
+      };
+      dataService.auth.saveSessionSync(step1Session);
+      setAuthSession(step1Session);
+      if (user.role === 'Admin') {
+        setIsAdminInitialized(true);
+      }
+      setState((prev) => {
+        const exists = prev.teamMembers.some(
+          (m) => m.id === user.id || m.email.toLowerCase() === user.email.toLowerCase(),
+        );
+        const nextMembers = exists
+          ? prev.teamMembers.map((m) =>
+              m.id === user.id || m.email.toLowerCase() === user.email.toLowerCase()
+                ? { ...m, ...user, lastActive: new Date().toISOString() }
+                : m,
+            )
+          : [user, ...prev.teamMembers];
+        return {
+          ...prev,
+          activeRole: user.role,
+          teamMembers: nextMembers,
+        };
+      });
+    } finally {
+      isSigningInRef.current = false;
+    }
+  };
+
+  const handleCompleteIdentityStep = async ({
+    department,
+    employeeId,
+  }: {
+    department: Department;
+    employeeId: string;
+  }) => {
+    if (!authSession) return;
+    const updatedUser = await dataService.auth.updateUserIdentity(
+      currentUser,
+      department,
+      employeeId,
+      state.teamMembers,
+    );
+    const nextSession: AuthSession = {
+      ...authSession,
+      userId: updatedUser.id,
+      employeeId: updatedUser.employeeId,
+      userName: updatedUser.name,
+      userEmail: updatedUser.email,
+      userRole: updatedUser.role,
+      approvalStatus: updatedUser.approvalStatus,
+      isSuperAdmin: updatedUser.isSuperAdmin,
+      userDepartment: updatedUser.department,
+      userTitle: updatedUser.title,
+      avatarUrl: updatedUser.avatarUrl,
+      identityVerified: true,
+    };
+    dataService.auth.saveSessionSync(nextSession);
+    setAuthSession(nextSession);
+    setState((prev) => ({
+      ...prev,
+      activeRole: updatedUser.role,
+      teamMembers: prev.teamMembers.some(
+        (m) =>
+          m.id === updatedUser.id ||
+          m.email.toLowerCase() === updatedUser.email.toLowerCase(),
+      )
         ? prev.teamMembers.map((m) =>
-            m.id === user.id || m.email.toLowerCase() === user.email.toLowerCase()
-              ? { ...m, ...user, lastActive: new Date().toISOString() }
+            m.id === updatedUser.id ||
+            m.email.toLowerCase() === updatedUser.email.toLowerCase()
+              ? updatedUser
               : m,
           )
-        : [user, ...prev.teamMembers];
-      return {
-        ...prev,
-        activeRole: user.role,
-        teamMembers: nextMembers,
-      };
-    });
+        : [updatedUser, ...prev.teamMembers],
+    }));
     pushToast(
-      `Signed in as ${user.name}`,
-      user.approvalStatus === 'approved' || isSuperAdminEmail(user.email)
-        ? `${user.email} · ${user.role}`
-        : `${user.email} · Account Pending Admin Approval`,
-      user.approvalStatus === 'approved' || isSuperAdminEmail(user.email) ? 'success' : 'info',
+      `Welcome, ${updatedUser.name}`,
+      updatedUser.approvalStatus === 'approved' || isSuperAdminEmail(updatedUser.email)
+        ? `${updatedUser.department} · ${updatedUser.employeeId} · ${updatedUser.role}`
+        : `${updatedUser.department} · ${updatedUser.employeeId} · Account Pending Admin Approval`,
+      updatedUser.approvalStatus === 'approved' || isSuperAdminEmail(updatedUser.email)
+        ? 'success'
+        : 'info',
     );
   };
 
@@ -4162,7 +4247,7 @@ export default function App() {
     );
   };
 
-  // Session Route Guard: unauthenticated users cannot access internal dashboard or records
+  // Step 1 Guard: unauthenticated users see clean Login screen
   if (!authSession || !authSession.isAuthenticated) {
     return (
       <>
@@ -4173,6 +4258,22 @@ export default function App() {
           onRegisterUser={handleRegisterUser}
           onResetPassword={handleResetPassword}
           onRegisterInitialAdmin={handleRegisterInitialAdmin}
+        />
+        <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+      </>
+    );
+  }
+
+  // Step 2 Guard: authenticated users confirm Department & Employee ID before proceeding
+  if (authSession.identityVerified === false) {
+    return (
+      <>
+        <DepartmentVerificationScreen
+          branding={branding}
+          initialDepartment={currentUser.department}
+          initialEmployeeId={currentUser.employeeId}
+          onContinue={handleCompleteIdentityStep}
+          onBackToLogin={handleSignOut}
         />
         <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       </>

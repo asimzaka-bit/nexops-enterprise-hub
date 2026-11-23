@@ -600,7 +600,7 @@ export function SheetsStudioEditor({
     if (doc) {
       doc.open();
       doc.write(
-        `<!doctype html><html><head><title>${title} - ${activeSheet.name}</title><style>body{font-family:Calibri,'Segoe UI',Arial,sans-serif;padding:24px;}table{border-collapse:collapse;width:100%;font-size:11pt;}</style></head><body><h2>${title} (${activeSheet.name})</h2><table>${tableRowsHtml}</table></body></html>`,
+        `<!doctype html><html><head><title>${title} - ${activeSheet.name}</title><style>body{font-family:'Calibri','Carlito','Segoe UI',Arial,sans-serif;padding:24px;}table{border-collapse:collapse;width:100%;font-size:11pt;}</style></head><body><h2>${title} (${activeSheet.name})</h2><table>${tableRowsHtml}</table></body></html>`,
       );
       doc.close();
       window.setTimeout(() => {

@@ -162,7 +162,7 @@ export function LoginScreen({ branding, onEmailSignIn }: LoginScreenProps) {
               disabled={submitting}
               className="flex h-10 w-full items-center justify-center rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-indigo-700 disabled:opacity-60"
             >
-              {submitting ? 'Signing In...' : 'Sign In'}
+              {submitting ? 'Authenticating...' : 'Login'}
             </button>
           </form>
         </div>
