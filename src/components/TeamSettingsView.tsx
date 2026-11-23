@@ -3,6 +3,7 @@ import {
   Building2,
   Check,
   CheckCircle2,
+  Clock,
   Cloud,
   Database,
   Download,
@@ -31,12 +32,14 @@ import {
   ApprovalStatus,
   AuditEvent,
   CompanyBrandingConfig,
+  DEFAULT_SLA_POLICY,
   Department,
   NexOpsState,
   OperationalRequest,
   PermissionKey,
   PermissionMatrix,
   Role,
+  SlaPolicyConfig,
   TableSyncStatus,
   TeamMember,
 } from '../types/nexops';
@@ -229,6 +232,18 @@ export function TeamSettingsView({
   );
   const [draftDepartments, setDraftDepartments] = useState<string[]>(branding.departments);
   const [draftCategories, setDraftCategories] = useState<string[]>(branding.categories);
+  const [draftSlaUrgentHours, setDraftSlaUrgentHours] = useState(
+    String(branding.slaPolicy?.urgentHours ?? DEFAULT_SLA_POLICY.urgentHours),
+  );
+  const [draftSlaHighHours, setDraftSlaHighHours] = useState(
+    String(branding.slaPolicy?.highHours ?? DEFAULT_SLA_POLICY.highHours),
+  );
+  const [draftSlaMediumHours, setDraftSlaMediumHours] = useState(
+    String(branding.slaPolicy?.mediumHours ?? DEFAULT_SLA_POLICY.mediumHours),
+  );
+  const [draftSlaLowHours, setDraftSlaLowHours] = useState(
+    String(branding.slaPolicy?.lowHours ?? DEFAULT_SLA_POLICY.lowHours),
+  );
   const [newDepartmentInput, setNewDepartmentInput] = useState('');
   const [newCategoryInput, setNewCategoryInput] = useState('');
   const [brandingError, setBrandingError] = useState<string | null>(null);
@@ -239,6 +254,11 @@ export function TeamSettingsView({
     setDraftBudgetThresholdUsd(String(branding.approvalBudgetThresholdUsd ?? 5000));
     setDraftDepartments(branding.departments);
     setDraftCategories(branding.categories);
+    const sla = branding.slaPolicy ?? DEFAULT_SLA_POLICY;
+    setDraftSlaUrgentHours(String(sla.urgentHours));
+    setDraftSlaHighHours(String(sla.highHours));
+    setDraftSlaMediumHours(String(sla.mediumHours));
+    setDraftSlaLowHours(String(sla.lowHours));
   }, [branding]);
 
   const [newName, setNewName] = useState('');
@@ -314,13 +334,32 @@ export function TeamSettingsView({
       setBrandingError('Two-Tier Approval Budget Threshold must be a non-negative USD amount.');
       return;
     }
+    const urgentHours = Math.round(Number(draftSlaUrgentHours));
+    const highHours = Math.round(Number(draftSlaHighHours));
+    const mediumHours = Math.round(Number(draftSlaMediumHours));
+    const lowHours = Math.round(Number(draftSlaLowHours));
+    if (
+      [urgentHours, highHours, mediumHours, lowHours].some(
+        (h) => !Number.isFinite(h) || h < 1 || h > 720,
+      )
+    ) {
+      setBrandingError('SLA escalation windows must be between 1 and 720 hours.');
+      return;
+    }
+    const nextSlaPolicy: SlaPolicyConfig = {
+      urgentHours,
+      highHours,
+      mediumHours,
+      lowHours,
+    };
     setBrandingError(null);
     onUpdateBranding({
       companyName: draftCompanyName.trim(),
-      tagline: draftTagline.trim() || 'Unified Operations, QA & Approval Management System',
+      tagline: draftTagline.trim() || 'Unified Operations, QA & Approval',
       departments: draftDepartments,
       categories: draftCategories,
       approvalBudgetThresholdUsd: Math.round(parsedThreshold),
+      slaPolicy: nextSlaPolicy,
     });
   };
 
@@ -997,6 +1036,115 @@ export function TeamSettingsView({
               placeholder="5000"
               className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 font-mono text-sm text-slate-900 focus:border-indigo-500 focus:outline-none disabled:bg-slate-50 disabled:text-slate-500"
             />
+          </div>
+        </div>
+
+        {/* Automated SLA Escalation Policy (Hours by Priority) */}
+        <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <span className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-900">
+                <Clock className="h-3.5 w-3.5 text-indigo-600" aria-hidden="true" />
+                <span>Automated SLA Escalation Windows (Hours by Priority)</span>
+              </span>
+              <p className="mt-0.5 text-[11px] text-slate-500">
+                Requests approaching &lt;25% remaining SLA trigger amber warnings; expired windows
+                trigger red SLA Breach alerts in the queue and header bell.
+              </p>
+            </div>
+            <span className="rounded-md border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] font-semibold text-slate-600">
+              Synced to Supabase
+            </span>
+          </div>
+
+          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div>
+              <label
+                htmlFor="sla-urgent-hours"
+                className="block text-[11px] font-semibold text-rose-700"
+              >
+                Urgent / Critical (hrs)
+              </label>
+              <input
+                id="sla-urgent-hours"
+                type="number"
+                min={1}
+                max={720}
+                disabled={!isAdmin}
+                value={draftSlaUrgentHours}
+                onChange={(e) => {
+                  setDraftSlaUrgentHours(e.target.value);
+                  if (brandingError) setBrandingError(null);
+                }}
+                className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 font-mono text-xs font-semibold text-slate-900 focus:border-indigo-500 focus:outline-none disabled:bg-slate-100 disabled:text-slate-500"
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="sla-high-hours"
+                className="block text-[11px] font-semibold text-amber-800"
+              >
+                High Priority (hrs)
+              </label>
+              <input
+                id="sla-high-hours"
+                type="number"
+                min={1}
+                max={720}
+                disabled={!isAdmin}
+                value={draftSlaHighHours}
+                onChange={(e) => {
+                  setDraftSlaHighHours(e.target.value);
+                  if (brandingError) setBrandingError(null);
+                }}
+                className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 font-mono text-xs font-semibold text-slate-900 focus:border-indigo-500 focus:outline-none disabled:bg-slate-100 disabled:text-slate-500"
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="sla-medium-hours"
+                className="block text-[11px] font-semibold text-slate-700"
+              >
+                Medium Priority (hrs)
+              </label>
+              <input
+                id="sla-medium-hours"
+                type="number"
+                min={1}
+                max={720}
+                disabled={!isAdmin}
+                value={draftSlaMediumHours}
+                onChange={(e) => {
+                  setDraftSlaMediumHours(e.target.value);
+                  if (brandingError) setBrandingError(null);
+                }}
+                className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 font-mono text-xs font-semibold text-slate-900 focus:border-indigo-500 focus:outline-none disabled:bg-slate-100 disabled:text-slate-500"
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="sla-low-hours"
+                className="block text-[11px] font-semibold text-slate-600"
+              >
+                Low Priority (hrs)
+              </label>
+              <input
+                id="sla-low-hours"
+                type="number"
+                min={1}
+                max={720}
+                disabled={!isAdmin}
+                value={draftSlaLowHours}
+                onChange={(e) => {
+                  setDraftSlaLowHours(e.target.value);
+                  if (brandingError) setBrandingError(null);
+                }}
+                className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 font-mono text-xs font-semibold text-slate-900 focus:border-indigo-500 focus:outline-none disabled:bg-slate-100 disabled:text-slate-500"
+              />
+            </div>
           </div>
         </div>
 

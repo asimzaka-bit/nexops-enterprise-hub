@@ -27,9 +27,11 @@ import {
 } from 'lucide-react';
 import { FormEvent, Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  DEFAULT_SLA_POLICY,
   OperationalRequest,
   RequestStatus,
   Role,
+  SlaPolicyConfig,
   TaskComment,
   TaskSubtask,
   TeamMember,
@@ -65,6 +67,7 @@ interface RequestDetailDrawerProps {
   request: OperationalRequest;
   activeRole: Role;
   approvalBudgetThresholdUsd?: number;
+  slaPolicy?: SlaPolicyConfig;
   subtasks: TaskSubtask[];
   taskComments: TaskComment[];
   teamMembers: TeamMember[];
@@ -92,6 +95,7 @@ export function RequestDetailDrawer({
   request,
   activeRole,
   approvalBudgetThresholdUsd = 5000,
+  slaPolicy = DEFAULT_SLA_POLICY,
   subtasks,
   taskComments,
   teamMembers,
@@ -164,7 +168,7 @@ export function RequestDetailDrawer({
       active = false;
     };
   }, []);
-  const overdue = isRequestOverdue(request);
+  const overdue = isRequestOverdue(request, slaPolicy, nowMs);
   const overdueDays = overdue ? getOverdueDays(request.dueDate) : 0;
   const canEscalate =
     request.status !== 'Approved' &&
@@ -438,9 +442,16 @@ export function RequestDetailDrawer({
               <span className="text-slate-300" aria-hidden="true">
                 ·
               </span>
-              <PriorityBadge priority={request.priority} />
+              <PriorityBadge priority={request.priority} slaBreached={overdue} />
               <StatusBadge status={request.status} />
-              <SlaCountdownPill dueDate={request.dueDate} status={request.status} nowMs={nowMs} />
+              <SlaCountdownPill
+                dueDate={request.dueDate}
+                status={request.status}
+                createdAt={request.createdAt}
+                priority={request.priority}
+                slaPolicy={slaPolicy}
+                nowMs={nowMs}
+              />
               {overdue && <OverdueBadge days={overdueDays} />}
               {isTwoTier && <TwoTierBadge stage1Completed={stage1Done && !stage2Done} />}
               {request.delegatedFromReviewer && (
@@ -587,6 +598,9 @@ export function RequestDetailDrawer({
                   <SlaCountdownPill
                     dueDate={request.dueDate}
                     status={request.status}
+                    createdAt={request.createdAt}
+                    priority={request.priority}
+                    slaPolicy={slaPolicy}
                     nowMs={nowMs}
                   />
                 </div>

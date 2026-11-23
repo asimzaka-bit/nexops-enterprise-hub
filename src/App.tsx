@@ -39,6 +39,7 @@ import {
   CompanyAsset,
   CompanyBrandingConfig,
   CompanyProject,
+  DEFAULT_SLA_POLICY,
   Department,
   DocumentVaultItem,
   LeaveRequest,
@@ -1524,6 +1525,7 @@ export default function App() {
   // Navigate to queue with optional status preset
   const handleNavigateToQueue = (status: RequestStatus | 'All' = 'All') => {
     setStatusFilter(status);
+    setOverdueOnly(false);
     setActiveSection('requests');
   };
 
@@ -4199,6 +4201,7 @@ export default function App() {
   const handleInspectRequestById = (requestId: string) => {
     const found = state.requests.find((r) => r.id === requestId);
     if (found) {
+      setActiveSection('requests');
       setSelectedRequestId(found.id);
     } else {
       pushToast('Request Not Found', `${requestId} is not present in the active queue.`, 'warning');
@@ -4422,10 +4425,11 @@ export default function App() {
     if (currentUser.role !== 'Admin') return;
     const saved = dataService.branding.saveSync(nextBranding);
     setBranding(saved);
+    const sla = saved.slaPolicy ?? DEFAULT_SLA_POLICY;
     const auditEntry = createAuditEvent(
       'SYS-BRANDING',
       'Team Updated',
-      `Updated white-label branding ("${saved.companyName}"), ${saved.departments.length} departments, and ${saved.categories.length} categories.`,
+      `Updated white-label branding ("${saved.companyName}"), ${saved.departments.length} departments, ${saved.categories.length} categories, and SLA windows (${sla.urgentHours}h/${sla.highHours}h/${sla.mediumHours}h/${sla.lowHours}h).`,
     );
     setState((prev) => ({
       ...prev,
@@ -4601,6 +4605,7 @@ export default function App() {
             onOpenProfile={() => setProfileModalOpen(true)}
             onSignOut={handleSignOut}
             activeWorkspaceTool={activeWorkspaceTool}
+            slaPolicy={branding.slaPolicy ?? DEFAULT_SLA_POLICY}
             onSelectWorkspaceTool={(tool) => {
               setActiveWorkspaceTool(tool);
               setActiveSection('workspace');
@@ -4631,8 +4636,14 @@ export default function App() {
                     announcements={state.announcements}
                     activeRole={currentUser.role}
                     departments={branding.departments}
+                    slaPolicy={branding.slaPolicy ?? DEFAULT_SLA_POLICY}
                     onOpenRequest={(req) => setSelectedRequestId(req.id)}
                     onNavigateToQueue={handleNavigateToQueue}
+                    onNavigateToOverdueQueue={() => {
+                      setStatusFilter('All');
+                      setOverdueOnly(true);
+                      setActiveSection('requests');
+                    }}
                     onNavigateToProjects={() => setActiveSection('projects')}
                     onOpenExecutiveReport={() =>
                       setReportModalState({ open: true, requestId: null })
@@ -4657,6 +4668,7 @@ export default function App() {
                     departments={branding.departments}
                     activeRole={currentUser.role}
                     approvalBudgetThresholdUsd={branding.approvalBudgetThresholdUsd ?? 5000}
+                    slaPolicy={branding.slaPolicy ?? DEFAULT_SLA_POLICY}
                     searchQuery={searchQuery}
                     onSearchQueryChange={setSearchQuery}
                     statusFilter={statusFilter}
@@ -4900,6 +4912,7 @@ export default function App() {
             request={selectedRequest}
             activeRole={currentUser.role}
             approvalBudgetThresholdUsd={branding.approvalBudgetThresholdUsd ?? 5000}
+            slaPolicy={branding.slaPolicy ?? DEFAULT_SLA_POLICY}
             subtasks={state.subtasks}
             taskComments={state.taskComments}
             teamMembers={state.teamMembers}

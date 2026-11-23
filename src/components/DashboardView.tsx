@@ -30,9 +30,11 @@ import {
   AttendanceLog,
   CompanyAnnouncement,
   CompanyProject,
+  DEFAULT_SLA_POLICY,
   OperationalRequest,
   RequestStatus,
   Role,
+  SlaPolicyConfig,
   TeamMember,
 } from '../types/nexops';
 import {
@@ -44,8 +46,11 @@ import {
   formatDateTime,
   formatPresenceStatus,
   formatShortDate,
+  formatTurnaroundDuration,
+  getApprovalTurnaroundHours,
   getBudgetUtilizationPct,
   getOverdueDays,
+  getRequestSlaStatus,
   getTimeOfDayGreeting,
   getTodayDateString,
   isRequestOverdue,
@@ -57,6 +62,7 @@ import {
   OverdueBadge,
   PresenceBadge,
   PriorityBadge,
+  SlaCountdownPill,
   StatusBadge,
 } from './StatusIndicator';
 import { UserAvatar } from './UserAvatar';
@@ -71,8 +77,10 @@ interface DashboardViewProps {
   announcements: CompanyAnnouncement[];
   activeRole: Role;
   departments: string[];
+  slaPolicy?: SlaPolicyConfig;
   onOpenRequest: (request: OperationalRequest) => void;
   onNavigateToQueue: (statusFilter?: RequestStatus | 'All') => void;
+  onNavigateToOverdueQueue?: () => void;
   onNavigateToProjects?: () => void;
   onOpenExecutiveReport: () => void;
   onExportScorecardSuccess?: (deptCount: number) => void;
@@ -107,8 +115,10 @@ export function DashboardView({
   announcements,
   activeRole,
   departments,
+  slaPolicy = DEFAULT_SLA_POLICY,
   onOpenRequest,
   onNavigateToQueue,
+  onNavigateToOverdueQueue,
   onNavigateToProjects,
   onOpenExecutiveReport,
   onExportScorecardSuccess,
@@ -120,6 +130,7 @@ export function DashboardView({
   const isAdmin = activeRole === 'Admin';
   const todayStr = getTodayDateString();
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const [dashboardTab, setDashboardTab] = useState<'overview' | 'analytics'>('overview');
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -353,6 +364,16 @@ export function DashboardView({
     },
   ];
 
+  const approvedActiveMembers = useMemo(
+    () =>
+      teamMembers.filter(
+        (m) =>
+          m.active &&
+          ((m.approvalStatus ?? 'approved') === 'approved' || isSuperAdminEmail(m.email)),
+      ),
+    [teamMembers],
+  );
+
   const scorecardRows: DepartmentScorecardRow[] = displayDepartments.map((dept) => {
     const deptRequests = requests.filter((r) => r.department === dept);
     const total = deptRequests.length;
@@ -361,7 +382,39 @@ export function DashboardView({
       (r) => r.status === 'Approved' || r.status === 'Rejected' || r.status === 'Revision Required',
     ).length;
     const approvalRatePct = decided > 0 ? Math.round((approved / decided) * 100) : 0;
-    const overdue = deptRequests.filter((r) => isRequestOverdue(r)).length;
+    const overdue = deptRequests.filter((r) => isRequestOverdue(r, slaPolicy, nowMs)).length;
+
+    const withinSlaCount = deptRequests.filter((r) => {
+      const sla = getRequestSlaStatus(r, slaPolicy, nowMs);
+      if (r.status === 'Approved') return sla.metSla !== false;
+      if (r.status === 'Rejected') return true;
+      return !sla.breached;
+    }).length;
+    const slaCompliancePct = total > 0 ? Math.round((withinSlaCount / total) * 100) : 100;
+
+    const turnaroundValues = deptRequests
+      .map((r) => getApprovalTurnaroundHours(r))
+      .filter((h): h is number => h !== null);
+    const avgTurnaroundHours =
+      turnaroundValues.length > 0
+        ? turnaroundValues.reduce((sum, h) => sum + h, 0) / turnaroundValues.length
+        : null;
+
+    const deptStaff = approvedActiveMembers.filter((m) => m.department === dept);
+    const activeStaffCount = deptStaff.length;
+    const deptAttToday = todayAttendanceLogs.filter((a) => a.department === dept);
+    const uniqueAttEmails = new Set(
+      deptAttToday.map((a) => a.userEmail.trim().toLowerCase()).filter(Boolean),
+    );
+    const attendanceTodayCount =
+      uniqueAttEmails.size > 0 ? uniqueAttEmails.size : deptAttToday.length;
+    const attendanceRatePct =
+      activeStaffCount > 0
+        ? Math.min(100, Math.round((attendanceTodayCount / activeStaffCount) * 100))
+        : attendanceTodayCount > 0
+          ? 100
+          : 0;
+
     const avgChecklistPct =
       total > 0
         ? Math.round(
@@ -381,6 +434,11 @@ export function DashboardView({
       approvalRatePct,
       overdueCount: overdue,
       avgChecklistPct,
+      slaCompliancePct,
+      avgTurnaroundHours,
+      activeStaffCount,
+      attendanceTodayCount,
+      attendanceRatePct,
     };
   });
 
@@ -403,7 +461,30 @@ export function DashboardView({
     onExportScorecardSuccess?.(departmentAnalyticsRows.length);
   };
 
-  const overdueCount = requests.filter((r) => isRequestOverdue(r)).length;
+  const overdueCount = requests.filter((r) => isRequestOverdue(r, slaPolicy, nowMs)).length;
+  const approachingSlaCount = requests.filter((r) => {
+    const sla = getRequestSlaStatus(r, slaPolicy, nowMs);
+    return !sla.breached && sla.approaching;
+  }).length;
+
+  const overallSlaCompliancePct = useMemo(() => {
+    if (requests.length === 0) return 100;
+    const compliant = requests.filter((r) => {
+      const sla = getRequestSlaStatus(r, slaPolicy, nowMs);
+      if (r.status === 'Approved') return sla.metSla !== false;
+      if (r.status === 'Rejected') return true;
+      return !sla.breached;
+    }).length;
+    return Math.round((compliant / requests.length) * 100);
+  }, [requests, slaPolicy, nowMs]);
+
+  const overallAvgTurnaroundHours = useMemo(() => {
+    const vals = requests
+      .map((r) => getApprovalTurnaroundHours(r))
+      .filter((h): h is number => h !== null);
+    if (vals.length === 0) return null;
+    return vals.reduce((sum, h) => sum + h, 0) / vals.length;
+  }, [requests]);
 
   const portfolioBudgetUsd = projects.reduce(
     (sum, p) => sum + toUsdEquivalent(p.estimatedBudget ?? 0, p.currency || 'USD'),
@@ -423,13 +504,25 @@ export function DashboardView({
       (r) =>
         r.status !== 'Approved' &&
         r.status !== 'Rejected' &&
-        (isRequestOverdue(r) ||
+        (isRequestOverdue(r, slaPolicy, nowMs) ||
           r.priority === 'Urgent' ||
           r.priority === 'High' ||
           r.status === 'Revision Required'),
     )
     .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
     .slice(0, 6);
+
+  const slaBreachedRequests = useMemo(
+    () =>
+      requests
+        .filter((r) => isRequestOverdue(r, slaPolicy, nowMs))
+        .sort(
+          (a, b) =>
+            getRequestSlaStatus(b, slaPolicy, nowMs).overdueHours -
+            getRequestSlaStatus(a, slaPolicy, nowMs).overdueHours,
+        ),
+    [requests, slaPolicy, nowMs],
+  );
 
   const kpis = [
     {
@@ -530,22 +623,47 @@ export function DashboardView({
         </div>
       </section>
 
-      {/* Executive Action Strip with Export KPI CSV & Calibri PDF Report */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-5 py-3.5">
-        <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
+      {/* Executive Action Strip with Dynamic SLA Status & Export Actions */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3.5 sm:px-5">
+        <div className="flex flex-wrap items-center gap-2.5 text-xs text-slate-600 sm:gap-3">
           <span className="font-semibold text-slate-900">Executive Governance Snapshot</span>
           <span aria-hidden="true" className="text-slate-300">
             ·
           </span>
-          <span className="font-mono tabular-nums">
+          <span className="tabular-nums">
             {overdueCount > 0 ? (
-              <span className="font-semibold text-rose-700">
-                {overdueCount} SLA Overdue Alert{overdueCount > 1 ? 's' : ''}
-              </span>
+              <button
+                type="button"
+                onClick={() =>
+                  onNavigateToOverdueQueue ? onNavigateToOverdueQueue() : onNavigateToQueue('All')
+                }
+                className="inline-flex items-center gap-1.5 rounded-md border border-rose-200 bg-rose-50 px-2 py-0.5 font-semibold text-rose-700 transition-colors hover:bg-rose-100"
+              >
+                <span className="relative flex h-2 w-2 shrink-0" aria-hidden="true">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-500 opacity-75" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-rose-600" />
+                </span>
+                <span>
+                  {overdueCount} SLA Breach{overdueCount > 1 ? 'es' : ''} require attention
+                </span>
+              </button>
             ) : (
-              <span className="text-emerald-700">All active SLAs on track</span>
+              <span className="inline-flex items-center gap-1.5 font-semibold text-emerald-700">
+                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                <span>All active SLAs on track</span>
+              </span>
             )}
           </span>
+          {approachingSlaCount > 0 && (
+            <>
+              <span aria-hidden="true" className="text-slate-300">
+                ·
+              </span>
+              <span className="rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 font-semibold text-amber-800 tabular-nums">
+                {approachingSlaCount} approaching SLA
+              </span>
+            </>
+          )}
           <span aria-hidden="true" className="text-slate-300">
             ·
           </span>
@@ -556,6 +674,40 @@ export function DashboardView({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {/* Sub-Tab Toggle: Overview vs Department & SLA Analytics */}
+          <div
+            role="tablist"
+            aria-label="Dashboard view mode"
+            className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-100 p-0.5"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={dashboardTab === 'overview'}
+              onClick={() => setDashboardTab('overview')}
+              className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors whitespace-nowrap ${
+                dashboardTab === 'overview'
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Overview
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={dashboardTab === 'analytics'}
+              onClick={() => setDashboardTab('analytics')}
+              className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors whitespace-nowrap ${
+                dashboardTab === 'analytics'
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Department &amp; SLA Analytics
+            </button>
+          </div>
+
           <button
             type="button"
             onClick={handleExportExecutiveKpiCsv}
@@ -576,6 +728,8 @@ export function DashboardView({
         </div>
       </div>
 
+      {dashboardTab === 'overview' && (
+        <>
       {/* Prominent Company Notice Board & Announcements Widget */}
       <section
         aria-label="Company Notice Board & Announcements"
@@ -1066,104 +1220,324 @@ export function DashboardView({
         )}
       </section>
 
-      {/* Department Performance & Turnaround Scorecard */}
-      <section className="rounded-xl border border-slate-200 bg-white">
-        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 px-6 py-4">
+        </>
+      )}
+
+      {/* Department Performance & SLA Analytics (Visible in both Overview & Dedicated Sub-Tab) */}
+      <section
+        aria-label="Department Performance and SLA Analytics"
+        className="rounded-xl border border-slate-200 bg-white"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 px-4 py-4 sm:px-6">
           <div className="flex items-center gap-2.5">
             <BarChart3 className="h-4 w-4 text-indigo-600 shrink-0" aria-hidden="true" />
             <div>
               <h2 className="font-display text-base font-bold text-slate-900">
-                Department Performance &amp; Turnaround
+                Department Performance &amp; SLA Analytics
               </h2>
               <p className="mt-0.5 text-xs text-slate-500">
-                Throughput scorecard comparing approval velocity, SLA adherence, and QA checklist completion
+                Cross-department comparison of request throughput, SLA compliance %, approval
+                turnaround speed, and today&apos;s staff attendance
               </p>
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={handleDownloadScorecard}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-800 transition-colors hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 whitespace-nowrap"
-          >
-            <Download className="h-3.5 w-3.5" />
-            <span>Download Scorecard CSV</span>
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700 tabular-nums">
+              Overall SLA Compliance: {overallSlaCompliancePct}%
+            </span>
+            <span className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700 tabular-nums">
+              Avg Turnaround: {formatTurnaroundDuration(overallAvgTurnaroundHours)}
+            </span>
+            <button
+              type="button"
+              onClick={handleDownloadScorecard}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-800 transition-colors hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 whitespace-nowrap"
+            >
+              <Download className="h-3.5 w-3.5" />
+              <span>Download Scorecard CSV</span>
+            </button>
+          </div>
         </div>
 
+        {/* Responsive Department Performance Summary Cards */}
+        <div className="grid grid-cols-1 gap-3 border-b border-slate-200 bg-slate-50/40 p-4 sm:grid-cols-2 sm:p-6 xl:grid-cols-3">
+          {scorecardRows.map((row) => {
+            const slaPct = row.slaCompliancePct ?? 100;
+            const attRate = row.attendanceRatePct ?? 0;
+            const staffCount = row.activeStaffCount ?? 0;
+            const attToday = row.attendanceTodayCount ?? 0;
+            return (
+              <div
+                key={`card-${row.department}`}
+                className="flex flex-col justify-between rounded-xl border border-slate-200 bg-white p-4"
+              >
+                <div>
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-900">{row.department}</h3>
+                      <p className="mt-0.5 text-xs text-slate-500 tabular-nums">
+                        {row.approvedCount} approved of {row.totalRequests} total requests
+                      </p>
+                    </div>
+                    {row.overdueCount > 0 ? (
+                      <span className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-rose-50 px-2 py-0.5 text-[11px] font-bold text-rose-700 tabular-nums">
+                        {row.overdueCount} SLA Breach{row.overdueCount > 1 ? 'es' : ''}
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                        SLA Healthy
+                      </span>
+                    )}
+                  </div>
+
+                  {/* SLA Compliance Progress Bar */}
+                  <div className="mt-3.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-medium text-slate-600">SLA Compliance Rate</span>
+                      <span className="font-mono font-bold text-slate-900 tabular-nums">
+                        {row.totalRequests > 0 ? `${slaPct}%` : '—'}
+                      </span>
+                    </div>
+                    <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                      <div
+                        className={`h-full rounded-full transition-all duration-300 ${
+                          slaPct >= 85
+                            ? 'bg-emerald-600'
+                            : slaPct >= 60
+                              ? 'bg-amber-500'
+                              : 'bg-rose-600'
+                        }`}
+                        style={{ width: `${row.totalRequests > 0 ? slaPct : 0}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Turnaround & Attendance Metrics */}
+                <div className="mt-4 grid grid-cols-2 gap-2.5 border-t border-slate-100 pt-3 text-xs">
+                  <div>
+                    <p className="text-[11px] text-slate-500">Avg Turnaround</p>
+                    <p className="mt-0.5 font-mono font-bold text-slate-900 tabular-nums">
+                      {formatTurnaroundDuration(row.avgTurnaroundHours ?? null)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] text-slate-500">Staff Attendance Today</p>
+                    <p className="mt-0.5 font-mono font-bold text-slate-900 tabular-nums">
+                      {attToday}/{staffCount}{' '}
+                      <span className="text-[11px] font-medium text-slate-500">
+                        ({attRate}%)
+                      </span>
+                    </p>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Full Responsive Department Comparison Table */}
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] border-collapse text-left text-sm">
+          <table className="w-full min-w-[880px] border-collapse text-left text-sm">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50/70 text-xs font-semibold text-slate-500">
                 <th className="py-3 pr-3 pl-6">Department</th>
-                <th className="px-3 py-3 text-right">Total Requests</th>
-                <th className="px-3 py-3">Approval Rate %</th>
-                <th className="px-3 py-3 text-right">Overdue Count</th>
-                <th className="py-3 pr-6 pl-3">Avg QA Checklist Completion %</th>
+                <th className="px-3 py-3 text-right">Approved / Total</th>
+                <th className="px-3 py-3">SLA Compliance %</th>
+                <th className="px-3 py-3 text-right">Avg Turnaround</th>
+                <th className="px-3 py-3 text-right">SLA Breaches</th>
+                <th className="px-3 py-3">Staff Attendance Today</th>
+                <th className="py-3 pr-6 pl-3">Avg QA Checklist %</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {scorecardRows.map((row) => (
-                <tr key={row.department} className="transition-colors hover:bg-slate-50/70">
-                  <td className="py-3.5 pr-3 pl-6 font-semibold text-slate-900 whitespace-nowrap">
-                    {row.department}
-                  </td>
-                  <td className="px-3 py-3.5 text-right font-mono text-xs font-semibold text-slate-800 tabular-nums">
-                    {row.totalRequests}
-                  </td>
-                  <td className="px-3 py-3.5">
-                    <div className="flex items-center gap-3">
-                      <div className="h-2 w-28 overflow-hidden rounded-full bg-slate-100">
-                        <div
-                          className={`h-full rounded-full ${
-                            row.approvalRatePct >= 75
-                              ? 'bg-emerald-600'
-                              : row.approvalRatePct >= 40
-                                ? 'bg-amber-500'
-                                : 'bg-slate-400'
-                          }`}
-                          style={{ width: `${row.approvalRatePct}%` }}
-                        />
+              {scorecardRows.map((row) => {
+                const slaPct = row.slaCompliancePct ?? 100;
+                const attRate = row.attendanceRatePct ?? 0;
+                const staffCount = row.activeStaffCount ?? 0;
+                const attToday = row.attendanceTodayCount ?? 0;
+                return (
+                  <tr key={row.department} className="transition-colors hover:bg-slate-50/70">
+                    <td className="py-3.5 pr-3 pl-6 font-semibold text-slate-900 whitespace-nowrap">
+                      {row.department}
+                    </td>
+                    <td className="px-3 py-3.5 text-right font-mono text-xs font-semibold text-slate-800 tabular-nums whitespace-nowrap">
+                      {row.approvedCount} / {row.totalRequests}
+                      <span className="ml-1.5 text-[11px] font-normal text-slate-400">
+                        ({row.approvalRatePct}%)
+                      </span>
+                    </td>
+                    <td className="px-3 py-3.5">
+                      <div className="flex items-center gap-2.5">
+                        <div className="h-2 w-24 overflow-hidden rounded-full bg-slate-100">
+                          <div
+                            className={`h-full rounded-full ${
+                              row.totalRequests === 0
+                                ? 'bg-slate-300'
+                                : slaPct >= 85
+                                  ? 'bg-emerald-600'
+                                  : slaPct >= 60
+                                    ? 'bg-amber-500'
+                                    : 'bg-rose-600'
+                            }`}
+                            style={{ width: `${row.totalRequests > 0 ? slaPct : 0}%` }}
+                          />
+                        </div>
+                        <span className="font-mono text-xs font-semibold text-slate-800 tabular-nums">
+                          {row.totalRequests > 0 ? `${slaPct}%` : '—'}
+                        </span>
                       </div>
-                      <span className="font-mono text-xs font-semibold text-slate-800 tabular-nums">
-                        {row.approvalRatePct}%
-                      </span>
-                    </div>
-                  </td>
-                  <td className="px-3 py-3.5 text-right font-mono text-xs tabular-nums">
-                    {row.overdueCount > 0 ? (
-                      <span className="inline-flex items-center rounded-md border border-rose-200 bg-rose-50 px-2 py-0.5 font-bold text-rose-700">
-                        {row.overdueCount}
-                      </span>
-                    ) : (
-                      <span className="font-medium text-emerald-700">0</span>
-                    )}
-                  </td>
-                  <td className="py-3.5 pr-6 pl-3">
-                    <div className="flex items-center gap-3">
-                      <div className="h-2 w-28 overflow-hidden rounded-full bg-slate-100">
-                        <div
-                          className={`h-full rounded-full ${
-                            row.avgChecklistPct >= 80
-                              ? 'bg-indigo-600'
-                              : row.avgChecklistPct >= 50
-                                ? 'bg-amber-500'
-                                : 'bg-slate-400'
-                          }`}
-                          style={{ width: `${row.avgChecklistPct}%` }}
-                        />
+                    </td>
+                    <td className="px-3 py-3.5 text-right font-mono text-xs font-semibold text-slate-800 tabular-nums whitespace-nowrap">
+                      {formatTurnaroundDuration(row.avgTurnaroundHours ?? null)}
+                    </td>
+                    <td className="px-3 py-3.5 text-right font-mono text-xs tabular-nums">
+                      {row.overdueCount > 0 ? (
+                        <span className="inline-flex items-center rounded-md border border-rose-200 bg-rose-50 px-2 py-0.5 font-bold text-rose-700">
+                          {row.overdueCount}
+                        </span>
+                      ) : (
+                        <span className="font-medium text-emerald-700">0</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-3.5 whitespace-nowrap">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-xs font-semibold text-slate-800 tabular-nums">
+                          {attToday}/{staffCount}
+                        </span>
+                        <span className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-slate-600 tabular-nums">
+                          {attRate}%
+                        </span>
                       </div>
-                      <span className="font-mono text-xs font-semibold text-slate-800 tabular-nums">
-                        {row.avgChecklistPct}%
-                      </span>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                    <td className="py-3.5 pr-6 pl-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="h-2 w-24 overflow-hidden rounded-full bg-slate-100">
+                          <div
+                            className={`h-full rounded-full ${
+                              row.avgChecklistPct >= 80
+                                ? 'bg-indigo-600'
+                                : row.avgChecklistPct >= 50
+                                  ? 'bg-amber-500'
+                                  : 'bg-slate-400'
+                            }`}
+                            style={{ width: `${row.avgChecklistPct}%` }}
+                          />
+                        </div>
+                        <span className="font-mono text-xs font-semibold text-slate-800 tabular-nums">
+                          {row.avgChecklistPct}%
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       </section>
+
+      {dashboardTab === 'analytics' && (
+        <section
+          aria-label="Active SLA Breach Escalation Watchlist"
+          className="rounded-xl border border-slate-200 bg-white"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 px-4 py-4 sm:px-6">
+            <div>
+              <h2 className="font-display text-base font-bold text-slate-900">
+                Active SLA Escalations &amp; Breached Requests
+              </h2>
+              <p className="mt-0.5 text-xs text-slate-500">
+                Requests exceeding configured SLA windows ({slaPolicy.urgentHours}h Urgent ·{' '}
+                {slaPolicy.highHours}h High · {slaPolicy.mediumHours}h Medium ·{' '}
+                {slaPolicy.lowHours}h Low)
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() =>
+                onNavigateToOverdueQueue ? onNavigateToOverdueQueue() : onNavigateToQueue('All')
+              }
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-700"
+            >
+              <span>Filter Overdue in Queue</span>
+              <ArrowRight className="h-3.5 w-3.5" />
+            </button>
+          </div>
+
+          {slaBreachedRequests.length === 0 ? (
+            <div className="px-6 py-10 text-center">
+              <CheckCircle2 className="mx-auto h-7 w-7 text-emerald-500" />
+              <p className="mt-2 text-sm font-semibold text-slate-900">
+                Zero SLA Breaches Across All Departments
+              </p>
+              <p className="mt-0.5 text-xs text-slate-500">
+                All active requests are currently operating within target SLA response windows.
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[760px] border-collapse text-left text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-50/70 text-xs font-semibold text-slate-500">
+                    <th className="py-3 pr-3 pl-6">Request ID</th>
+                    <th className="px-3 py-3">Operational Deliverable</th>
+                    <th className="px-3 py-3">Department</th>
+                    <th className="px-3 py-3">Priority</th>
+                    <th className="px-3 py-3">SLA Status</th>
+                    <th className="py-3 pr-6 pl-3 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {slaBreachedRequests.map((req) => (
+                    <tr key={req.id} className="bg-rose-50/20 hover:bg-rose-50/45">
+                      <td className="py-3.5 pr-3 pl-6 font-mono text-xs font-bold text-indigo-700 tabular-nums whitespace-nowrap">
+                        {req.id}
+                      </td>
+                      <td className="px-3 py-3.5">
+                        <p className="max-w-xs truncate font-semibold text-slate-900">{req.title}</p>
+                        <p className="text-xs text-slate-500">
+                          {req.category} · Owner: {req.submittedBy}
+                        </p>
+                      </td>
+                      <td className="px-3 py-3.5 text-xs font-medium text-slate-700 whitespace-nowrap">
+                        {req.department}
+                      </td>
+                      <td className="px-3 py-3.5">
+                        <PriorityBadge priority={req.priority} slaBreached />
+                      </td>
+                      <td className="px-3 py-3.5 whitespace-nowrap">
+                        <SlaCountdownPill
+                          dueDate={req.dueDate}
+                          status={req.status}
+                          createdAt={req.createdAt}
+                          priority={req.priority}
+                          slaPolicy={slaPolicy}
+                          nowMs={nowMs}
+                        />
+                      </td>
+                      <td className="py-3.5 pr-6 pl-3 text-right">
+                        <button
+                          type="button"
+                          onClick={() => onOpenRequest(req)}
+                          className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 transition-colors hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 whitespace-nowrap"
+                        >
+                          <span>Inspect</span>
+                          <ArrowUpRight className="h-3.5 w-3.5" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
+
+      {dashboardTab === 'overview' && (
+        <>
 
       {/* Urgent Attention Table */}
       <section className="rounded-xl border border-slate-200 bg-white">
@@ -1211,7 +1585,7 @@ export function DashboardView({
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {urgentRequests.map((req) => {
-                  const overdue = isRequestOverdue(req);
+                  const overdue = isRequestOverdue(req, slaPolicy, nowMs);
                   return (
                     <tr
                       key={req.id}
@@ -1230,7 +1604,7 @@ export function DashboardView({
                         {req.department}
                       </td>
                       <td className="px-3 py-3.5">
-                        <PriorityBadge priority={req.priority} />
+                        <PriorityBadge priority={req.priority} slaBreached={overdue} />
                       </td>
                       <td className="px-3 py-3.5">
                         <div className="flex flex-wrap items-center gap-1.5">
@@ -1349,6 +1723,8 @@ export function DashboardView({
           </div>
         )}
       </section>
+        </>
+      )}
 
       {/* Post / Edit Official Notice Modal (Admin Only) */}
       {noticeModalOpen && isAdmin && (

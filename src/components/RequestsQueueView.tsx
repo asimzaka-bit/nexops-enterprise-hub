@@ -14,17 +14,20 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import {
+  DEFAULT_SLA_POLICY,
   Department,
   OperationalRequest,
   Priority,
   RequestStatus,
   Role,
+  SlaPolicyConfig,
 } from '../types/nexops';
 import {
   exportRequestsCsv,
   formatCurrency,
   formatShortDate,
   getOverdueDays,
+  getRequestSlaStatus,
   isRequestOverdue,
   requiresTwoTierApproval,
 } from '../utils/storage';
@@ -44,6 +47,7 @@ interface RequestsQueueViewProps {
   departments: string[];
   activeRole: Role;
   approvalBudgetThresholdUsd?: number;
+  slaPolicy?: SlaPolicyConfig;
   searchQuery: string;
   onSearchQueryChange: (val: string) => void;
   statusFilter: RequestStatus | 'All';
@@ -92,6 +96,7 @@ export function RequestsQueueView({
   departments,
   activeRole,
   approvalBudgetThresholdUsd = 5000,
+  slaPolicy = DEFAULT_SLA_POLICY,
   searchQuery,
   onSearchQueryChange,
   statusFilter,
@@ -133,7 +138,7 @@ export function RequestsQueueView({
   const canBulkManage = activeRole === 'Admin';
 
   const normalizedSearch = searchQuery.trim().toLowerCase();
-  const overdueCount = requests.filter((r) => isRequestOverdue(r)).length;
+  const overdueCount = requests.filter((r) => isRequestOverdue(r, slaPolicy, nowMs)).length;
 
   const filteredRequests = requests.filter((req) => {
     const matchesSearch =
@@ -150,7 +155,7 @@ export function RequestsQueueView({
     const matchesStatus = statusFilter === 'All' || req.status === statusFilter;
     const matchesDept = departmentFilter === 'All' || req.department === departmentFilter;
     const matchesPriority = priorityFilter === 'All' || req.priority === priorityFilter;
-    const matchesOverdue = !overdueOnly || isRequestOverdue(req);
+    const matchesOverdue = !overdueOnly || isRequestOverdue(req, slaPolicy, nowMs);
 
     return matchesSearch && matchesStatus && matchesDept && matchesPriority && matchesOverdue;
   });
@@ -530,7 +535,8 @@ export function RequestsQueueView({
                     </div>
                   ) : (
                     columnItems.map((req) => {
-                      const overdue = isRequestOverdue(req);
+                      const slaStatus = getRequestSlaStatus(req, slaPolicy, nowMs);
+                      const overdue = slaStatus.breached;
                       const overdueDays = overdue ? getOverdueDays(req.dueDate) : 0;
                       const doneChecks = req.checklist.filter((c) => c.checked).length;
                       return (
@@ -546,7 +552,11 @@ export function RequestsQueueView({
                             }
                           }}
                           className={`group cursor-pointer rounded-xl border bg-white p-3.5 text-left transition-all hover:border-indigo-300 hover:shadow-sm focus-visible:outline-2 focus-visible:outline-indigo-600 ${
-                            overdue ? 'border-rose-300 bg-rose-50/20' : 'border-slate-200'
+                            overdue
+                              ? 'border-rose-300 bg-rose-50/25'
+                              : slaStatus.approaching
+                                ? 'border-amber-300 bg-amber-50/20'
+                                : 'border-slate-200'
                           }`}
                         >
                           <div className="flex items-center justify-between gap-2">
@@ -555,7 +565,7 @@ export function RequestsQueueView({
                             </span>
                             <div className="flex items-center gap-1">
                               {overdue && <OverdueBadge days={overdueDays} />}
-                              <PriorityBadge priority={req.priority} />
+                              <PriorityBadge priority={req.priority} slaBreached={overdue} />
                             </div>
                           </div>
 
@@ -607,6 +617,9 @@ export function RequestsQueueView({
                             <SlaCountdownPill
                               dueDate={req.dueDate}
                               status={req.status}
+                              createdAt={req.createdAt}
+                              priority={req.priority}
+                              slaPolicy={slaPolicy}
                               nowMs={nowMs}
                             />
                             <div className="flex items-center gap-1.5">
@@ -674,7 +687,8 @@ export function RequestsQueueView({
                 {filteredRequests.map((req) => {
                   const totalChecks = req.checklist.length;
                   const doneChecks = req.checklist.filter((c) => c.checked).length;
-                  const overdue = isRequestOverdue(req);
+                  const slaStatus = getRequestSlaStatus(req, slaPolicy, nowMs);
+                  const overdue = slaStatus.breached;
                   const overdueDays = overdue ? getOverdueDays(req.dueDate) : 0;
                   const isSelected = activeSelectedIds.includes(req.id);
 
@@ -686,8 +700,10 @@ export function RequestsQueueView({
                         isSelected
                           ? 'bg-indigo-50/50 hover:bg-indigo-50/80'
                           : overdue
-                            ? 'bg-rose-50/25 hover:bg-rose-50/50'
-                            : 'hover:bg-slate-50/90'
+                            ? 'bg-rose-50/30 hover:bg-rose-50/55'
+                            : slaStatus.approaching
+                              ? 'bg-amber-50/25 hover:bg-amber-50/45'
+                              : 'hover:bg-slate-50/90'
                       }`}
                     >
                       {canBulkManage && (
@@ -742,7 +758,7 @@ export function RequestsQueueView({
                         )}
                       </td>
                       <td className="px-3 py-3.5">
-                        <PriorityBadge priority={req.priority} />
+                        <PriorityBadge priority={req.priority} slaBreached={overdue} />
                       </td>
                       <td className="px-3 py-3.5">
                         <div className="flex flex-wrap items-center gap-1.5">
@@ -770,6 +786,9 @@ export function RequestsQueueView({
                           <SlaCountdownPill
                             dueDate={req.dueDate}
                             status={req.status}
+                            createdAt={req.createdAt}
+                            priority={req.priority}
+                            slaPolicy={slaPolicy}
                             nowMs={nowMs}
                           />
                         </div>

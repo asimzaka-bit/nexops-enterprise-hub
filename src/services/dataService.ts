@@ -281,6 +281,7 @@ import {
   CurrencyCode,
   DEFAULT_CATEGORIES,
   DEFAULT_DEPARTMENTS,
+  DEFAULT_SLA_POLICY,
   Department,
   DocumentVaultAccessTag,
   DocumentVaultFolder,
@@ -300,6 +301,7 @@ import {
   ProjectType,
   RequestStatus,
   Role,
+  SlaPolicyConfig,
   SopAcknowledgment,
   SopCategory,
   SopDocument,
@@ -333,10 +335,11 @@ const LOCAL_CREDENTIALS_KEY = 'nexops_enterprise_credentials_v1';
 
 export const DEFAULT_COMPANY_BRANDING: CompanyBrandingConfig = {
   companyName: 'NexOps Enterprise Hub',
-  tagline: 'Unified Operations, QA & Approval Management System',
+  tagline: 'Unified Operations, QA & Approval',
   departments: [...DEFAULT_DEPARTMENTS],
   categories: [...DEFAULT_CATEGORIES],
   approvalBudgetThresholdUsd: 5000,
+  slaPolicy: { ...DEFAULT_SLA_POLICY },
 };
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
@@ -644,10 +647,28 @@ function normalizeStringList(raw: unknown, fallback: string[]): string[] {
   return cleaned.length > 0 ? cleaned : [...fallback];
 }
 
+function normalizeSlaPolicy(
+  raw: unknown,
+  fallback: SlaPolicyConfig = DEFAULT_SLA_POLICY,
+): SlaPolicyConfig {
+  if (!raw || typeof raw !== 'object') return { ...fallback };
+  const parsed = raw as Partial<SlaPolicyConfig>;
+  const clampHours = (val: unknown, def: number): number => {
+    const num = Number(val);
+    return Number.isFinite(num) && num >= 1 && num <= 720 ? Math.round(num) : def;
+  };
+  return {
+    urgentHours: clampHours(parsed.urgentHours, fallback.urgentHours),
+    highHours: clampHours(parsed.highHours, fallback.highHours),
+    mediumHours: clampHours(parsed.mediumHours, fallback.mediumHours),
+    lowHours: clampHours(parsed.lowHours, fallback.lowHours),
+  };
+}
+
 function readBrandingConfig(): CompanyBrandingConfig {
   try {
     const raw = localStorage.getItem(BRANDING_STORAGE_KEY);
-    if (!raw) return { ...DEFAULT_COMPANY_BRANDING };
+    if (!raw) return { ...DEFAULT_COMPANY_BRANDING, slaPolicy: { ...DEFAULT_SLA_POLICY } };
     const parsed = JSON.parse(raw) as Partial<CompanyBrandingConfig>;
     return {
       companyName:
@@ -666,9 +687,10 @@ function readBrandingConfig(): CompanyBrandingConfig {
         parsed.approvalBudgetThresholdUsd >= 0
           ? parsed.approvalBudgetThresholdUsd
           : DEFAULT_COMPANY_BRANDING.approvalBudgetThresholdUsd,
+      slaPolicy: normalizeSlaPolicy(parsed.slaPolicy, DEFAULT_SLA_POLICY),
     };
   } catch {
-    return { ...DEFAULT_COMPANY_BRANDING };
+    return { ...DEFAULT_COMPANY_BRANDING, slaPolicy: { ...DEFAULT_SLA_POLICY } };
   }
 }
 
@@ -684,6 +706,7 @@ function writeBrandingConfig(config: CompanyBrandingConfig): CompanyBrandingConf
       config.approvalBudgetThresholdUsd >= 0
         ? config.approvalBudgetThresholdUsd
         : DEFAULT_COMPANY_BRANDING.approvalBudgetThresholdUsd,
+    slaPolicy: normalizeSlaPolicy(config.slaPolicy, DEFAULT_SLA_POLICY),
   };
   try {
     localStorage.setItem(BRANDING_STORAGE_KEY, JSON.stringify(normalized));
@@ -1876,6 +1899,7 @@ function normalizeBrandingCandidate(raw: unknown, fallback: CompanyBrandingConfi
       parsed.approvalBudgetThresholdUsd >= 0
         ? parsed.approvalBudgetThresholdUsd
         : fallback.approvalBudgetThresholdUsd,
+    slaPolicy: normalizeSlaPolicy(parsed.slaPolicy, fallback.slaPolicy ?? DEFAULT_SLA_POLICY),
   };
 }
 

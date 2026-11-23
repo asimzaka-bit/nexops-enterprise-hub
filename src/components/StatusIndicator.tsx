@@ -18,7 +18,7 @@ import {
   UserCheck,
   XCircle,
 } from 'lucide-react';
-import { Priority, RequestStatus, Role } from '../types/nexops';
+import { Priority, RequestStatus, Role, SlaPolicyConfig } from '../types/nexops';
 import {
   formatPresenceStatus,
   getBudgetHealthTone,
@@ -74,7 +74,13 @@ export function StatusBadge({ status }: { status: RequestStatus }) {
   );
 }
 
-export function PriorityBadge({ priority }: { priority: Priority }) {
+export function PriorityBadge({
+  priority,
+  slaBreached = false,
+}: {
+  priority: Priority;
+  slaBreached?: boolean;
+}) {
   const config: Record<
     Priority,
     { classes: string; icon: typeof ArrowUp; label: string }
@@ -102,12 +108,16 @@ export function PriorityBadge({ priority }: { priority: Priority }) {
   };
 
   const { classes, icon: Icon, label } = config[priority];
+  const highlightClasses = slaBreached
+    ? 'bg-rose-50 text-rose-800 border-rose-300 ring-1 ring-rose-400/70 font-semibold'
+    : classes;
 
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-medium whitespace-nowrap shrink-0 ${classes}`}
+      title={slaBreached ? `${label} Priority — SLA Breached` : `${label} Priority`}
+      className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-medium whitespace-nowrap shrink-0 ${highlightClasses}`}
     >
-      <Icon className="h-3 w-3 shrink-0" aria-hidden="true" />
+      <Icon className={`h-3 w-3 shrink-0 ${slaBreached ? 'text-rose-600' : ''}`} aria-hidden="true" />
       <span>{label}</span>
     </span>
   );
@@ -158,27 +168,36 @@ export function SlaCountdownPill({
   dueDate,
   status,
   nowMs,
+  createdAt,
+  priority,
+  slaPolicy,
 }: {
   dueDate: string;
   status: RequestStatus;
   nowMs?: number;
+  createdAt?: string;
+  priority?: Priority;
+  slaPolicy?: SlaPolicyConfig;
 }) {
-  const sla = getSlaCountdown(dueDate, status, nowMs);
+  const sla = getSlaCountdown(dueDate, status, nowMs, createdAt, priority, slaPolicy);
 
   const toneClasses: Record<typeof sla.tone, string> = {
     emerald: 'border-emerald-200 bg-emerald-50 text-emerald-700',
     slate: 'border-slate-200 bg-slate-100 text-slate-700',
-    amber: 'border-amber-200 bg-amber-50 text-amber-800',
-    red: 'border-rose-200 bg-rose-50 text-rose-700',
+    amber: 'border-amber-300 bg-amber-50 text-amber-800',
+    red: 'border-rose-300 bg-rose-50 text-rose-700',
     neutral: 'border-slate-200 bg-slate-50 text-slate-500',
   };
 
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 font-mono text-[11px] font-semibold tabular-nums whitespace-nowrap shrink-0 ${toneClasses[sla.tone]}`}
+      className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[11px] font-semibold tabular-nums whitespace-nowrap shrink-0 ${toneClasses[sla.tone]}`}
     >
       {sla.breached ? (
-        <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden="true" />
+        <span className="relative flex h-2 w-2 shrink-0" aria-hidden="true">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-500 opacity-75" />
+          <span className="relative inline-flex h-2 w-2 rounded-full bg-rose-600" />
+        </span>
       ) : (
         <Clock className="h-3 w-3 shrink-0" aria-hidden="true" />
       )}

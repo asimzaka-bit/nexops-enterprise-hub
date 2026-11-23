@@ -5,13 +5,16 @@ import {
   AuditEvent,
   CompanyAsset,
   CurrencyCode,
+  DEFAULT_SLA_POLICY,
   DbAccessRole,
   NexOpsState,
   OperationalRequest,
   PermissionKey,
   PermissionMatrix,
+  Priority,
   RequestStatus,
   Role,
+  SlaPolicyConfig,
   TeamMember,
 } from '../types/nexops';
 
@@ -93,12 +96,193 @@ export function getTodayDateString(): string {
   return `${y}-${m}-${d}`;
 }
 
-export function isRequestOverdue(req: OperationalRequest): boolean {
+export function getSlaWindowHours(
+  priority: Priority,
+  slaPolicy: SlaPolicyConfig = DEFAULT_SLA_POLICY,
+): number {
+  switch (priority) {
+    case 'Urgent':
+      return Math.max(1, slaPolicy.urgentHours || DEFAULT_SLA_POLICY.urgentHours);
+    case 'High':
+      return Math.max(1, slaPolicy.highHours || DEFAULT_SLA_POLICY.highHours);
+    case 'Medium':
+      return Math.max(1, slaPolicy.mediumHours || DEFAULT_SLA_POLICY.mediumHours);
+    case 'Low':
+    default:
+      return Math.max(1, slaPolicy.lowHours || DEFAULT_SLA_POLICY.lowHours);
+  }
+}
+
+export interface RequestSlaStatus {
+  state: 'on_track' | 'approaching' | 'breached' | 'completed';
+  label: string;
+  tone: 'emerald' | 'amber' | 'red' | 'neutral';
+  breached: boolean;
+  approaching: boolean;
+  slaHours: number;
+  deadlineMs: number;
+  remainingMs: number;
+  overdueHours: number;
+  metSla?: boolean;
+}
+
+export function getRequestSlaStatus(
+  req: Pick<
+    OperationalRequest,
+    'createdAt' | 'dueDate' | 'priority' | 'status' | 'updatedAt' | 'stage1Approval' | 'stage2Approval'
+  >,
+  slaPolicy: SlaPolicyConfig = DEFAULT_SLA_POLICY,
+  nowMs: number = Date.now(),
+): RequestSlaStatus {
+  const slaHours = getSlaWindowHours(req.priority, slaPolicy);
+  const createdParsed = req.createdAt ? new Date(req.createdAt).getTime() : NaN;
+  const dueStartParsed = req.dueDate ? new Date(`${req.dueDate}T00:00:00`).getTime() : NaN;
+  const baseCreatedMs = !Number.isNaN(createdParsed)
+    ? createdParsed
+    : !Number.isNaN(dueStartParsed)
+      ? dueStartParsed
+      : nowMs;
+  const slaDeadlineMs = baseCreatedMs + slaHours * 3600_000;
+  const dueEndMs = req.dueDate ? new Date(`${req.dueDate}T23:59:59`).getTime() : NaN;
+  const todayStr = getTodayDateString();
+  const isPastDueDate = Boolean(req.dueDate && req.dueDate < todayStr);
+  const effectiveDeadlineMs =
+    isPastDueDate && !Number.isNaN(dueEndMs)
+      ? Math.min(slaDeadlineMs, dueEndMs)
+      : slaDeadlineMs;
+
+  if (req.status === 'Approved') {
+    const completedIso =
+      req.stage2Approval?.timestamp ||
+      req.stage1Approval?.timestamp ||
+      req.updatedAt ||
+      req.createdAt;
+    const completedMs = completedIso ? new Date(completedIso).getTime() : NaN;
+    const metSla = !Number.isNaN(completedMs) ? completedMs <= slaDeadlineMs : true;
+    return {
+      state: 'completed',
+      label: metSla ? 'SLA Met' : 'Approved (Past SLA)',
+      tone: 'neutral',
+      breached: false,
+      approaching: false,
+      slaHours,
+      deadlineMs: effectiveDeadlineMs,
+      remainingMs: 0,
+      overdueHours: 0,
+      metSla,
+    };
+  }
+
+  if (req.status === 'Rejected') {
+    return {
+      state: 'completed',
+      label: 'Closed',
+      tone: 'neutral',
+      breached: false,
+      approaching: false,
+      slaHours,
+      deadlineMs: effectiveDeadlineMs,
+      remainingMs: 0,
+      overdueHours: 0,
+    };
+  }
+
+  const remainingMs = effectiveDeadlineMs - nowMs;
+
+  if (remainingMs <= 0 || isPastDueDate) {
+    const overdueMs = Math.max(60_000, nowMs - effectiveDeadlineMs);
+    const overdueHours = Math.max(1, Math.round(overdueMs / 3600_000));
+    const label =
+      overdueMs < 3600_000
+        ? `SLA Breached (+${Math.max(1, Math.ceil(overdueMs / 60_000))}m overdue)`
+        : `SLA Breached (+${overdueHours}h overdue)`;
+    return {
+      state: 'breached',
+      label,
+      tone: 'red',
+      breached: true,
+      approaching: false,
+      slaHours,
+      deadlineMs: effectiveDeadlineMs,
+      remainingMs,
+      overdueHours,
+    };
+  }
+
+  const totalWindowMs = slaHours * 3600_000;
+  const remainingRatio = remainingMs / totalWindowMs;
+  const timeLeftLabel =
+    remainingMs < 3600_000
+      ? `${Math.max(1, Math.ceil(remainingMs / 60_000))}m`
+      : `${Math.max(1, Math.round(remainingMs / 3600_000))}h`;
+
+  if (remainingRatio < 0.25) {
+    return {
+      state: 'approaching',
+      label: `SLA: ${timeLeftLabel} left`,
+      tone: 'amber',
+      breached: false,
+      approaching: true,
+      slaHours,
+      deadlineMs: effectiveDeadlineMs,
+      remainingMs,
+      overdueHours: 0,
+    };
+  }
+
+  return {
+    state: 'on_track',
+    label: `SLA: ${timeLeftLabel} left`,
+    tone: 'emerald',
+    breached: false,
+    approaching: false,
+    slaHours,
+    deadlineMs: effectiveDeadlineMs,
+    remainingMs,
+    overdueHours: 0,
+  };
+}
+
+export function isRequestOverdue(
+  req: OperationalRequest,
+  slaPolicy: SlaPolicyConfig = DEFAULT_SLA_POLICY,
+  nowMs: number = Date.now(),
+): boolean {
   if (req.status === 'Approved' || req.status === 'Rejected') {
     return false;
   }
-  if (!req.dueDate) return false;
-  return req.dueDate < getTodayDateString();
+  return getRequestSlaStatus(req, slaPolicy, nowMs).breached;
+}
+
+export function isRequestPendingOver24h(
+  req: OperationalRequest,
+  nowMs: number = Date.now(),
+): boolean {
+  if (req.status === 'Approved' || req.status === 'Rejected') {
+    return false;
+  }
+  const createdMs = new Date(req.createdAt).getTime();
+  if (Number.isNaN(createdMs)) return false;
+  return nowMs - createdMs >= 24 * 3600_000;
+}
+
+export function getApprovalTurnaroundHours(req: OperationalRequest): number | null {
+  if (req.status !== 'Approved') return null;
+  const startMs = new Date(req.createdAt).getTime();
+  const endIso =
+    req.stage2Approval?.timestamp || req.stage1Approval?.timestamp || req.updatedAt;
+  const endMs = endIso ? new Date(endIso).getTime() : NaN;
+  if (Number.isNaN(startMs) || Number.isNaN(endMs) || endMs < startMs) return null;
+  return (endMs - startMs) / 3600_000;
+}
+
+export function formatTurnaroundDuration(hours: number | null): string {
+  if (hours === null || !Number.isFinite(hours)) return '—';
+  if (hours < 1) {
+    const mins = Math.max(1, Math.round(hours * 60));
+    return `${mins} min${mins === 1 ? '' : 's'}`;
+  }
+  return `${hours.toFixed(1)} hrs`;
 }
 
 export function getOverdueDays(dueDate: string): number {
@@ -119,7 +303,29 @@ export function getSlaCountdown(
   dueDate: string,
   status: RequestStatus,
   nowMs: number = Date.now(),
+  createdAt?: string,
+  priority?: Priority,
+  slaPolicy?: SlaPolicyConfig,
 ): SlaCountdownInfo {
+  if (createdAt && priority) {
+    const res = getRequestSlaStatus(
+      {
+        createdAt,
+        dueDate,
+        priority,
+        status,
+        updatedAt: createdAt,
+      },
+      slaPolicy,
+      nowMs,
+    );
+    return {
+      label: res.label,
+      tone: res.tone,
+      breached: res.breached,
+    };
+  }
+
   if (status === 'Approved') {
     return { label: 'SLA Met', tone: 'neutral', breached: false };
   }
@@ -132,9 +338,12 @@ export function getSlaCountdown(
 
   const todayStr = getTodayDateString();
   if (dueDate < todayStr) {
-    const breachDays = Math.max(1, getOverdueDays(dueDate));
+    const dueEndMs = new Date(`${dueDate}T23:59:59`).getTime();
+    const overdueHours = !Number.isNaN(dueEndMs)
+      ? Math.max(1, Math.round((nowMs - dueEndMs) / 3600_000))
+      : Math.max(1, getOverdueDays(dueDate) * 24);
     return {
-      label: `Breached by ${breachDays}d`,
+      label: `SLA Breached (+${overdueHours}h overdue)`,
       tone: 'red',
       breached: true,
     };
@@ -145,25 +354,19 @@ export function getSlaCountdown(
     return { label: dueDate, tone: 'slate', breached: false };
   }
 
-  const diffMs = dueEndMs - nowMs;
-
-  if (dueDate === todayStr) {
-    const hoursLeft = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60)));
+  const diffMs = Math.max(0, dueEndMs - nowMs);
+  const hoursLeft = Math.max(1, Math.round(diffMs / 3600_000));
+  if (dueDate === todayStr || hoursLeft <= 6) {
     return {
-      label: hoursLeft > 0 ? `Due Today (${hoursLeft}h)` : 'Due Today',
+      label: `SLA: ${hoursLeft}h left`,
       tone: 'amber',
       breached: false,
     };
   }
 
-  const safeDiff = Math.max(0, diffMs);
-  const days = Math.floor(safeDiff / (1000 * 60 * 60 * 24));
-  const hours = Math.floor((safeDiff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-
-  const label = days > 0 ? `Due in ${days}d ${hours}h` : `Due in ${Math.max(1, hours)}h`;
   return {
-    label,
-    tone: days >= 2 ? 'emerald' : 'slate',
+    label: `SLA: ${hoursLeft}h left`,
+    tone: 'emerald',
     breached: false,
   };
 }
@@ -535,6 +738,11 @@ export interface DepartmentScorecardRow {
   approvalRatePct: number;
   overdueCount: number;
   avgChecklistPct: number;
+  slaCompliancePct?: number;
+  avgTurnaroundHours?: number | null;
+  activeStaffCount?: number;
+  attendanceTodayCount?: number;
+  attendanceRatePct?: number;
 }
 
 export function exportDepartmentScorecardCsv(rows: DepartmentScorecardRow[]): void {
@@ -543,7 +751,12 @@ export function exportDepartmentScorecardCsv(rows: DepartmentScorecardRow[]): vo
     'Total Requests',
     'Approved Requests',
     'Approval Rate (%)',
-    'Overdue Count',
+    'SLA Compliance Rate (%)',
+    'Avg Approval Turnaround',
+    'Overdue / SLA Breached Count',
+    'Active Staff',
+    'Clocked In Today',
+    'Attendance Rate (%)',
     'Avg QA Checklist Completion (%)',
   ];
 
@@ -552,7 +765,16 @@ export function exportDepartmentScorecardCsv(rows: DepartmentScorecardRow[]): vo
     escapeCsvCell(String(row.totalRequests)),
     escapeCsvCell(String(row.approvedCount)),
     escapeCsvCell(`${row.approvalRatePct}%`),
+    escapeCsvCell(
+      row.slaCompliancePct !== undefined ? `${row.slaCompliancePct}%` : '—',
+    ),
+    escapeCsvCell(formatTurnaroundDuration(row.avgTurnaroundHours ?? null)),
     escapeCsvCell(String(row.overdueCount)),
+    escapeCsvCell(String(row.activeStaffCount ?? 0)),
+    escapeCsvCell(String(row.attendanceTodayCount ?? 0)),
+    escapeCsvCell(
+      row.attendanceRatePct !== undefined ? `${row.attendanceRatePct}%` : '—',
+    ),
     escapeCsvCell(`${row.avgChecklistPct}%`),
   ]);
 

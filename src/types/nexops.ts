@@ -46,12 +46,27 @@ export type CurrencyCode = 'PKR' | 'USD' | 'AED';
 
 export const SUPPORTED_CURRENCIES: CurrencyCode[] = ['PKR', 'USD', 'AED'];
 
+export interface SlaPolicyConfig {
+  urgentHours: number;
+  highHours: number;
+  mediumHours: number;
+  lowHours: number;
+}
+
+export const DEFAULT_SLA_POLICY: SlaPolicyConfig = {
+  urgentHours: 4,
+  highHours: 24,
+  mediumHours: 48,
+  lowHours: 48,
+};
+
 export interface CompanyBrandingConfig {
   companyName: string;
   tagline: string;
   departments: string[];
   categories: string[];
   approvalBudgetThresholdUsd: number;
+  slaPolicy?: SlaPolicyConfig;
 }
 
 export type ProjectStatus = 'Active' | 'On Hold' | 'Completed';
