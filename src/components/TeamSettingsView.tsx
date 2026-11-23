@@ -18,6 +18,7 @@ import {
   ShieldAlert,
   ShieldCheck,
   Tag,
+  Trash2,
   Upload,
   UserCheck,
   UserPlus,
@@ -62,6 +63,7 @@ interface TeamSettingsViewProps {
   onToggleMemberActive: (memberId: string) => void;
   onApproveUser: (memberId: string, assignedRole: Role) => Promise<void> | void;
   onRejectUser: (memberId: string) => Promise<void> | void;
+  onDeleteMember?: (memberId: string) => Promise<void> | void;
   onRefreshUsers?: () => Promise<void>;
   onPreApproveUser?: (payload: {
     email: string;
@@ -161,6 +163,7 @@ export function TeamSettingsView({
   onToggleMemberActive,
   onApproveUser,
   onRejectUser,
+  onDeleteMember,
   onRefreshUsers,
   onPreApproveUser,
   onProvisionEmployee,
@@ -176,6 +179,8 @@ export function TeamSettingsView({
   const [approvalFilter, setApprovalFilter] = useState<ApprovalStatus | 'all'>('all');
   const [draftApprovalRoles, setDraftApprovalRoles] = useState<Record<string, Role>>({});
   const [approvalBusyId, setApprovalBusyId] = useState<string | null>(null);
+  const [deleteConfirmTarget, setDeleteConfirmTarget] = useState<TeamMember | null>(null);
+  const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
   const [refreshingUsers, setRefreshingUsers] = useState(false);
   const [showPreApproveForm, setShowPreApproveForm] = useState(false);
   const [preEmail, setPreEmail] = useState('');
@@ -388,15 +393,20 @@ export function TeamSettingsView({
     let pending = 0;
     let approved = 0;
     let rejected = 0;
+    let deactivated = 0;
     teamMembers.forEach((m) => {
-      const status: ApprovalStatus = isSuperAdminEmail(m.email)
+      const superAdmin = isSuperAdminEmail(m.email);
+      const status: ApprovalStatus = superAdmin
         ? 'approved'
-        : m.approvalStatus ?? (m.active ? 'approved' : 'pending');
+        : m.approvalStatus === 'deactivated' || (m.approvalStatus === 'approved' && !m.active)
+          ? 'deactivated'
+          : m.approvalStatus ?? (m.active ? 'approved' : 'pending');
       if (status === 'pending') pending += 1;
       else if (status === 'rejected') rejected += 1;
+      else if (status === 'deactivated') deactivated += 1;
       else approved += 1;
     });
-    return { all: teamMembers.length, pending, approved, rejected };
+    return { all: teamMembers.length, pending, approved, rejected, deactivated };
   }, [teamMembers]);
 
   const filteredApprovalUsers = useMemo(() => {
@@ -405,13 +415,18 @@ export function TeamSettingsView({
         if (approvalFilter === 'all') return true;
         const status: ApprovalStatus = isSuperAdminEmail(m.email)
           ? 'approved'
-          : m.approvalStatus ?? (m.active ? 'approved' : 'pending');
+          : m.approvalStatus === 'deactivated' || (m.approvalStatus === 'approved' && !m.active)
+            ? 'deactivated'
+            : m.approvalStatus ?? (m.active ? 'approved' : 'pending');
         return status === approvalFilter;
       })
       .sort((a, b) => {
         const statusOrder = (m: TeamMember) => {
           if (isSuperAdminEmail(m.email)) return 1;
-          const s = m.approvalStatus ?? (m.active ? 'approved' : 'pending');
+          const s =
+            m.approvalStatus === 'deactivated' || (m.approvalStatus === 'approved' && !m.active)
+              ? 'deactivated'
+              : m.approvalStatus ?? (m.active ? 'approved' : 'pending');
           return s === 'pending' ? 0 : s === 'approved' ? 1 : 2;
         };
         return statusOrder(a) - statusOrder(b);
@@ -506,6 +521,7 @@ export function TeamSettingsView({
                     { id: 'pending', label: 'Pending', count: approvalStats.pending },
                     { id: 'approved', label: 'Approved', count: approvalStats.approved },
                     { id: 'rejected', label: 'Rejected', count: approvalStats.rejected },
+                    { id: 'deactivated', label: 'Deactivated', count: approvalStats.deactivated },
                   ] as const
                 ).map((tab) => {
                   const active = approvalFilter === tab.id;
@@ -705,12 +721,17 @@ export function TeamSettingsView({
                     const superAdmin = isSuperAdminEmail(member.email);
                     const status: ApprovalStatus = superAdmin
                       ? 'approved'
-                      : member.approvalStatus ?? (member.active ? 'approved' : 'pending');
+                      : member.approvalStatus === 'deactivated' ||
+                          (member.approvalStatus === 'approved' && !member.active)
+                        ? 'deactivated'
+                        : member.approvalStatus ?? (member.active ? 'approved' : 'pending');
                     const rawRole: Role = superAdmin
                       ? 'Admin'
                       : draftApprovalRoles[member.id] ?? member.role;
                     const selectedRole: Role = rawRole === 'Admin' ? 'Admin' : 'Viewer';
-                    const busy = approvalBusyId === member.id;
+                    const busy = approvalBusyId === member.id || deletingUserId === member.id;
+                    const isRejectedOrDeactivated =
+                      !superAdmin && (status === 'rejected' || status === 'deactivated');
 
                     return (
                       <tr key={member.id} className="hover:bg-slate-50/70">
@@ -752,6 +773,11 @@ export function TeamSettingsView({
                             <span className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-rose-50 px-2 py-0.5 text-[11px] font-semibold text-rose-700">
                               <UserX className="h-3 w-3" />
                               <span>Rejected</span>
+                            </span>
+                          ) : status === 'deactivated' ? (
+                            <span className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
+                              <UserX className="h-3 w-3" />
+                              <span>Deactivated</span>
                             </span>
                           ) : (
                             <span className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
@@ -801,10 +827,12 @@ export function TeamSettingsView({
                                   className="inline-flex h-8 items-center gap-1 rounded-lg bg-emerald-600 px-3 text-xs font-semibold text-white transition-colors hover:bg-emerald-700 disabled:opacity-60"
                                 >
                                   <Check className="h-3.5 w-3.5" />
-                                  <span>Approve</span>
+                                  <span>
+                                    {isRejectedOrDeactivated ? 'Activate / Re-Approve' : 'Approve'}
+                                  </span>
                                 </button>
                               )}
-                              {status !== 'rejected' && (
+                              {status !== 'rejected' && status !== 'deactivated' && (
                                 <button
                                   type="button"
                                   disabled={busy}
@@ -820,6 +848,17 @@ export function TeamSettingsView({
                                 >
                                   <X className="h-3.5 w-3.5" />
                                   <span>Reject</span>
+                                </button>
+                              )}
+                              {isRejectedOrDeactivated && onDeleteMember && (
+                                <button
+                                  type="button"
+                                  disabled={busy}
+                                  onClick={() => setDeleteConfirmTarget(member)}
+                                  className="inline-flex h-8 items-center gap-1 rounded-lg bg-rose-600 px-3 text-xs font-semibold text-white transition-colors hover:bg-rose-700 disabled:opacity-60"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                  <span>Delete</span>
                                 </button>
                               )}
                             </div>
@@ -1286,7 +1325,14 @@ export function TeamSettingsView({
                 const superAdmin = isSuperAdminEmail(member.email);
                 const approvalStatus: ApprovalStatus = superAdmin
                   ? 'approved'
-                  : member.approvalStatus ?? (member.active ? 'approved' : 'pending');
+                  : member.approvalStatus === 'deactivated' ||
+                      (member.approvalStatus === 'approved' && !member.active)
+                    ? 'deactivated'
+                    : member.approvalStatus ?? (member.active ? 'approved' : 'pending');
+                const isRejectedOrDeactivated =
+                  !superAdmin &&
+                  (approvalStatus === 'rejected' || approvalStatus === 'deactivated');
+                const busy = approvalBusyId === member.id || deletingUserId === member.id;
                 return (
                 <tr key={member.id} className="hover:bg-slate-50/70">
                   <td className="py-3.5 pr-3 pl-6 font-mono text-xs font-bold text-indigo-700 tabular-nums whitespace-nowrap">
@@ -1377,9 +1423,9 @@ export function TeamSettingsView({
                           ? 'border-amber-200 bg-amber-50 text-amber-800'
                           : approvalStatus === 'rejected'
                             ? 'border-rose-200 bg-rose-50 text-rose-700'
-                            : member.active
-                              ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                              : 'border-slate-200 bg-slate-100 text-slate-600'
+                            : approvalStatus === 'deactivated' || !member.active
+                              ? 'border-slate-300 bg-slate-100 text-slate-700'
+                              : 'border-emerald-200 bg-emerald-50 text-emerald-700'
                       }`}
                     >
                       {member.active && approvalStatus === 'approved' ? (
@@ -1392,21 +1438,84 @@ export function TeamSettingsView({
                           ? 'Pending Approval'
                           : approvalStatus === 'rejected'
                             ? 'Rejected'
-                            : member.active
-                              ? 'Active'
-                              : 'Inactive'}
+                            : approvalStatus === 'deactivated' || !member.active
+                              ? 'Deactivated'
+                              : 'Active'}
                       </span>
                     </span>
                   </td>
-                  <td className="py-3.5 pr-6 pl-3 text-right">
-                    <button
-                      type="button"
-                      disabled={!isAdmin || superAdmin}
-                      onClick={() => onToggleMemberActive(member.id)}
-                      className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap"
-                    >
-                      {superAdmin ? 'Locked' : member.active ? 'Deactivate' : 'Activate'}
-                    </button>
+                  <td className="py-3.5 pr-6 pl-3 text-right whitespace-nowrap">
+                    {superAdmin ? (
+                      <button
+                        type="button"
+                        disabled
+                        className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-500 disabled:cursor-not-allowed disabled:opacity-60 whitespace-nowrap"
+                      >
+                        Locked
+                      </button>
+                    ) : isRejectedOrDeactivated ? (
+                      <div className="inline-flex items-center justify-end gap-1.5">
+                        <button
+                          type="button"
+                          disabled={!isAdmin || busy}
+                          onClick={async () => {
+                            setApprovalBusyId(member.id);
+                            try {
+                              await onApproveUser(
+                                member.id,
+                                member.role === 'Admin' ? 'Admin' : 'Viewer',
+                              );
+                            } finally {
+                              setApprovalBusyId(null);
+                            }
+                          }}
+                          className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap"
+                        >
+                          <Check className="h-3.5 w-3.5" />
+                          <span>Activate / Re-Approve</span>
+                        </button>
+                        {onDeleteMember && (
+                          <button
+                            type="button"
+                            disabled={!isAdmin || busy}
+                            onClick={() => setDeleteConfirmTarget(member)}
+                            className="inline-flex items-center gap-1 rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            <span>Delete</span>
+                          </button>
+                        )}
+                      </div>
+                    ) : approvalStatus === 'pending' ? (
+                      <button
+                        type="button"
+                        disabled={!isAdmin || busy}
+                        onClick={async () => {
+                          setApprovalBusyId(member.id);
+                          try {
+                            await onApproveUser(
+                              member.id,
+                              member.role === 'Admin' ? 'Admin' : 'Viewer',
+                            );
+                          } finally {
+                            setApprovalBusyId(null);
+                          }
+                        }}
+                        className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap"
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                        <span>Approve</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={!isAdmin || busy}
+                        onClick={() => onToggleMemberActive(member.id)}
+                        className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap"
+                      >
+                        Deactivate
+                      </button>
+                    )}
                   </td>
                 </tr>
                 );
@@ -1691,6 +1800,75 @@ export function TeamSettingsView({
           </table>
         </div>
       </div>
+
+      {/* Delete Rejected / Deactivated User Confirmation Modal */}
+      {deleteConfirmTarget && onDeleteMember && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-user-modal-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-xs"
+        >
+          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-rose-200 bg-rose-50 text-rose-600">
+                <Trash2 className="h-5 w-5" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h3
+                  id="delete-user-modal-title"
+                  className="font-display text-base font-bold text-slate-900"
+                >
+                  Permanently Delete User Record?
+                </h3>
+                <p className="mt-1 text-xs leading-relaxed text-slate-600">
+                  Are you sure you want to permanently remove{' '}
+                  <strong className="text-slate-900">{deleteConfirmTarget.name}</strong> (
+                  <span className="font-mono">{deleteConfirmTarget.email}</span>) from{' '}
+                  <span className="font-mono">user_access</span> and synced team records?
+                </p>
+                <p className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
+                  If this user signs in again later, a fresh <strong>Pending</strong> approval
+                  request will automatically appear in your approval queue.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                disabled={deletingUserId === deleteConfirmTarget.id}
+                onClick={() => setDeleteConfirmTarget(null)}
+                className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deletingUserId === deleteConfirmTarget.id}
+                onClick={async () => {
+                  const target = deleteConfirmTarget;
+                  setDeletingUserId(target.id);
+                  try {
+                    await onDeleteMember(target.id);
+                    setDeleteConfirmTarget(null);
+                  } finally {
+                    setDeletingUserId(null);
+                  }
+                }}
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-rose-600 px-4 text-xs font-semibold text-white transition-colors hover:bg-rose-700 disabled:opacity-60"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                <span>
+                  {deletingUserId === deleteConfirmTarget.id
+                    ? 'Deleting...'
+                    : 'Delete Permanently'}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

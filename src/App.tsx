@@ -380,6 +380,52 @@ export default function App() {
         setBranding(remote.branding);
         setTableDiagnostics(remote.diagnostics);
         setDbConnected(remote.cloudHealthy);
+
+        // Keep active authSession strictly synchronized with authoritative `user_access` cloud state
+        const profilesHealthy =
+          remote.diagnostics.find((d) => d.tableKey === 'profiles')?.status === 'connected';
+        const activeSess = dataService.auth.loadSessionSync();
+        if (profilesHealthy && activeSess?.isAuthenticated) {
+          const cleanSessEmail = activeSess.userEmail?.trim().toLowerCase();
+          const matchedCloudUser = remote.state.teamMembers.find(
+            (m) =>
+              m.id === activeSess.userId ||
+              (cleanSessEmail && m.email.trim().toLowerCase() === cleanSessEmail),
+          );
+          if (matchedCloudUser) {
+            if (
+              matchedCloudUser.approvalStatus !== activeSess.approvalStatus ||
+              matchedCloudUser.role !== activeSess.userRole ||
+              matchedCloudUser.department !== activeSess.userDepartment ||
+              matchedCloudUser.employeeId !== activeSess.employeeId ||
+              matchedCloudUser.id !== activeSess.userId
+            ) {
+              const syncedSession: AuthSession = {
+                ...activeSess,
+                userId: matchedCloudUser.id,
+                employeeId: matchedCloudUser.employeeId,
+                userName: matchedCloudUser.name,
+                userDepartment: matchedCloudUser.department,
+                userRole: matchedCloudUser.role,
+                approvalStatus: matchedCloudUser.approvalStatus,
+                isSuperAdmin: matchedCloudUser.isSuperAdmin,
+              };
+              dataService.auth.saveSessionSync(syncedSession);
+              setAuthSession(syncedSession);
+            }
+          } else if (cleanSessEmail && !isSuperAdminEmail(cleanSessEmail)) {
+            // User was permanently deleted from `user_access` on another device
+            void dataService.auth.signOut().finally(() => {
+              setAuthSession(null);
+              pushToast(
+                'Access Record Removed',
+                'Your user record was removed by an Administrator. Sign in again to submit a fresh approval request.',
+                'warning',
+              );
+            });
+          }
+        }
+
         if (showFeedbackToast) {
           const healthyCount = remote.diagnostics.filter((d) => d.status === 'connected').length;
           pushToast(
@@ -535,9 +581,18 @@ export default function App() {
                 )
               : [refreshed, ...prev.teamMembers],
           }));
-          if (refreshed.approvalStatus !== authSession.approvalStatus || refreshed.role !== authSession.userRole) {
+          if (
+            refreshed.approvalStatus !== authSession.approvalStatus ||
+            refreshed.role !== authSession.userRole ||
+            refreshed.department !== authSession.userDepartment ||
+            refreshed.employeeId !== authSession.employeeId
+          ) {
             const nextSession: AuthSession = {
               ...authSession,
+              userId: refreshed.id,
+              employeeId: refreshed.employeeId,
+              userName: refreshed.name,
+              userDepartment: refreshed.department,
               userRole: refreshed.role,
               approvalStatus: refreshed.approvalStatus,
               isSuperAdmin: refreshed.isSuperAdmin,
@@ -614,7 +669,9 @@ export default function App() {
             if (
               refreshed.approvalStatus !== authSession.approvalStatus ||
               refreshed.role !== authSession.userRole ||
-              refreshed.id !== authSession.userId
+              refreshed.id !== authSession.userId ||
+              refreshed.department !== authSession.userDepartment ||
+              refreshed.employeeId !== authSession.employeeId
             ) {
               const nextSession: AuthSession = {
                 ...authSession,
@@ -969,7 +1026,7 @@ export default function App() {
   ) => {
     isSigningInRef.current = true;
     try {
-      const { user, session } = await dataService.auth.signInWithEmail(
+      const { user, session, wasInsertedPending } = await dataService.auth.signInWithEmail(
         email,
         password,
         rememberSession,
@@ -983,6 +1040,20 @@ export default function App() {
       if (user.role === 'Admin') {
         setIsAdminInitialized(true);
       }
+      const pendingNotif: AppNotification | null = wasInsertedPending
+        ? {
+            id: `notif-relogin-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            title: 'New User Awaiting Approval',
+            message: `${user.name} (${user.email}) requested workspace access and awaits Admin approval.`,
+            timestamp: new Date().toISOString(),
+            read: false,
+            targetSection: 'settings',
+            recipientRole: 'Admin',
+            actorEmail: user.email,
+            category: 'user_approval',
+            severity: 'warning',
+          }
+        : null;
       setState((prev) => {
         const exists = prev.teamMembers.some(
           (m) => m.id === user.id || m.email.toLowerCase() === user.email.toLowerCase(),
@@ -998,8 +1069,14 @@ export default function App() {
           ...prev,
           activeRole: user.role,
           teamMembers: nextMembers,
+          notifications: pendingNotif
+            ? [pendingNotif, ...prev.notifications]
+            : prev.notifications,
         };
       });
+      if (pendingNotif) {
+        void dataService.notifications.create(pendingNotif);
+      }
     } finally {
       isSigningInRef.current = false;
     }
@@ -1013,12 +1090,13 @@ export default function App() {
     employeeId: string;
   }) => {
     if (!authSession) return;
-    const updatedUser = await dataService.auth.updateUserIdentity(
-      currentUser,
-      department,
-      employeeId,
-      state.teamMembers,
-    );
+    const { member: updatedUser, wasInsertedPending } =
+      await dataService.auth.updateUserIdentity(
+        currentUser,
+        department,
+        employeeId,
+        state.teamMembers,
+      );
     const nextSession: AuthSession = {
       ...authSession,
       userId: updatedUser.id,
@@ -1035,6 +1113,20 @@ export default function App() {
     };
     dataService.auth.saveSessionSync(nextSession);
     setAuthSession(nextSession);
+    const pendingNotif: AppNotification | null = wasInsertedPending
+      ? {
+          id: `notif-step2-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          title: 'New User Awaiting Approval',
+          message: `${updatedUser.name} (${updatedUser.email}) submitted access request (${updatedUser.department} · ${updatedUser.employeeId}).`,
+          timestamp: new Date().toISOString(),
+          read: false,
+          targetSection: 'settings',
+          recipientRole: 'Admin',
+          actorEmail: updatedUser.email,
+          category: 'user_approval',
+          severity: 'warning',
+        }
+      : null;
     setState((prev) => ({
       ...prev,
       activeRole: updatedUser.role,
@@ -1050,12 +1142,22 @@ export default function App() {
               : m,
           )
         : [updatedUser, ...prev.teamMembers],
+      notifications: pendingNotif
+        ? [pendingNotif, ...prev.notifications]
+        : prev.notifications,
     }));
+    if (pendingNotif) {
+      void dataService.notifications.create(pendingNotif);
+    }
     pushToast(
       `Welcome, ${updatedUser.name}`,
       updatedUser.approvalStatus === 'approved' || isSuperAdminEmail(updatedUser.email)
         ? `${updatedUser.department} · ${updatedUser.employeeId} · ${updatedUser.role}`
-        : `${updatedUser.department} · ${updatedUser.employeeId} · Account Pending Admin Approval`,
+        : updatedUser.approvalStatus === 'deactivated'
+          ? `${updatedUser.department} · ${updatedUser.employeeId} · Account Deactivated`
+          : updatedUser.approvalStatus === 'rejected'
+            ? `${updatedUser.department} · ${updatedUser.employeeId} · Access Declined`
+            : `${updatedUser.department} · ${updatedUser.employeeId} · Account Pending Admin Approval`,
       updatedUser.approvalStatus === 'approved' || isSuperAdminEmail(updatedUser.email)
         ? 'success'
         : 'info',
@@ -1150,8 +1252,8 @@ export default function App() {
 
     if (!refreshed) {
       pushToast(
-        'Still Pending Admin Approval',
-        'No status change detected yet. Please check again shortly.',
+        'No Active Access Record Found',
+        'Sign out and log in again to submit a fresh approval request.',
         'info',
       );
       return;
@@ -2688,7 +2790,7 @@ export default function App() {
     pushToast('Department Updated', `Reassigned member to ${department}.`, 'success');
   };
 
-  const handleToggleMemberActive = (memberId: string) => {
+  const handleToggleMemberActive = async (memberId: string) => {
     if (currentUser.role !== 'Admin') {
       pushToast('Admin Access Required', 'Only verified Admins can change account status.', 'error');
       return;
@@ -2700,28 +2802,48 @@ export default function App() {
       return;
     }
     const nextActiveState = !target.active;
+    const nextApprovalStatus = nextActiveState ? ('approved' as const) : ('deactivated' as const);
+    const now = new Date().toISOString();
     const auditEntry = createAuditEvent(
       'TEAM-STATUS',
       'Team Updated',
-      `${nextActiveState ? 'Activated' : 'Deactivated'} corporate account for ${target.name}.`,
+      `${nextActiveState ? 'Activated' : 'Deactivated'} corporate account for ${target.name} (${target.email}).`,
       state.activeRole,
     );
     const nextMembers = state.teamMembers.map((m) =>
-      m.id === memberId ? { ...m, active: nextActiveState } : m,
+      m.id === memberId
+        ? {
+            ...m,
+            active: nextActiveState,
+            approvalStatus: nextApprovalStatus,
+            ...(nextActiveState ? { approvedBy: currentUser.name, approvedAt: now } : {}),
+          }
+        : m,
     );
     setState((prev) => ({
       ...prev,
       teamMembers: nextMembers,
       globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
     }));
-    void dataService.team
-      .updateMember(memberId, { active: nextActiveState }, auditEntry, nextMembers)
-      .catch(handleCloudWriteError);
-    pushToast(
-      nextActiveState ? 'Account Activated' : 'Account Deactivated',
-      target.name,
-      nextActiveState ? 'success' : 'warning',
-    );
+    try {
+      await dataService.team.updateMember(
+        memberId,
+        {
+          active: nextActiveState,
+          approvalStatus: nextApprovalStatus,
+          ...(nextActiveState ? { approvedBy: currentUser.name, approvedAt: now } : {}),
+        },
+        auditEntry,
+        nextMembers,
+      );
+      pushToast(
+        nextActiveState ? 'Account Activated' : 'Account Deactivated',
+        `${target.name} synced with Supabase (${nextApprovalStatus}).`,
+        nextActiveState ? 'success' : 'warning',
+      );
+    } catch (err) {
+      handleCloudWriteError(err);
+    }
   };
 
   const handleRefreshUsersFromCloud = async (silent = false) => {
@@ -2900,6 +3022,49 @@ export default function App() {
         `Rejected ${target.name}`,
         `Access denied for ${target.email} in Supabase.`,
         'warning',
+      );
+    } catch (err) {
+      handleCloudWriteError(err);
+      throw err;
+    }
+  };
+
+  const handleDeleteMember = async (memberId: string) => {
+    if (currentUser.role !== 'Admin') {
+      pushToast('Admin Access Required', 'Only verified Admins can delete user records.', 'error');
+      return;
+    }
+    const target = state.teamMembers.find((m) => m.id === memberId);
+    if (!target) return;
+    if (isSuperAdminEmail(target.email)) {
+      pushToast('Permanent Super Admin', `${target.email} cannot be deleted.`, 'warning');
+      return;
+    }
+
+    const auditEntry = createAuditEvent(
+      'TEAM-DELETE',
+      'Team Updated',
+      `Admin ${currentUser.name} permanently deleted user record for ${target.name} (${target.email}).`,
+      currentUser.role,
+    );
+
+    const nextMembers = state.teamMembers.filter(
+      (m) =>
+        m.id !== memberId &&
+        m.email.trim().toLowerCase() !== target.email.trim().toLowerCase(),
+    );
+
+    try {
+      await dataService.team.deleteMember(memberId, target.email, auditEntry, nextMembers);
+      setState((prev) => ({
+        ...prev,
+        teamMembers: nextMembers,
+        globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+      }));
+      pushToast(
+        `Deleted ${target.name}`,
+        `Removed ${target.email} from Supabase user_access & synced directory.`,
+        'success',
       );
     } catch (err) {
       handleCloudWriteError(err);
@@ -4590,6 +4755,7 @@ export default function App() {
                     onToggleMemberActive={handleToggleMemberActive}
                     onApproveUser={handleApproveUser}
                     onRejectUser={handleRejectUser}
+                    onDeleteMember={handleDeleteMember}
                     onRefreshUsers={() => handleRefreshUsersFromCloud(false)}
                     onPreApproveUser={handlePreApproveUser}
                     onProvisionEmployee={handleProvisionEmployee}

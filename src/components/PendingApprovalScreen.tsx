@@ -18,6 +18,10 @@ export function PendingApprovalScreen({
 }: PendingApprovalScreenProps) {
   const [checking, setChecking] = useState(false);
   const isRejected = user.approvalStatus === 'rejected';
+  const isDeactivated =
+    user.approvalStatus === 'deactivated' ||
+    (user.approvalStatus === 'approved' && !user.active);
+  const isBlockedState = isRejected || isDeactivated;
 
   const handleCheck = async () => {
     setChecking(true);
@@ -44,12 +48,12 @@ export function PendingApprovalScreen({
           <div className="flex flex-col items-center text-center">
             <div
               className={`flex h-12 w-12 items-center justify-center rounded-xl border ${
-                isRejected
+                isBlockedState
                   ? 'border-rose-200 bg-rose-50 text-rose-600'
                   : 'border-amber-200 bg-amber-50 text-amber-600'
               }`}
             >
-              {isRejected ? (
+              {isBlockedState ? (
                 <XCircle className="h-6 w-6" />
               ) : (
                 <Clock className="h-6 w-6" />
@@ -58,25 +62,35 @@ export function PendingApprovalScreen({
 
             <span
               className={`mt-4 inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-semibold ${
-                isRejected
+                isBlockedState
                   ? 'border-rose-200 bg-rose-50 text-rose-700'
                   : 'border-amber-200 bg-amber-50 text-amber-800'
               }`}
             >
               <ShieldAlert className="h-3.5 w-3.5" />
-              <span>{isRejected ? 'Access Request Declined' : 'Pending Admin Approval'}</span>
+              <span>
+                {isRejected
+                  ? 'Access Request Declined'
+                  : isDeactivated
+                    ? 'Account Deactivated'
+                    : 'Pending Admin Approval'}
+              </span>
             </span>
 
             <h2 className="mt-4 font-display text-lg font-bold text-slate-900">
               {isRejected
                 ? 'Account Access Not Approved — Please contact your administrator'
-                : 'Account Pending Admin Approval — Please contact your administrator'}
+                : isDeactivated
+                  ? 'Account Deactivated — Please contact your administrator'
+                  : 'Account Pending Admin Approval — Please contact your administrator'}
             </h2>
 
             <p className="mt-2 text-sm leading-relaxed text-slate-600">
               {isRejected
                 ? 'Your access request has been declined by a System Administrator. Company records remain restricted.'
-                : 'Your corporate account is registered and secured, but workspace data access is locked until an Administrator approves your account and assigns your role (Viewer or Admin).'}
+                : isDeactivated
+                  ? 'Your workspace access has been deactivated by a System Administrator. Company records remain restricted until your account is reactivated.'
+                  : 'Your corporate account is registered and secured, but workspace data access is locked until an Administrator approves your account and assigns your role (Viewer or Admin).'}
             </p>
           </div>
 

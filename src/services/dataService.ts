@@ -413,15 +413,31 @@ function isLegacyDemoMember(member: TeamMember): boolean {
 function enforceMemberInvariants(member: TeamMember, idx = 0): TeamMember {
   const isSuper = isSuperAdminEmail(member.email) || Boolean(member.isSuperAdmin);
   const role: Role = isSuper ? 'Admin' : normalizeRole(member.role);
-  const approvalStatus: ApprovalStatus = isSuper
+  let approvalStatus: ApprovalStatus = isSuper
     ? 'approved'
-    : normalizeApprovalStatus(member.approvalStatus ?? 'approved', member.email);
+    : normalizeApprovalStatus(
+        member.approvalStatus ?? (member.active === false ? 'deactivated' : 'approved'),
+        member.email,
+      );
+  let active = isSuper ? true : member.active !== false;
+  if (!isSuper) {
+    if (approvalStatus === 'rejected' || approvalStatus === 'deactivated') {
+      active = false;
+    } else if (approvalStatus === 'approved' && member.active === false) {
+      approvalStatus = 'deactivated';
+      active = false;
+    } else if (approvalStatus === 'pending') {
+      active = false;
+    } else if (approvalStatus === 'approved') {
+      active = true;
+    }
+  }
   return {
     ...member,
     role,
     approvalStatus,
     isSuperAdmin: isSuper,
-    active: isSuper ? true : member.active !== false,
+    active,
     employeeId: member.employeeId || `NX-EMP-${String(1001 + idx * 4)}`,
     signOffTitle: member.signOffTitle || member.title || role,
   };
@@ -1993,7 +2009,7 @@ function mapProfileRowToMember(row: NexOpsProfileDbRow, existing?: TeamMember): 
     title,
     signOffTitle: (existing?.signOffTitle ?? title).trim(),
     avatarUrl: existing?.avatarUrl,
-    active: isSuper ? true : approvalStatus !== 'rejected' && (existing?.active ?? true),
+    active: isSuper ? true : approvalStatus === 'approved',
     lastActive: row.created_at || existing?.lastActive || new Date().toISOString(),
     outOfOffice: existing?.outOfOffice,
     delegateApproverId: existing?.delegateApproverId,
@@ -2006,9 +2022,14 @@ async function upsertProfileRecord(member: TeamMember): Promise<void> {
   const cleanEmail = member.email.trim().toLowerCase();
   const isSuper = isSuperAdminEmail(cleanEmail) || Boolean(member.isSuperAdmin);
   const role: Role = isSuper ? 'Admin' : normalizeRole(member.role);
+  const rawStatus = normalizeApprovalStatus(member.approvalStatus ?? 'pending', cleanEmail);
   const approvalStatus: ApprovalStatus = isSuper
     ? 'approved'
-    : normalizeApprovalStatus(member.approvalStatus ?? 'pending', cleanEmail);
+    : rawStatus === 'rejected'
+      ? 'rejected'
+      : rawStatus === 'deactivated' || (rawStatus === 'approved' && !member.active)
+        ? 'deactivated'
+        : rawStatus;
 
   let targetId = member.id;
   const isPlaceholderId = targetId.startsWith('pre-') || targetId.startsWith('usr-');
@@ -2232,21 +2253,24 @@ export const dataService = {
             .map((m, idx) => enforceMemberInvariants(m, idx))
         : localSnapshot.teamMembers;
 
-    // Merge all rows from `profiles` table (authoritative DB role + approval_status + avatar_url)
-    const profileRows = !profileRes.error ? ((profileRes.data ?? []) as NexOpsProfileDbRow[]) : [];
+    // Treat `user_access` as authoritative when reachable so deleted/deactivated/approved statuses never drift
     const mergedByKey = new Map<string, TeamMember>();
-    for (const member of baseMembers) {
-      mergedByKey.set(member.email.trim().toLowerCase() || member.id, member);
-    }
-    for (const pRow of profileRows) {
-      const key = (pRow.email ?? '').trim().toLowerCase() || pRow.id;
-      const existing =
-        mergedByKey.get(key) ??
-        baseMembers.find((m) => m.id === pRow.id || m.email.toLowerCase() === key);
-      if (existing && isLegacyDemoMember(existing)) continue;
-      const mapped = mapProfileRowToMember(pRow, existing);
-      if (!isLegacyDemoMember(mapped)) {
-        mergedByKey.set((mapped.email ?? '').trim().toLowerCase() || mapped.id, mapped);
+    if (!profileRes.error) {
+      const profileRows = (profileRes.data ?? []) as NexOpsProfileDbRow[];
+      for (const pRow of profileRows) {
+        const key = (pRow.email ?? '').trim().toLowerCase() || pRow.id;
+        const existing = baseMembers.find(
+          (m) => m.id === pRow.id || m.email.trim().toLowerCase() === key,
+        );
+        if (existing && isLegacyDemoMember(existing)) continue;
+        const mapped = mapProfileRowToMember(pRow, existing);
+        if (!isLegacyDemoMember(mapped)) {
+          mergedByKey.set((mapped.email ?? '').trim().toLowerCase() || mapped.id, mapped);
+        }
+      }
+    } else {
+      for (const member of baseMembers) {
+        mergedByKey.set(member.email.trim().toLowerCase() || member.id, member);
       }
     }
     const teamMembers: TeamMember[] = Array.from(mergedByKey.values()).map((m, idx) =>
@@ -2801,11 +2825,12 @@ export const dataService = {
       strictThrow = false,
     ): Promise<TeamMember | null> {
       const local = readWorkspaceState();
+      const cleanEmail = email?.trim().toLowerCase();
       const localMatch =
         local.teamMembers.find(
           (m) =>
             m.id === userId ||
-            (email && m.email.trim().toLowerCase() === email.trim().toLowerCase()),
+            (cleanEmail && m.email.trim().toLowerCase() === cleanEmail),
         ) ?? fallbackMember;
 
       if (!supabase) {
@@ -2814,29 +2839,37 @@ export const dataService = {
 
       try {
         let row: NexOpsProfileDbRow | null = null;
-        const { data: byId, error: byIdErr } = await supabase
-          .from('user_access')
-          .select('*')
-          .eq('id', userId)
-          .maybeSingle();
-        if (byIdErr && strictThrow) throw byIdErr;
-        if (byId) {
-          row = byId as NexOpsProfileDbRow;
-        } else if (email) {
+        if (cleanEmail) {
           const { data: byEmail, error: byEmailErr } = await supabase
             .from('user_access')
             .select('*')
-            .ilike('email', email.trim())
+            .ilike('email', cleanEmail)
             .maybeSingle();
           if (byEmailErr && strictThrow) throw byEmailErr;
           if (byEmail) {
             row = byEmail as NexOpsProfileDbRow;
           }
         }
-
-        if (!row) {
-          return localMatch ? enforceMemberInvariants(localMatch) : null;
+        if (!row && userId) {
+          const { data: byId, error: byIdErr } = await supabase
+            .from('user_access')
+            .select('*')
+            .eq('id', userId)
+            .maybeSingle();
+          if (byIdErr && strictThrow) throw byIdErr;
+          if (byId) {
+            row = byId as NexOpsProfileDbRow;
+          }
         }
+
+        // If the row was deleted from `user_access` in Supabase, do NOT fall back to stale localStorage
+        if (!row) {
+          if (cleanEmail && isSuperAdminEmail(cleanEmail) && localMatch) {
+            return enforceMemberInvariants(localMatch);
+          }
+          return null;
+        }
+
         let mapped = enforceMemberInvariants(mapProfileRowToMember(row, localMatch));
         // Migrate placeholder pre-approved ID onto authenticated Supabase Auth UUID
         const isRealAuthId = userId && !userId.startsWith('pre-') && !userId.startsWith('usr-');
@@ -2885,37 +2918,36 @@ export const dataService = {
           throw new Error('Supabase authentication succeeded without user profile.');
         }
 
-        // Query authoritative profile row from Supabase `user_access`
+        // Always fetch the latest user record directly from `public.user_access` by email (case-insensitive)
         let dbProfileRow: NexOpsProfileDbRow | null = null;
-        const { data: byId } = await supabase
+        const { data: byEmail, error: emailLookupErr } = await supabase
           .from('user_access')
           .select('*')
-          .eq('id', data.user.id)
+          .ilike('email', cleanEmail)
           .maybeSingle();
-        if (byId) {
-          dbProfileRow = byId as NexOpsProfileDbRow;
+        if (emailLookupErr) throw emailLookupErr;
+        if (byEmail) {
+          dbProfileRow = byEmail as NexOpsProfileDbRow;
         } else {
-          const { data: byEmail } = await supabase
+          const { data: byId, error: idLookupErr } = await supabase
             .from('user_access')
             .select('*')
-            .ilike('email', cleanEmail)
+            .eq('id', data.user.id)
             .maybeSingle();
-          if (byEmail) {
-            dbProfileRow = byEmail as NexOpsProfileDbRow;
+          if (idLookupErr) throw idLookupErr;
+          if (byId) {
+            dbProfileRow = byId as NexOpsProfileDbRow;
           }
         }
 
-        const existingMatch = local.teamMembers.find(
+        const existingMetaOnly = local.teamMembers.find(
           (m) => m.id === data.user?.id || m.email.toLowerCase() === cleanEmail,
         );
 
         let member: TeamMember;
         if (dbProfileRow) {
           member = enforceMemberInvariants(
-            mapProfileRowToMember(
-              dbProfileRow,
-              existingMatch ?? buildMemberFromSupabaseUser(data.user, local.teamMembers),
-            ),
+            mapProfileRowToMember(dbProfileRow, existingMetaOnly),
           );
           if (dbProfileRow.id !== data.user.id) {
             // Migrate pre-approved placeholder row onto real auth UUID while keeping approval & role
@@ -2923,27 +2955,22 @@ export const dataService = {
             await upsertProfileRecord(member);
           }
         } else {
-          const base = buildMemberFromSupabaseUser(data.user, local.teamMembers);
+          // New user OR deleted user logging in again: never rely on stale localStorage approval/role!
+          // Automatically re-insert into `public.user_access` with `status = 'pending'`.
+          const freshBase = buildMemberFromSupabaseUser(data.user, []);
           member = enforceMemberInvariants({
-            ...base,
+            ...freshBase,
             id: data.user.id,
             role: isSuper ? 'Admin' : 'Viewer',
             approvalStatus: isSuper ? 'approved' : 'pending',
             isSuperAdmin: isSuper,
-            active: true,
+            active: isSuper,
           });
           await upsertProfileRecord(member);
         }
 
         if (isSuper) {
           await upsertProfileRecord(member);
-        }
-
-        if (!isSuper && member.approvalStatus === 'approved' && !member.active) {
-          await supabase.auth.signOut();
-          throw new Error(
-            `Account for ${member.name} has been deactivated. Contact your System Administrator.`,
-          );
         }
 
         const updatedMembers = local.teamMembers.some(
@@ -2961,6 +2988,10 @@ export const dataService = {
           activeRole: member.role,
           teamMembers: updatedMembers,
         });
+
+        await dataService.systemState
+          .upsertKey(SYSTEM_STATE_KEYS.TEAM_DIRECTORY, updatedMembers, member.name)
+          .catch(() => {});
 
         const session: AuthSession = {
           isAuthenticated: true,
@@ -2980,7 +3011,7 @@ export const dataService = {
           identityVerified: false,
         };
         dataService.auth.saveSessionSync(session);
-        return { user: member, session };
+        return { user: member, session, wasInsertedPending: !dbProfileRow && !isSuper };
       }
 
       // Offline corporate credential verification when Supabase env vars are absent
@@ -3034,7 +3065,7 @@ export const dataService = {
         identityVerified: false,
       };
       dataService.auth.saveSessionSync(session);
-      return { user: { ...normalizedMatch, lastActive: now }, session };
+      return { user: { ...normalizedMatch, lastActive: now }, session, wasInsertedPending: false };
     },
 
     async registerUser(
@@ -3566,7 +3597,7 @@ export const dataService = {
       department: Department,
       employeeId: string,
       directoryOverride?: TeamMember[],
-    ): Promise<TeamMember> {
+    ): Promise<{ member: TeamMember; wasInsertedPending: boolean }> {
       const cleanDept = department.trim();
       const cleanEmpId = employeeId.trim().toUpperCase();
       if (!cleanDept) {
@@ -3577,8 +3608,49 @@ export const dataService = {
       }
 
       const now = new Date().toISOString();
+      const cleanEmail = currentMember.email.trim().toLowerCase();
+      const isSuper = isSuperAdminEmail(cleanEmail) || Boolean(currentMember.isSuperAdmin);
+
+      let latestCloudMember: TeamMember | null = null;
+      let missingFromCloud = false;
+
+      if (supabase && cleanEmail) {
+        // Always fetch the latest user record directly from `public.user_access` by email (case-insensitive)
+        const { data: row, error } = await supabase
+          .from('user_access')
+          .select('*')
+          .ilike('email', cleanEmail)
+          .maybeSingle();
+        if (error) throw error;
+        if (row) {
+          latestCloudMember = mapProfileRowToMember(row as NexOpsProfileDbRow, currentMember);
+        } else {
+          missingFromCloud = true;
+        }
+      }
+
+      const baseMember: TeamMember = latestCloudMember
+        ? {
+            ...latestCloudMember,
+            id:
+              currentMember.id &&
+              !currentMember.id.startsWith('pre-') &&
+              !currentMember.id.startsWith('usr-')
+                ? currentMember.id
+                : latestCloudMember.id,
+          }
+        : missingFromCloud
+          ? {
+              ...currentMember,
+              role: isSuper ? 'Admin' : 'Viewer',
+              approvalStatus: isSuper ? 'approved' : 'pending',
+              isSuperAdmin: isSuper,
+              active: isSuper,
+            }
+          : currentMember;
+
       const updatedMember: TeamMember = enforceMemberInvariants({
-        ...currentMember,
+        ...baseMember,
         department: cleanDept,
         employeeId: cleanEmpId,
         lastActive: now,
@@ -3586,7 +3658,6 @@ export const dataService = {
 
       const local = readWorkspaceState();
       const baseDirectory = directoryOverride ?? local.teamMembers;
-      const cleanEmail = updatedMember.email.trim().toLowerCase();
       const exists = baseDirectory.some(
         (m) => m.id === updatedMember.id || (cleanEmail && m.email.trim().toLowerCase() === cleanEmail),
       );
@@ -3610,7 +3681,10 @@ export const dataService = {
         teamMembers: nextDirectory,
       });
 
-      return updatedMember;
+      return {
+        member: updatedMember,
+        wasInsertedPending: missingFromCloud && !isSuper,
+      };
     },
 
     async signOut() {
@@ -4320,15 +4394,12 @@ export const dataService = {
 
       const rows = (data ?? []) as NexOpsProfileDbRow[];
       const mergedByKey = new Map<string, TeamMember>();
-      for (const m of base) {
-        const key = m.email.trim().toLowerCase() || m.id;
-        mergedByKey.set(key, enforceMemberInvariants(m));
-      }
+      // `user_access` is the authoritative user directory so deleted users do not resurrect from cache
       for (const row of rows) {
         const key = (row.email ?? '').trim().toLowerCase() || row.id;
-        const existing =
-          mergedByKey.get(key) ??
-          base.find((m) => m.id === row.id || m.email.toLowerCase() === key);
+        const existing = base.find(
+          (m) => m.id === row.id || m.email.trim().toLowerCase() === key,
+        );
         const mapped = enforceMemberInvariants(mapProfileRowToMember(row, existing));
         if (!isLegacyDemoMember(mapped)) {
           mergedByKey.set((mapped.email ?? '').trim().toLowerCase() || mapped.id, mapped);
@@ -4526,6 +4597,49 @@ export const dataService = {
         );
       }
       await Promise.all(tasks);
+    },
+
+    async deleteMember(
+      memberId: string,
+      email: string,
+      auditEntry: AuditEvent,
+      nextDirectory: TeamMember[],
+    ): Promise<void> {
+      const cleanEmail = email.trim().toLowerCase();
+      if (isSuperAdminEmail(cleanEmail)) {
+        throw new Error('The Primary Super Admin account cannot be deleted.');
+      }
+
+      const local = readWorkspaceState();
+      writeWorkspaceState({
+        ...local,
+        teamMembers: nextDirectory,
+      });
+
+      if (!supabase) return;
+
+      const { error: deleteByIdErr } = await supabase
+        .from('user_access')
+        .delete()
+        .eq('id', memberId);
+      if (deleteByIdErr) throw deleteByIdErr;
+
+      if (cleanEmail) {
+        const { error: deleteByEmailErr } = await supabase
+          .from('user_access')
+          .delete()
+          .ilike('email', cleanEmail);
+        if (deleteByEmailErr) throw deleteByEmailErr;
+      }
+
+      await Promise.all([
+        dataService.auditLogs.append(auditEntry),
+        dataService.systemState.upsertKey(
+          SYSTEM_STATE_KEYS.TEAM_DIRECTORY,
+          nextDirectory,
+          auditEntry.actorName,
+        ),
+      ]);
     },
   },
 

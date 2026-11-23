@@ -1,6 +1,6 @@
 export type Role = 'Admin' | 'Editor' | 'Viewer';
 export type DbAccessRole = 'admin' | 'editor' | 'viewer';
-export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
+export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'deactivated';
 
 export interface MasterKeyConfig {
   keyHash: string;

@@ -65,8 +65,9 @@ export function normalizeApprovalStatus(raw: unknown, email?: string | null): Ap
   if (isSuperAdminEmail(email)) return 'approved';
   if (typeof raw !== 'string') return 'pending';
   const cleaned = raw.trim().toLowerCase();
-  if (cleaned === 'approved') return 'approved';
+  if (cleaned === 'approved' || cleaned === 'active') return 'approved';
   if (cleaned === 'rejected' || cleaned === 'declined') return 'rejected';
+  if (cleaned === 'deactivated' || cleaned === 'inactive') return 'deactivated';
   return 'pending';
 }
 
