@@ -133,17 +133,16 @@ export function OfficialReportModal({
           <div id="official-print-report" className="mx-auto max-w-3xl space-y-7 text-slate-900">
             {/* Corporate Letterhead */}
             <header className="flex flex-wrap items-start justify-between gap-4 border-b-2 border-slate-900 pb-5">
-              <div className="flex items-center gap-3">
-                <NexOpsLogo className="h-10 w-10 shrink-0" title={branding.companyName} />
-                <div>
-                  <p className="font-display text-lg font-bold tracking-tight text-slate-900">
-                    {branding.companyName}
-                  </p>
-                  <p className="text-xs font-medium text-slate-500">
-                    {branding.tagline}
-                  </p>
-                </div>
-              </div>
+              <NexOpsLogo
+                size={38}
+                showWordmark
+                layout="horizontal"
+                surface="light"
+                title={branding.companyName}
+                tagline={branding.tagline}
+                wordmarkClassName="block font-sans text-lg font-semibold tracking-tight text-slate-900"
+                taglineClassName="mt-0.5 block font-sans text-xs font-normal text-slate-500"
+              />
 
               <div className="text-right text-xs">
                 <p className="font-semibold text-slate-900">

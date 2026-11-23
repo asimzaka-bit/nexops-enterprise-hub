@@ -35,14 +35,13 @@ export function PendingApprovalScreen({
   return (
     <div className="flex min-h-screen flex-col justify-center bg-slate-50 px-4 py-10 sm:px-6 lg:px-8">
       <div className="mx-auto w-full max-w-lg">
-        <div className="flex flex-col items-center text-center">
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white p-1.5 shadow-sm ring-1 ring-slate-200/80">
-            <NexOpsLogo className="h-11 w-11" title={branding.companyName} />
-          </div>
-          <h1 className="mt-4 font-display text-2xl font-bold tracking-tight text-slate-900">
-            {branding.companyName}
-          </h1>
-        </div>
+        <NexOpsLogo
+          size={54}
+          showWordmark
+          layout="stacked"
+          title={branding.companyName}
+          tagline={branding.tagline}
+        />
 
         <div className="mt-7 rounded-2xl border border-slate-200 bg-white p-6 shadow-xs sm:p-8">
           <div className="flex flex-col items-center text-center">

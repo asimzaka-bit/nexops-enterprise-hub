@@ -4,153 +4,169 @@ interface NexOpsLogoProps {
   className?: string;
   size?: number;
   title?: string;
+  tagline?: string;
+  showWordmark?: boolean;
+  layout?: 'horizontal' | 'stacked';
+  surface?: 'light' | 'dark';
+  wordmarkClassName?: string;
+  taglineClassName?: string;
+}
+
+const LEGACY_VERBOSE_TAGLINE = 'Unified Operations, QA & Approval Management System';
+const DEFAULT_COMPACT_TAGLINE = 'Unified Operations, QA & Approval';
+
+export function resolveCorporateTagline(tagline?: string): string {
+  const trimmed = tagline?.trim();
+  if (!trimmed || trimmed === LEGACY_VERBOSE_TAGLINE) {
+    return DEFAULT_COMPACT_TAGLINE;
+  }
+  return trimmed;
 }
 
 export function NexOpsLogo({
-  className = 'h-9 w-9',
-  size,
+  className = '',
+  size = 36,
   title = 'NexOps Enterprise Hub',
+  tagline = DEFAULT_COMPACT_TAGLINE,
+  showWordmark = false,
+  layout = 'horizontal',
+  surface = 'light',
+  wordmarkClassName,
+  taglineClassName,
 }: NexOpsLogoProps) {
   const uid = useId().replace(/:/g, '');
-  const shieldGradId = `nexops-shield-${uid}`;
-  const coreGradId = `nexops-core-${uid}`;
-  const beamGradId = `nexops-beam-${uid}`;
-  const glowGradId = `nexops-glow-${uid}`;
+  const badgeGradId = `nexops-badge-${uid}`;
+  const accentGradId = `nexops-accent-${uid}`;
+  const resolvedTagline = resolveCorporateTagline(tagline);
+  const isDark = surface === 'dark';
 
-  return (
+  const svgMark = (
     <svg
       xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 48 48"
+      viewBox="0 0 44 44"
       width={size}
       height={size}
+      style={{ width: size, height: size }}
       fill="none"
       role="img"
       aria-label={title}
-      className={className}
+      className={`shrink-0 rounded-[10px] ${
+        isDark ? '' : 'shadow-sm'
+      } ${!showWordmark ? className : ''}`.trim()}
     >
       <defs>
-        {/* Corporate Gradient: Deep Indigo (#4F46E5) -> Electric Cyan (#06B6D4) */}
+        {/* Subtle Satin-Slate Vertical Tone (#0F172A -> #1E293B) */}
         <linearGradient
-          id={shieldGradId}
-          x1="6"
-          y1="42"
-          x2="42"
-          y2="6"
+          id={badgeGradId}
+          x1="22"
+          y1="1"
+          x2="22"
+          y2="43"
           gradientUnits="userSpaceOnUse"
         >
-          <stop offset="0%" stopColor="#4F46E5" />
-          <stop offset="52%" stopColor="#2563EB" />
-          <stop offset="100%" stopColor="#06B6D4" />
+          <stop offset="0%" stopColor="#0F172A" />
+          <stop offset="100%" stopColor="#1E293B" />
         </linearGradient>
 
-        {/* High-Contrast Dark Shield Backdrop for Light & Dark Surfaces */}
+        {/* Royal Indigo to Sky Blue Diagonal Ribbon Accent (#6366F1 -> #38BDF8) */}
         <linearGradient
-          id={coreGradId}
-          x1="24"
-          y1="4"
-          x2="24"
-          y2="44"
+          id={accentGradId}
+          x1="14"
+          y1="12"
+          x2="30"
+          y2="32"
           gradientUnits="userSpaceOnUse"
         >
-          <stop offset="0%" stopColor="#171E38" />
-          <stop offset="100%" stopColor="#0B1120" />
-        </linearGradient>
-
-        {/* Subtle Inner Glow */}
-        <radialGradient
-          id={glowGradId}
-          cx="0"
-          cy="0"
-          r="1"
-          gradientUnits="userSpaceOnUse"
-          gradientTransform="translate(29 17) rotate(130) scale(24)"
-        >
-          <stop offset="0%" stopColor="#06B6D4" stopOpacity="0.28" />
-          <stop offset="55%" stopColor="#4F46E5" stopOpacity="0.16" />
-          <stop offset="100%" stopColor="#0B1120" stopOpacity="0" />
-        </radialGradient>
-
-        {/* Diagonal Monogram Beam Accent */}
-        <linearGradient
-          id={beamGradId}
-          x1="17"
-          y1="15"
-          x2="31"
-          y2="33"
-          gradientUnits="userSpaceOnUse"
-        >
-          <stop offset="0%" stopColor="#FFFFFF" />
-          <stop offset="55%" stopColor="#E0F2FE" />
-          <stop offset="100%" stopColor="#06B6D4" />
+          <stop offset="0%" stopColor="#6366F1" />
+          <stop offset="100%" stopColor="#38BDF8" />
         </linearGradient>
       </defs>
 
-      {/* Solid Hexagonal Shield Core (ensures sharp contrast on light & dark UIs) */}
-      <path
-        d="M24 4.2L41.2 14.1V33.9L24 43.8L6.8 33.9V14.1L24 4.2Z"
-        fill={`url(#${coreGradId})`}
-      />
-      <path
-        d="M24 4.2L41.2 14.1V33.9L24 43.8L6.8 33.9V14.1L24 4.2Z"
-        fill={`url(#${glowGradId})`}
-      />
-
-      {/* Inner Geometric Facet Line */}
-      <path
-        d="M24 8.4L37.5 16.2V31.8L24 39.6L10.5 31.8V16.2L24 8.4Z"
-        stroke={`url(#${shieldGradId})`}
-        strokeWidth="1"
-        strokeOpacity="0.35"
+      {/* Rounded-Square Badge Container (rx="10") with Crisp Hairline Border */}
+      <rect
+        x="0.75"
+        y="0.75"
+        width="42.5"
+        height="42.5"
+        rx="10"
+        fill={`url(#${badgeGradId})`}
+        stroke="rgba(148,163,184,0.28)"
+        strokeWidth="1.15"
       />
 
-      {/* Interlocking Hexagonal Shield Bracket A (Upper-Left to Bottom Lock) */}
-      <path
-        d="M28.6 6.6L24 3.9L6.5 14V34L17.9 40.6L19.7 37.5"
-        stroke={`url(#${shieldGradId})`}
-        strokeWidth="2.9"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+      {/* Sleek "N" Geometric Ribbon: Diagonal Accent Bar */}
+      <path d="M13.6 11.5H17.2L30.4 32.5H26.8L13.6 11.5Z" fill={`url(#${accentGradId})`} />
 
-      {/* Interlocking Hexagonal Shield Bracket B (Lower-Right to Top Lock) */}
-      <path
-        d="M19.4 41.4L24 44.1L41.5 34V14L30.1 7.4L28.3 10.5"
-        stroke={`url(#${shieldGradId})`}
-        strokeWidth="2.9"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+      {/* Sleek "N" Geometric Ribbon: Crisp White Vertical Pillars (#F8FAFC) */}
+      <rect x="11.5" y="11.5" width="4.4" height="21" rx="1.4" fill="#F8FAFC" />
+      <rect x="28.1" y="11.5" width="4.4" height="21" rx="1.4" fill="#F8FAFC" />
 
-      {/* Futuristic Monogram "N" — Left Chamfered Pillar */}
-      <path
-        d="M15.2 32.5V16.2L18.9 14.3V32.5H15.2Z"
-        fill="#FFFFFF"
-      />
-
-      {/* Futuristic Monogram "N" — Diagonal Energy Bridge */}
-      <path
-        d="M17.5 15.6H20.6L29.8 29.2V32.5H26.7L17.5 18.9V15.6Z"
-        fill={`url(#${beamGradId})`}
-      />
-
-      {/* Futuristic Monogram "N" — Right Chamfered Pillar */}
-      <path
-        d="M29.1 32.5V20.5H32.8V30.6L29.1 32.5Z"
-        fill="#FFFFFF"
-      />
-
-      {/* Enterprise Network Node Accent & Trace */}
-      <path
-        d="M30.95 20.5V15.6L35.9 12.8"
-        stroke="#06B6D4"
-        strokeWidth="1.75"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <circle cx="30.95" cy="15.6" r="3.1" fill="#0B1120" />
-      <circle cx="30.95" cy="15.6" r="2.35" fill="#06B6D4" />
-      <circle cx="30.95" cy="15.6" r="1.0" fill="#FFFFFF" />
-      <circle cx="35.9" cy="12.8" r="1.35" fill="#22D3EE" />
+      {/* Understated Geometric Accent Node at Upper-Right Corner */}
+      <circle cx="36.2" cy="7.8" r="1.75" fill="#38BDF8" />
     </svg>
+  );
+
+  if (!showWordmark) {
+    return svgMark;
+  }
+
+  if (layout === 'stacked') {
+    return (
+      <div className={`flex flex-col items-center text-center font-sans ${className}`.trim()}>
+        {svgMark}
+        <h1
+          className={
+            wordmarkClassName ||
+            `mt-4 font-sans text-2xl font-semibold tracking-tight ${
+              isDark ? 'text-white' : 'text-slate-900'
+            }`
+          }
+        >
+          {title}
+        </h1>
+        {resolvedTagline && (
+          <p
+            className={
+              taglineClassName ||
+              `mt-1 font-sans text-sm font-normal ${
+                isDark ? 'text-slate-400' : 'text-slate-500'
+              }`
+            }
+          >
+            {resolvedTagline}
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className={`flex min-w-0 items-center gap-2.5 font-sans ${className}`.trim()}>
+      {svgMark}
+      <div className="min-w-0 leading-tight">
+        <span
+          className={
+            wordmarkClassName ||
+            `block truncate font-sans text-sm font-semibold tracking-tight ${
+              isDark ? 'text-white' : 'text-slate-900'
+            }`
+          }
+        >
+          {title}
+        </span>
+        {resolvedTagline && (
+          <span
+            className={
+              taglineClassName ||
+              `mt-0.5 block truncate font-sans text-[11px] font-normal ${
+                isDark ? 'text-slate-400' : 'text-slate-500'
+              }`
+            }
+          >
+            {resolvedTagline}
+          </span>
+        )}
+      </div>
+    </div>
   );
 }

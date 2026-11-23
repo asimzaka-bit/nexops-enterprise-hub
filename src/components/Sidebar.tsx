@@ -186,8 +186,8 @@ export function Sidebar({
     <div className="flex h-full flex-col bg-slate-900 text-slate-100">
       {/* Brand Lockup & Collapse Toggle */}
       <div
-        className={`flex h-16 shrink-0 items-center border-b border-slate-800 ${
-          isCollapsed ? 'justify-center gap-1 px-2' : 'justify-between px-4'
+        className={`flex h-16 shrink-0 items-center border-b border-slate-800 bg-slate-900 ${
+          isCollapsed ? 'justify-center gap-1 px-2' : 'justify-between gap-2 px-3.5'
         }`}
       >
         {isCollapsed ? (
@@ -195,22 +195,18 @@ export function Sidebar({
             className="flex shrink-0 items-center justify-center"
             title={branding.companyName}
           >
-            <NexOpsLogo className="h-8 w-8" title={branding.companyName} />
+            <NexOpsLogo size={30} surface="dark" title={branding.companyName} />
           </div>
         ) : (
-          <div className="flex min-w-0 items-center gap-2.5">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center">
-              <NexOpsLogo className="h-9 w-9" title={branding.companyName} />
-            </div>
-            <div className="min-w-0">
-              <span className="block truncate font-display text-sm font-bold tracking-tight text-white">
-                {branding.companyName}
-              </span>
-              <span className="block truncate text-[11px] font-medium text-slate-400">
-                {branding.tagline}
-              </span>
-            </div>
-          </div>
+          <NexOpsLogo
+            size={34}
+            showWordmark
+            layout="horizontal"
+            surface="dark"
+            title={branding.companyName}
+            tagline={branding.tagline}
+            className="min-w-0 flex-1"
+          />
         )}
 
         <div className="flex shrink-0 items-center gap-1">
