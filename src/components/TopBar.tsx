@@ -45,6 +45,7 @@ import {
   formatDateTime,
   getRequestSlaStatus,
   isRequestPendingOver24h,
+  resolveLivePresenceOverride,
 } from '../utils/storage';
 import {
   GmailColorIcon,
@@ -60,6 +61,8 @@ interface TopBarProps {
   activeRole: Role;
   currentUser: TeamMember;
   teamMembers?: TeamMember[];
+  onlinePresenceKeys?: Set<string>;
+  recentlyOfflineKeys?: Set<string>;
   departments: string[];
   requests: OperationalRequest[];
   auditLogs: AuditEvent[];
@@ -176,6 +179,8 @@ export function TopBar({
   activeRole,
   currentUser,
   teamMembers = [],
+  onlinePresenceKeys,
+  recentlyOfflineKeys,
   departments,
   requests,
   auditLogs,
@@ -208,7 +213,7 @@ export function TopBar({
   useEffect(() => {
     const timer = window.setInterval(() => {
       setNowMs(Date.now());
-    }, 30_000);
+    }, 10_000);
     return () => window.clearInterval(timer);
   }, []);
 
@@ -663,6 +668,11 @@ export function TopBar({
                         lastActiveAt={member.lastActiveAt || member.lastActive}
                         nowMs={nowMs}
                         compact
+                        isOnlineOverride={resolveLivePresenceOverride(
+                          member,
+                          onlinePresenceKeys,
+                          recentlyOfflineKeys,
+                        )}
                       />
                     </div>
                   </button>
@@ -721,7 +731,7 @@ export function TopBar({
 
   return (
     <>
-    <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur-xs">
+    <header className="gpu-accelerated sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur-xs">
       <div className="flex h-16 w-full max-w-full items-center justify-between gap-2 px-3 sm:gap-4 sm:px-6 md:gap-2 md:px-4">
         {/* Left: Mobile Menu + Breadcrumb / Page Title */}
         <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
@@ -1162,6 +1172,11 @@ export function TopBar({
                     lastActiveAt={currentUser.lastActiveAt || currentUser.lastActive}
                     nowMs={nowMs}
                     compact
+                    isOnlineOverride={resolveLivePresenceOverride(
+                      currentUser,
+                      onlinePresenceKeys,
+                      recentlyOfflineKeys,
+                    )}
                   />
                 </div>
                 <div className="mt-2.5 border-t border-slate-100 pt-2.5">
@@ -1231,7 +1246,7 @@ export function TopBar({
           aria-modal="true"
           aria-label="Global Command Search"
         >
-          <div className="w-[92vw] max-w-2xl overflow-hidden rounded-2xl border border-slate-200 bg-white font-sans shadow-2xl sm:w-full">
+          <div className="gpu-accelerated w-[92vw] max-w-2xl overflow-hidden rounded-2xl border border-slate-200 bg-white font-sans shadow-2xl sm:w-full">
             <div className="flex items-center gap-3 border-b border-slate-200 px-4 py-3">
               <Search className="h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
               <input

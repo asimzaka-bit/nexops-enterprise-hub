@@ -318,12 +318,14 @@ export function PresenceBadge({
   lastActiveAt,
   nowMs,
   compact = false,
+  isOnlineOverride,
 }: {
   lastActiveAt?: string | null;
   nowMs?: number;
   compact?: boolean;
+  isOnlineOverride?: boolean;
 }) {
-  const status = formatPresenceStatus(lastActiveAt, nowMs);
+  const status = formatPresenceStatus(lastActiveAt, nowMs, isOnlineOverride);
 
   if (compact) {
     return (

@@ -7,7 +7,7 @@ interface PendingApprovalScreenProps {
   branding: CompanyBrandingConfig;
   user: TeamMember;
   onRefreshStatus: () => Promise<void>;
-  onSignOut: () => Promise<void>;
+  onSignOut: () => Promise<void> | void;
 }
 
 export function PendingApprovalScreen({

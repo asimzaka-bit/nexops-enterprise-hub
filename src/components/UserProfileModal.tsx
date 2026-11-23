@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { TeamMember } from '../types/nexops';
-import { isSuperAdminEmail } from '../utils/storage';
+import { isSuperAdminEmail, resolveLivePresenceOverride } from '../utils/storage';
 import { PresenceBadge, RoleBadge } from './StatusIndicator';
 import { UserAvatar } from './UserAvatar';
 
@@ -23,6 +23,8 @@ interface UserProfileModalProps {
   user: TeamMember;
   teamMembers: TeamMember[];
   pendingAssignedCount: number;
+  onlinePresenceKeys?: Set<string>;
+  recentlyOfflineKeys?: Set<string>;
   onClose: () => void;
   onUploadAvatar: (file: File) => Promise<void>;
   onRemoveAvatar: () => Promise<void>;
@@ -39,6 +41,8 @@ export function UserProfileModal({
   user,
   teamMembers,
   pendingAssignedCount,
+  onlinePresenceKeys,
+  recentlyOfflineKeys,
   onClose,
   onUploadAvatar,
   onRemoveAvatar,
@@ -54,7 +58,7 @@ export function UserProfileModal({
   useEffect(() => {
     const timer = window.setInterval(() => {
       setNowMs(Date.now());
-    }, 30_000);
+    }, 10_000);
     return () => window.clearInterval(timer);
   }, []);
 
@@ -312,6 +316,11 @@ export function UserProfileModal({
                   <PresenceBadge
                     lastActiveAt={user.lastActiveAt || user.lastActive}
                     nowMs={nowMs}
+                    isOnlineOverride={resolveLivePresenceOverride(
+                      user,
+                      onlinePresenceKeys,
+                      recentlyOfflineKeys,
+                    )}
                   />
                 </div>
               </div>

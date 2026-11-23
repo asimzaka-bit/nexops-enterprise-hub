@@ -142,6 +142,10 @@ export default function App() {
   );
   const realtimeTimerRef = useRef<number | null>(null);
   const isSigningInRef = useRef(false);
+  const [onlinePresenceKeys, setOnlinePresenceKeys] = useState<Set<string>>(() => new Set());
+  const [recentlyOfflineKeys, setRecentlyOfflineKeys] = useState<Set<string>>(() => new Set());
+  const presenceChannelRef = useRef<ReturnType<NonNullable<typeof supabase>['channel']> | null>(null);
+  const recentlyOfflineTimersRef = useRef<Map<string, number>>(new Map());
 
   // Unified Google Workspace OAuth session state shared across Gmail, Docs, Sheets & Forms
   const [googleToken, setGoogleToken] = useState<string | null>(() =>
@@ -646,7 +650,7 @@ export default function App() {
     }
   }, [activeSection, currentUser.role, authSession?.isAuthenticated, isApprovedUser]);
 
-  // Real-Time User Presence Heartbeat: login, visibilitychange, and 60-second background interval
+  // Instant Real-Time Presence (Supabase Realtime Presence WebSocket + 15s Heartbeat + Tab-Close Beacon)
   useEffect(() => {
     if (
       !authSession?.isAuthenticated ||
@@ -654,47 +658,229 @@ export default function App() {
       !isApprovedUser ||
       currentUser.id === 'unauthenticated'
     ) {
+      setOnlinePresenceKeys(new Set());
       return;
     }
 
+    const cleanSelfEmail = currentUser.email.trim().toLowerCase();
     const userSnapshot = {
       id: currentUser.id,
       email: currentUser.email,
       name: currentUser.name,
     };
 
+    const applyLocalTimestamp = (nowIso: string) => {
+      setState((prev) => ({
+        ...prev,
+        teamMembers: prev.teamMembers.map((m) =>
+          m.id === userSnapshot.id ||
+          (cleanSelfEmail && m.email.trim().toLowerCase() === cleanSelfEmail)
+            ? { ...m, lastActive: nowIso, lastActiveAt: nowIso }
+            : m,
+        ),
+      }));
+    };
+
     const sendHeartbeat = () => {
+      const nowIso = new Date().toISOString();
+      applyLocalTimestamp(nowIso);
       void dataService.team
         .sendPresenceHeartbeat(userSnapshot)
-        .then((nowIso) => {
-          const cleanEmail = userSnapshot.email.trim().toLowerCase();
-          setState((prev) => ({
-            ...prev,
-            teamMembers: prev.teamMembers.map((m) =>
-              m.id === userSnapshot.id ||
-              (cleanEmail && m.email.trim().toLowerCase() === cleanEmail)
-                ? { ...m, lastActive: nowIso, lastActiveAt: nowIso }
-                : m,
-            ),
-          }));
+        .then((savedIso) => {
+          applyLocalTimestamp(savedIso);
         })
         .catch(() => {});
     };
 
-    sendHeartbeat();
+    const markKeysOnline = (keys: string[]) => {
+      if (keys.length === 0) return;
+      for (const k of keys) {
+        const existingTimer = recentlyOfflineTimersRef.current.get(k);
+        if (existingTimer !== undefined) {
+          window.clearTimeout(existingTimer);
+          recentlyOfflineTimersRef.current.delete(k);
+        }
+      }
+      setRecentlyOfflineKeys((prev) => {
+        let changed = false;
+        const next = new Set(prev);
+        for (const k of keys) {
+          if (next.delete(k)) changed = true;
+        }
+        return changed ? next : prev;
+      });
+    };
 
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        sendHeartbeat();
+    const markKeysRecentlyOffline = (keys: string[]) => {
+      if (keys.length === 0) return;
+      setRecentlyOfflineKeys((prev) => {
+        const next = new Set(prev);
+        for (const k of keys) next.add(k);
+        return next;
+      });
+      for (const k of keys) {
+        const existingTimer = recentlyOfflineTimersRef.current.get(k);
+        if (existingTimer !== undefined) {
+          window.clearTimeout(existingTimer);
+        }
+        const timeoutId = window.setTimeout(() => {
+          recentlyOfflineTimersRef.current.delete(k);
+          setRecentlyOfflineKeys((prev) => {
+            if (!prev.has(k)) return prev;
+            const next = new Set(prev);
+            next.delete(k);
+            return next;
+          });
+        }, 30_000);
+        recentlyOfflineTimersRef.current.set(k, timeoutId);
       }
     };
 
+    const extractKeysFromPresences = (
+      key: string,
+      presences: Array<Record<string, unknown>>,
+    ): string[] => {
+      const out = new Set<string>();
+      const cleanKey = key.trim().toLowerCase();
+      if (cleanKey) out.add(cleanKey);
+      for (const p of presences) {
+        if (typeof p.user_id === 'string' && p.user_id.trim()) out.add(p.user_id.trim());
+        if (typeof p.email === 'string' && p.email.trim()) {
+          out.add(p.email.trim().toLowerCase());
+        }
+      }
+      return Array.from(out);
+    };
+
+    const collectPresenceKeys = (
+      stateMap: Record<string, Array<Record<string, unknown>>>,
+    ): Set<string> => {
+      const keys = new Set<string>();
+      for (const [presenceKey, list] of Object.entries(stateMap)) {
+        for (const k of extractKeysFromPresences(presenceKey, list)) {
+          keys.add(k);
+        }
+      }
+      return keys;
+    };
+
+    sendHeartbeat();
+
+    const client = supabase;
+    let presenceChannel: ReturnType<NonNullable<typeof supabase>['channel']> | null = null;
+    const presencePayload = {
+      user_id: currentUser.id,
+      email: cleanSelfEmail,
+      name: currentUser.name,
+      department: currentUser.department,
+      online_at: new Date().toISOString(),
+    };
+
+    if (client) {
+      presenceChannel = client.channel('nexops-online-presence', {
+        config: {
+          presence: {
+            key: cleanSelfEmail || currentUser.id,
+          },
+        },
+      });
+      presenceChannelRef.current = presenceChannel;
+
+      const syncFromChannel = () => {
+        if (!presenceChannel) return new Set<string>();
+        const activeKeys = collectPresenceKeys(
+          presenceChannel.presenceState() as Record<string, Array<Record<string, unknown>>>,
+        );
+        setOnlinePresenceKeys(activeKeys);
+        return activeKeys;
+      };
+
+      presenceChannel
+        .on('presence', { event: 'sync' }, () => {
+          const activeKeys = syncFromChannel();
+          markKeysOnline(Array.from(activeKeys));
+        })
+        .on('presence', { event: 'join' }, ({ key, newPresences }) => {
+          const joined = extractKeysFromPresences(
+            key,
+            newPresences as Array<Record<string, unknown>>,
+          );
+          markKeysOnline(joined);
+          syncFromChannel();
+        })
+        .on('presence', { event: 'leave' }, ({ key, leftPresences }) => {
+          const activeKeys = syncFromChannel();
+          const leftKeys = extractKeysFromPresences(
+            key,
+            leftPresences as Array<Record<string, unknown>>,
+          ).filter((k) => !activeKeys.has(k));
+
+          if (leftKeys.length > 0) {
+            const leftIso = new Date().toISOString();
+            markKeysRecentlyOffline(leftKeys);
+            setState((prev) => ({
+              ...prev,
+              teamMembers: prev.teamMembers.map((m) =>
+                leftKeys.includes(m.id) ||
+                (m.email && leftKeys.includes(m.email.trim().toLowerCase()))
+                  ? { ...m, lastActive: leftIso, lastActiveAt: leftIso }
+                  : m,
+              ),
+            }));
+          }
+        })
+        .subscribe((status) => {
+          if (status === 'SUBSCRIBED' && document.visibilityState === 'visible') {
+            markKeysOnline([currentUser.id, cleanSelfEmail].filter(Boolean));
+            void presenceChannel?.track({
+              ...presencePayload,
+              online_at: new Date().toISOString(),
+            });
+          }
+        });
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        markKeysOnline([currentUser.id, cleanSelfEmail].filter(Boolean));
+        void presenceChannelRef.current?.track({
+          ...presencePayload,
+          online_at: new Date().toISOString(),
+        });
+        sendHeartbeat();
+      } else {
+        void presenceChannelRef.current?.untrack();
+        const nowIso = dataService.team.sendPresenceBeacon(userSnapshot);
+        applyLocalTimestamp(nowIso);
+      }
+    };
+
+    const handlePageUnload = () => {
+      void presenceChannelRef.current?.untrack();
+      dataService.team.sendPresenceBeacon(userSnapshot);
+    };
+
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    const heartbeatTimer = window.setInterval(sendHeartbeat, 60_000);
+    window.addEventListener('pagehide', handlePageUnload);
+    window.addEventListener('beforeunload', handlePageUnload);
+    const heartbeatTimer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        sendHeartbeat();
+      }
+    }, 15_000);
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('pagehide', handlePageUnload);
+      window.removeEventListener('beforeunload', handlePageUnload);
       window.clearInterval(heartbeatTimer);
+      if (presenceChannel && client) {
+        void presenceChannel.untrack();
+        void client.removeChannel(presenceChannel);
+      }
+      if (presenceChannelRef.current === presenceChannel) {
+        presenceChannelRef.current = null;
+      }
     };
   }, [
     authSession?.isAuthenticated,
@@ -703,6 +889,7 @@ export default function App() {
     currentUser.id,
     currentUser.email,
     currentUser.name,
+    currentUser.department,
   ]);
 
   useEffect(() => {
@@ -1454,18 +1641,16 @@ export default function App() {
     return { status: 'signed_in' };
   };
 
-  const handleSignOut = async () => {
+  const handleSignOut = () => {
     if (currentUser.id !== 'unauthenticated') {
-      await dataService.team
-        .sendPresenceHeartbeat({
-          id: currentUser.id,
-          email: currentUser.email,
-          name: currentUser.name,
-        })
-        .catch(() => {});
+      void presenceChannelRef.current?.untrack();
+      dataService.team.sendPresenceBeacon({
+        id: currentUser.id,
+        email: currentUser.email,
+        name: currentUser.name,
+      });
     }
-    await dataService.auth.signOut();
-    await disconnectGoogleWorkspace().catch(() => {});
+    setOnlinePresenceKeys(new Set());
     setGoogleToken(null);
     setGoogleEmail(null);
     setGoogleDisplayName(null);
@@ -1479,6 +1664,8 @@ export default function App() {
     setReportModalState({ open: false, requestId: null });
     setMobileMenuOpen(false);
     pushToast('Signed Out', 'Corporate session closed securely.', 'info');
+    void dataService.auth.signOut().catch(() => {});
+    void disconnectGoogleWorkspace().catch(() => {});
   };
 
   const handleGoogleWorkspaceSignIn = async () => {
@@ -2811,7 +2998,7 @@ export default function App() {
     );
   };
 
-  // Admin-Only Team, Approval & Master Key Management Handlers
+  // Admin-Only Team, Approval & Master Key Management Handlers (Zero-Lag Optimistic UI + Rollback)
   const handleUpdateMemberRole = (memberId: string, role: Role) => {
     if (currentUser.role !== 'Admin') {
       pushToast('Admin Access Required', 'Only verified Admins can modify user roles.', 'error');
@@ -2823,13 +3010,15 @@ export default function App() {
       pushToast('Permanent Super Admin', `${target.email} is permanently locked as Admin.`, 'warning');
       return;
     }
+    const prevMembers = state.teamMembers;
+    const prevAudits = state.globalAuditLogs;
     const auditEntry = createAuditEvent(
       'TEAM-RBAC',
       'Role Changed',
       `Updated ${target.name} (${target.email}) role from ${target.role} to ${role}.`,
       state.activeRole,
     );
-    const nextMembers = state.teamMembers.map((m) =>
+    const nextMembers = prevMembers.map((m) =>
       m.id === memberId ? { ...m, role } : m,
     );
     setState((prev) => ({
@@ -2837,10 +3026,20 @@ export default function App() {
       teamMembers: nextMembers,
       globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
     }));
+    pushToast('RBAC Role Updated', `Assigned ${role} permissions.`, 'success');
     void dataService.team
       .updateMember(memberId, { role }, auditEntry, nextMembers)
-      .catch(handleCloudWriteError);
-    pushToast('RBAC Role Updated', `Assigned ${role} permissions.`, 'success');
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      })
+      .catch((err) => {
+        setState((prev) => ({
+          ...prev,
+          teamMembers: prevMembers,
+          globalAuditLogs: prevAudits,
+        }));
+        handleCloudWriteError(err);
+      });
   };
 
   const handleUpdateMemberDepartment = (memberId: string, department: Department) => {
@@ -2850,13 +3049,15 @@ export default function App() {
     }
     const target = state.teamMembers.find((m) => m.id === memberId);
     if (!target) return;
+    const prevMembers = state.teamMembers;
+    const prevAudits = state.globalAuditLogs;
     const auditEntry = createAuditEvent(
       'TEAM-DEPT',
       'Team Updated',
       `Reassigned ${target.name} from ${target.department} to ${department}.`,
       state.activeRole,
     );
-    const nextMembers = state.teamMembers.map((m) =>
+    const nextMembers = prevMembers.map((m) =>
       m.id === memberId ? { ...m, department } : m,
     );
     setState((prev) => ({
@@ -2864,13 +3065,23 @@ export default function App() {
       teamMembers: nextMembers,
       globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
     }));
+    pushToast('Department Updated', `Reassigned member to ${department}.`, 'success');
     void dataService.team
       .updateMember(memberId, { department }, auditEntry, nextMembers)
-      .catch(handleCloudWriteError);
-    pushToast('Department Updated', `Reassigned member to ${department}.`, 'success');
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      })
+      .catch((err) => {
+        setState((prev) => ({
+          ...prev,
+          teamMembers: prevMembers,
+          globalAuditLogs: prevAudits,
+        }));
+        handleCloudWriteError(err);
+      });
   };
 
-  const handleToggleMemberActive = async (memberId: string) => {
+  const handleToggleMemberActive = (memberId: string) => {
     if (currentUser.role !== 'Admin') {
       pushToast('Admin Access Required', 'Only verified Admins can change account status.', 'error');
       return;
@@ -2881,6 +3092,8 @@ export default function App() {
       pushToast('Permanent Super Admin', `${target.email} cannot be deactivated.`, 'warning');
       return;
     }
+    const prevMembers = state.teamMembers;
+    const prevAudits = state.globalAuditLogs;
     const nextActiveState = !target.active;
     const nextApprovalStatus = nextActiveState ? ('approved' as const) : ('deactivated' as const);
     const now = new Date().toISOString();
@@ -2890,7 +3103,7 @@ export default function App() {
       `${nextActiveState ? 'Activated' : 'Deactivated'} corporate account for ${target.name} (${target.email}).`,
       state.activeRole,
     );
-    const nextMembers = state.teamMembers.map((m) =>
+    const nextMembers = prevMembers.map((m) =>
       m.id === memberId
         ? {
             ...m,
@@ -2905,8 +3118,13 @@ export default function App() {
       teamMembers: nextMembers,
       globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
     }));
-    try {
-      await dataService.team.updateMember(
+    pushToast(
+      nextActiveState ? 'Account Activated' : 'Account Deactivated',
+      `${target.name} status updated (${nextApprovalStatus}).`,
+      nextActiveState ? 'success' : 'warning',
+    );
+    void dataService.team
+      .updateMember(
         memberId,
         {
           active: nextActiveState,
@@ -2915,15 +3133,18 @@ export default function App() {
         },
         auditEntry,
         nextMembers,
-      );
-      pushToast(
-        nextActiveState ? 'Account Activated' : 'Account Deactivated',
-        `${target.name} synced with Supabase (${nextApprovalStatus}).`,
-        nextActiveState ? 'success' : 'warning',
-      );
-    } catch (err) {
-      handleCloudWriteError(err);
-    }
+      )
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      })
+      .catch((err) => {
+        setState((prev) => ({
+          ...prev,
+          teamMembers: prevMembers,
+          globalAuditLogs: prevAudits,
+        }));
+        handleCloudWriteError(err);
+      });
   };
 
   const handleRefreshUsersFromCloud = async (silent = false) => {
@@ -2962,42 +3183,117 @@ export default function App() {
     if (currentUser.role !== 'Admin') {
       throw new Error('Only verified Admins can pre-approve or add users.');
     }
-    const { member, alreadyExisted, auditEntry } =
-      await dataService.team.preApproveUserByEmail(
-        payload,
-        currentUser.name,
-        currentUser.role,
-        currentUser.signOffTitle || currentUser.title,
-        state.teamMembers,
-      );
+    const cleanEmail = payload.email.trim().toLowerCase();
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      throw new Error('A valid corporate email address is required.');
+    }
+
+    const prevMembers = state.teamMembers;
+    const prevAudits = state.globalAuditLogs;
+    const isSuper = isSuperAdminEmail(cleanEmail);
+    const effectiveRole: Role = isSuper ? 'Admin' : payload.role === 'Admin' ? 'Admin' : 'Viewer';
+    const now = new Date().toISOString();
+    const localExisting = prevMembers.find(
+      (m) => m.email.trim().toLowerCase() === cleanEmail,
+    );
+    const optimisticMember: TeamMember = {
+      id:
+        localExisting?.id ||
+        `pre-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      employeeId:
+        localExisting?.employeeId ||
+        `EMP-${String(100 + (prevMembers.length % 899)).padStart(3, '0')}`,
+      name: payload.fullName?.trim() || localExisting?.name || cleanEmail.split('@')[0],
+      email: cleanEmail,
+      role: effectiveRole,
+      approvalStatus: 'approved',
+      isSuperAdmin: isSuper,
+      approvedBy: currentUser.name,
+      approvedAt: now,
+      department: payload.department || localExisting?.department || branding.departments[0],
+      title:
+        isSuper
+          ? 'Primary Super Administrator'
+          : effectiveRole === 'Admin'
+            ? 'Operations Administrator'
+            : 'Workspace Viewer',
+      signOffTitle: localExisting?.signOffTitle || currentUser.signOffTitle,
+      avatarUrl: localExisting?.avatarUrl,
+      active: true,
+      lastActive: localExisting?.lastActiveAt || '',
+      lastActiveAt: localExisting?.lastActiveAt,
+    };
+
+    const optimisticAudit = createAuditEvent(
+      'TEAM-PREAPPROVE',
+      'Role Changed',
+      localExisting
+        ? `Admin ${currentUser.name} approved & assigned ${effectiveRole} access for ${optimisticMember.name} (${cleanEmail}).`
+        : `Admin ${currentUser.name} pre-approved ${cleanEmail} (${effectiveRole} · ${optimisticMember.department}).`,
+      currentUser.role,
+    );
 
     setState((prev) => ({
       ...prev,
       teamMembers: [
-        member,
+        optimisticMember,
         ...prev.teamMembers.filter(
           (m) =>
-            m.id !== member.id &&
-            m.email.trim().toLowerCase() !== member.email.trim().toLowerCase(),
+            m.id !== optimisticMember.id &&
+            m.email.trim().toLowerCase() !== cleanEmail,
         ),
       ],
-      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+      globalAuditLogs: [optimisticAudit, ...prev.globalAuditLogs],
     }));
 
     pushToast(
-      alreadyExisted ? `Approved ${member.email}` : `Pre-Approved ${member.email}`,
-      `Assigned ${member.role} access (${member.department}) in Supabase.`,
+      localExisting ? `Approved ${cleanEmail}` : `Pre-Approved ${cleanEmail}`,
+      `Assigned ${effectiveRole} access (${optimisticMember.department}).`,
       'success',
     );
+
+    void dataService.team
+      .preApproveUserByEmail(
+        payload,
+        currentUser.name,
+        currentUser.role,
+        currentUser.signOffTitle || currentUser.title,
+        prevMembers,
+      )
+      .then(({ member }) => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+        setState((prev) => ({
+          ...prev,
+          teamMembers: [
+            member,
+            ...prev.teamMembers.filter(
+              (m) =>
+                m.id !== optimisticMember.id &&
+                m.id !== member.id &&
+                m.email.trim().toLowerCase() !== cleanEmail,
+            ),
+          ],
+        }));
+      })
+      .catch((err) => {
+        setState((prev) => ({
+          ...prev,
+          teamMembers: prevMembers,
+          globalAuditLogs: prevAudits,
+        }));
+        handleCloudWriteError(err);
+      });
   };
 
-  const handleApproveUser = async (memberId: string, assignedRole: Role) => {
+  const handleApproveUser = (memberId: string, assignedRole: Role) => {
     if (currentUser.role !== 'Admin') {
       pushToast('Admin Access Required', 'Only verified Admins can approve pending accounts.', 'error');
       return;
     }
     const target = state.teamMembers.find((m) => m.id === memberId);
     if (!target) return;
+    const prevMembers = state.teamMembers;
+    const prevAudits = state.globalAuditLogs;
     const effectiveRole: Role = isSuperAdminEmail(target.email) ? 'Admin' : assignedRole;
     const now = new Date().toISOString();
 
@@ -3008,7 +3304,7 @@ export default function App() {
       currentUser.role,
     );
 
-    const nextMembers = state.teamMembers.map((m) =>
+    const nextMembers = prevMembers.map((m) =>
       m.id === memberId
         ? {
             ...m,
@@ -3021,8 +3317,20 @@ export default function App() {
         : m,
     );
 
-    try {
-      await dataService.team.updateMember(
+    setState((prev) => ({
+      ...prev,
+      teamMembers: nextMembers,
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+    }));
+
+    pushToast(
+      `Approved ${target.name}`,
+      `Assigned ${effectiveRole} access (${target.email}).`,
+      'success',
+    );
+
+    void dataService.team
+      .updateMember(
         memberId,
         {
           role: effectiveRole,
@@ -3033,26 +3341,21 @@ export default function App() {
         },
         auditEntry,
         nextMembers,
-      );
-
-      setState((prev) => ({
-        ...prev,
-        teamMembers: nextMembers,
-        globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
-      }));
-
-      pushToast(
-        `Approved ${target.name}`,
-        `Assigned ${effectiveRole} access (${target.email}) in Supabase.`,
-        'success',
-      );
-    } catch (err) {
-      handleCloudWriteError(err);
-      throw err;
-    }
+      )
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      })
+      .catch((err) => {
+        setState((prev) => ({
+          ...prev,
+          teamMembers: prevMembers,
+          globalAuditLogs: prevAudits,
+        }));
+        handleCloudWriteError(err);
+      });
   };
 
-  const handleRejectUser = async (memberId: string) => {
+  const handleRejectUser = (memberId: string) => {
     if (currentUser.role !== 'Admin') {
       pushToast('Admin Access Required', 'Only verified Admins can decline pending accounts.', 'error');
       return;
@@ -3064,6 +3367,8 @@ export default function App() {
       return;
     }
 
+    const prevMembers = state.teamMembers;
+    const prevAudits = state.globalAuditLogs;
     const auditEntry = createAuditEvent(
       'TEAM-APPROVAL',
       'Role Changed',
@@ -3071,7 +3376,7 @@ export default function App() {
       currentUser.role,
     );
 
-    const nextMembers = state.teamMembers.map((m) =>
+    const nextMembers = prevMembers.map((m) =>
       m.id === memberId
         ? {
             ...m,
@@ -3081,8 +3386,20 @@ export default function App() {
         : m,
     );
 
-    try {
-      await dataService.team.updateMember(
+    setState((prev) => ({
+      ...prev,
+      teamMembers: nextMembers,
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+    }));
+
+    pushToast(
+      `Rejected ${target.name}`,
+      `Access denied for ${target.email}.`,
+      'warning',
+    );
+
+    void dataService.team
+      .updateMember(
         memberId,
         {
           approvalStatus: 'rejected',
@@ -3090,26 +3407,21 @@ export default function App() {
         },
         auditEntry,
         nextMembers,
-      );
-
-      setState((prev) => ({
-        ...prev,
-        teamMembers: nextMembers,
-        globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
-      }));
-
-      pushToast(
-        `Rejected ${target.name}`,
-        `Access denied for ${target.email} in Supabase.`,
-        'warning',
-      );
-    } catch (err) {
-      handleCloudWriteError(err);
-      throw err;
-    }
+      )
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      })
+      .catch((err) => {
+        setState((prev) => ({
+          ...prev,
+          teamMembers: prevMembers,
+          globalAuditLogs: prevAudits,
+        }));
+        handleCloudWriteError(err);
+      });
   };
 
-  const handleDeleteMember = async (memberId: string) => {
+  const handleDeleteMember = (memberId: string) => {
     if (currentUser.role !== 'Admin') {
       pushToast('Admin Access Required', 'Only verified Admins can delete user records.', 'error');
       return;
@@ -3121,6 +3433,8 @@ export default function App() {
       return;
     }
 
+    const prevMembers = state.teamMembers;
+    const prevAudits = state.globalAuditLogs;
     const auditEntry = createAuditEvent(
       'TEAM-DELETE',
       'Team Updated',
@@ -3128,28 +3442,37 @@ export default function App() {
       currentUser.role,
     );
 
-    const nextMembers = state.teamMembers.filter(
+    const nextMembers = prevMembers.filter(
       (m) =>
         m.id !== memberId &&
         m.email.trim().toLowerCase() !== target.email.trim().toLowerCase(),
     );
 
-    try {
-      await dataService.team.deleteMember(memberId, target.email, auditEntry, nextMembers);
-      setState((prev) => ({
-        ...prev,
-        teamMembers: nextMembers,
-        globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
-      }));
-      pushToast(
-        `Deleted ${target.name}`,
-        `Removed ${target.email} from Supabase user_access & synced directory.`,
-        'success',
-      );
-    } catch (err) {
-      handleCloudWriteError(err);
-      throw err;
-    }
+    setState((prev) => ({
+      ...prev,
+      teamMembers: nextMembers,
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+    }));
+
+    pushToast(
+      `Deleted ${target.name}`,
+      `Removed ${target.email} from directory.`,
+      'success',
+    );
+
+    void dataService.team
+      .deleteMember(memberId, target.email, auditEntry, nextMembers)
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      })
+      .catch((err) => {
+        setState((prev) => ({
+          ...prev,
+          teamMembers: prevMembers,
+          globalAuditLogs: prevAudits,
+        }));
+        handleCloudWriteError(err);
+      });
   };
 
   const handleProvisionEmployee = async (payload: ProvisionEmployeePayload) => {
@@ -4584,6 +4907,8 @@ export default function App() {
             activeRole={currentUser.role}
             currentUser={currentUser}
             teamMembers={state.teamMembers}
+            onlinePresenceKeys={onlinePresenceKeys}
+            recentlyOfflineKeys={recentlyOfflineKeys}
             departments={branding.departments}
             requests={state.requests}
             auditLogs={state.globalAuditLogs}
@@ -4630,6 +4955,8 @@ export default function App() {
                     companyName={branding.companyName}
                     currentUser={currentUser}
                     teamMembers={state.teamMembers}
+                    onlinePresenceKeys={onlinePresenceKeys}
+                    recentlyOfflineKeys={recentlyOfflineKeys}
                     requests={state.requests}
                     projects={state.projects}
                     attendanceLogs={state.attendanceLogs}
@@ -4836,6 +5163,8 @@ export default function App() {
                     tableDiagnostics={tableDiagnostics}
                     isCheckingHealth={isCheckingHealth}
                     teamMembers={state.teamMembers}
+                    onlinePresenceKeys={onlinePresenceKeys}
+                    recentlyOfflineKeys={recentlyOfflineKeys}
                     requests={state.requests}
                     auditLogs={state.globalAuditLogs}
                     notificationsCount={state.notifications.length}
@@ -4897,6 +5226,8 @@ export default function App() {
             user={currentUser}
             teamMembers={state.teamMembers}
             pendingAssignedCount={pendingAssignedCount}
+            onlinePresenceKeys={onlinePresenceKeys}
+            recentlyOfflineKeys={recentlyOfflineKeys}
             onClose={() => setProfileModalOpen(false)}
             onUploadAvatar={handleUploadAvatar}
             onRemoveAvatar={handleRemoveAvatar}

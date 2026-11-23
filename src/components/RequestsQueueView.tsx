@@ -138,27 +138,63 @@ export function RequestsQueueView({
   const canBulkManage = activeRole === 'Admin';
 
   const normalizedSearch = searchQuery.trim().toLowerCase();
-  const overdueCount = requests.filter((r) => isRequestOverdue(r, slaPolicy, nowMs)).length;
 
-  const filteredRequests = requests.filter((req) => {
-    const matchesSearch =
-      !normalizedSearch ||
-      req.id.toLowerCase().includes(normalizedSearch) ||
-      req.title.toLowerCase().includes(normalizedSearch) ||
-      req.submittedBy.toLowerCase().includes(normalizedSearch) ||
-      req.category.toLowerCase().includes(normalizedSearch) ||
-      (req.projectCode && req.projectCode.toLowerCase().includes(normalizedSearch)) ||
-      (req.projectName && req.projectName.toLowerCase().includes(normalizedSearch)) ||
-      (req.assetTag && req.assetTag.toLowerCase().includes(normalizedSearch)) ||
-      (req.assetName && req.assetName.toLowerCase().includes(normalizedSearch));
+  const overdueCount = useMemo(
+    () => requests.filter((r) => isRequestOverdue(r, slaPolicy, nowMs)).length,
+    [requests, slaPolicy, nowMs],
+  );
 
-    const matchesStatus = statusFilter === 'All' || req.status === statusFilter;
-    const matchesDept = departmentFilter === 'All' || req.department === departmentFilter;
-    const matchesPriority = priorityFilter === 'All' || req.priority === priorityFilter;
-    const matchesOverdue = !overdueOnly || isRequestOverdue(req, slaPolicy, nowMs);
+  const statusTabCounts = useMemo(() => {
+    const counts: Record<string, number> = { All: requests.length };
+    for (const r of requests) {
+      counts[r.status] = (counts[r.status] ?? 0) + 1;
+    }
+    return counts;
+  }, [requests]);
 
-    return matchesSearch && matchesStatus && matchesDept && matchesPriority && matchesOverdue;
-  });
+  const filteredRequests = useMemo(() => {
+    return requests.filter((req) => {
+      const matchesSearch =
+        !normalizedSearch ||
+        req.id.toLowerCase().includes(normalizedSearch) ||
+        req.title.toLowerCase().includes(normalizedSearch) ||
+        req.submittedBy.toLowerCase().includes(normalizedSearch) ||
+        req.category.toLowerCase().includes(normalizedSearch) ||
+        (req.projectCode && req.projectCode.toLowerCase().includes(normalizedSearch)) ||
+        (req.projectName && req.projectName.toLowerCase().includes(normalizedSearch)) ||
+        (req.assetTag && req.assetTag.toLowerCase().includes(normalizedSearch)) ||
+        (req.assetName && req.assetName.toLowerCase().includes(normalizedSearch));
+
+      const matchesStatus = statusFilter === 'All' || req.status === statusFilter;
+      const matchesDept = departmentFilter === 'All' || req.department === departmentFilter;
+      const matchesPriority = priorityFilter === 'All' || req.priority === priorityFilter;
+      const matchesOverdue = !overdueOnly || isRequestOverdue(req, slaPolicy, nowMs);
+
+      return matchesSearch && matchesStatus && matchesDept && matchesPriority && matchesOverdue;
+    });
+  }, [
+    requests,
+    normalizedSearch,
+    statusFilter,
+    departmentFilter,
+    priorityFilter,
+    overdueOnly,
+    slaPolicy,
+    nowMs,
+  ]);
+
+  const boardColumnsMap = useMemo(() => {
+    const grouped: Record<string, OperationalRequest[]> = {};
+    for (const col of BOARD_COLUMNS) {
+      grouped[col.status] = [];
+    }
+    for (const r of filteredRequests) {
+      if (grouped[r.status]) {
+        grouped[r.status].push(r);
+      }
+    }
+    return grouped;
+  }, [filteredRequests]);
 
   const filteredIds = useMemo(
     () => filteredRequests.map((r) => r.id),
@@ -230,10 +266,7 @@ export function RequestsQueueView({
         >
           {STATUS_TABS.map((status) => {
             const active = statusFilter === status;
-            const count =
-              status === 'All'
-                ? requests.length
-                : requests.filter((r) => r.status === status).length;
+            const count = statusTabCounts[status] ?? 0;
             return (
               <button
                 key={status}
@@ -505,7 +538,7 @@ export function RequestsQueueView({
           aria-label="Kanban Board View by Request Status"
         >
           {BOARD_COLUMNS.map((col) => {
-            const columnItems = filteredRequests.filter((r) => r.status === col.status);
+            const columnItems = boardColumnsMap[col.status] ?? [];
             return (
               <section
                 key={col.status}

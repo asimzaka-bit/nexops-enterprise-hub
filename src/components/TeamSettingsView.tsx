@@ -43,7 +43,12 @@ import {
   TableSyncStatus,
   TeamMember,
 } from '../types/nexops';
-import { formatDateTime, isSuperAdminEmail, parseSystemBackupJson } from '../utils/storage';
+import {
+  formatDateTime,
+  isSuperAdminEmail,
+  parseSystemBackupJson,
+  resolveLivePresenceOverride,
+} from '../utils/storage';
 import { PresenceBadge } from './StatusIndicator';
 import { UserAvatar } from './UserAvatar';
 
@@ -54,6 +59,8 @@ interface TeamSettingsViewProps {
   tableDiagnostics: TableSyncStatus[];
   isCheckingHealth: boolean;
   teamMembers: TeamMember[];
+  onlinePresenceKeys?: Set<string>;
+  recentlyOfflineKeys?: Set<string>;
   requests: OperationalRequest[];
   auditLogs: AuditEvent[];
   notificationsCount: number;
@@ -154,6 +161,8 @@ export function TeamSettingsView({
   tableDiagnostics,
   isCheckingHealth,
   teamMembers,
+  onlinePresenceKeys,
+  recentlyOfflineKeys,
   requests,
   auditLogs,
   notificationsCount,
@@ -204,7 +213,7 @@ export function TeamSettingsView({
   useEffect(() => {
     const timer = window.setInterval(() => {
       setPresenceNowMs(Date.now());
-    }, 30_000);
+    }, 10_000);
     return () => window.clearInterval(timer);
   }, []);
 
@@ -810,6 +819,11 @@ export function TeamSettingsView({
                                   lastActiveAt={member.lastActiveAt || member.lastActive}
                                   nowMs={presenceNowMs}
                                   compact
+                                  isOnlineOverride={resolveLivePresenceOverride(
+                                    member,
+                                    onlinePresenceKeys,
+                                    recentlyOfflineKeys,
+                                  )}
                                 />
                               </div>
                             </div>
@@ -1581,6 +1595,11 @@ export function TeamSettingsView({
                     <PresenceBadge
                       lastActiveAt={member.lastActiveAt || member.lastActive}
                       nowMs={presenceNowMs}
+                      isOnlineOverride={resolveLivePresenceOverride(
+                        member,
+                        onlinePresenceKeys,
+                        recentlyOfflineKeys,
+                      )}
                     />
                   </td>
                   <td className="px-3 py-3.5">

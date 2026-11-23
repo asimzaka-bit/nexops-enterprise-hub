@@ -4581,6 +4581,53 @@ export const dataService = {
       return nowIso;
     },
 
+    sendPresenceBeacon(member: {
+      id: string;
+      email?: string | null;
+      name?: string;
+    }): string {
+      const nowIso = new Date().toISOString();
+      const cleanEmail = (member.email ?? '').trim().toLowerCase();
+      try {
+        const local = readWorkspaceState();
+        const updatedLocalMembers = local.teamMembers.map((m) =>
+          m.id === member.id || (cleanEmail && m.email.trim().toLowerCase() === cleanEmail)
+            ? { ...m, lastActive: nowIso, lastActiveAt: nowIso }
+            : m,
+        );
+        writeWorkspaceState({
+          ...local,
+          teamMembers: updatedLocalMembers,
+        });
+      } catch {
+        // Ignore storage write errors on unload
+      }
+
+      if (hasValidSupabaseConfig && typeof fetch === 'function') {
+        try {
+          const filter = cleanEmail
+            ? `email=ilike.${encodeURIComponent(cleanEmail)}`
+            : `id=eq.${encodeURIComponent(member.id)}`;
+          const endpoint = `${SUPABASE_URL.replace(/\/+$/, '')}/rest/v1/user_access?${filter}`;
+          void fetch(endpoint, {
+            method: 'PATCH',
+            keepalive: true,
+            headers: {
+              apikey: SUPABASE_ANON_KEY,
+              Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+              'Content-Type': 'application/json',
+              Prefer: 'return=minimal',
+            },
+            body: JSON.stringify({ last_active_at: nowIso }),
+          }).catch(() => {});
+        } catch {
+          // Ignore network beacon errors during page unload
+        }
+      }
+
+      return nowIso;
+    },
+
     async preApproveUserByEmail(
       payload: {
         email: string;

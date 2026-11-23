@@ -431,7 +431,7 @@ export function RequestDetailDrawer({
       <div className="flex-1" onClick={onClose} />
 
       {/* Split-View Drawer Panel */}
-      <div className="flex h-full w-full max-w-5xl flex-col overflow-hidden border-l border-slate-200 bg-white shadow-2xl">
+      <div className="gpu-accelerated flex h-full w-full max-w-5xl flex-col overflow-hidden border-l border-slate-200 bg-white shadow-2xl">
         {/* Drawer Header */}
         <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 bg-slate-50/70 px-4 py-3.5 sm:gap-4 sm:px-6 sm:py-4">
           <div className="min-w-0 flex-1">

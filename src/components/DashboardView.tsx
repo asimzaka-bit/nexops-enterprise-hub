@@ -55,6 +55,7 @@ import {
   getTodayDateString,
   isRequestOverdue,
   isSuperAdminEmail,
+  resolveLivePresenceOverride,
   toUsdEquivalent,
 } from '../utils/storage';
 import {
@@ -71,6 +72,8 @@ interface DashboardViewProps {
   companyName: string;
   currentUser: TeamMember;
   teamMembers?: TeamMember[];
+  onlinePresenceKeys?: Set<string>;
+  recentlyOfflineKeys?: Set<string>;
   requests: OperationalRequest[];
   projects: CompanyProject[];
   attendanceLogs: AttendanceLog[];
@@ -109,6 +112,8 @@ export function DashboardView({
   companyName,
   currentUser,
   teamMembers = [],
+  onlinePresenceKeys,
+  recentlyOfflineKeys,
   requests,
   projects,
   attendanceLogs,
@@ -135,7 +140,7 @@ export function DashboardView({
   useEffect(() => {
     const timer = window.setInterval(() => {
       setNowMs(Date.now());
-    }, 30_000);
+    }, 10_000);
     return () => window.clearInterval(timer);
   }, []);
 
@@ -164,11 +169,17 @@ export function DashboardView({
     return approved
       .map((member) => {
         const ts = member.lastActiveAt || member.lastActive;
-        const presence = formatPresenceStatus(ts, nowMs);
+        const liveOverride = resolveLivePresenceOverride(
+          member,
+          onlinePresenceKeys,
+          recentlyOfflineKeys,
+        );
+        const presence = formatPresenceStatus(ts, nowMs, liveOverride);
         const tsMs = ts ? new Date(ts).getTime() : 0;
         return {
           member,
           presence,
+          liveOverride,
           sortTime: Number.isNaN(tsMs) ? 0 : tsMs,
         };
       })
@@ -181,7 +192,7 @@ export function DashboardView({
         }
         return a.member.name.localeCompare(b.member.name);
       });
-  }, [teamMembers, nowMs]);
+  }, [teamMembers, nowMs, onlinePresenceKeys, recentlyOfflineKeys]);
 
   const onlineMembersCount = useMemo(
     () => activeDirectoryWithPresence.filter((item) => item.presence.isOnline).length,
@@ -272,33 +283,77 @@ export function DashboardView({
     setEditingNotice(null);
   };
 
-  const totalRequests = requests.length;
-  const pendingCount = requests.filter(
-    (r) => r.status === 'Draft' || r.status === 'Submitted',
-  ).length;
-  const inProgressCount = requests.filter(
-    (r) => r.status === 'Under QA Review' || r.status === 'Revision Required',
-  ).length;
-  const completedCount = requests.filter((r) => r.status === 'Approved').length;
-  const rejectedCount = requests.filter((r) => r.status === 'Rejected').length;
+  const requestMetrics = useMemo(() => {
+    const total = requests.length;
+    let pending = 0;
+    let inProgress = 0;
+    let completed = 0;
+    let rejected = 0;
+    let pendingApp = 0;
+    let revReq = 0;
+    let decided = 0;
+    let submitted = 0;
+    let underQa = 0;
 
-  const pendingApproval = requests.filter(
-    (r) => r.status === 'Submitted' || r.status === 'Under QA Review',
-  ).length;
-  const revisionRequired = requests.filter((r) => r.status === 'Revision Required').length;
-  const approvedCount = completedCount;
-  const decidedCount = requests.filter(
-    (r) => r.status === 'Approved' || r.status === 'Rejected' || r.status === 'Revision Required',
-  ).length;
-  const approvalRate =
-    decidedCount > 0 ? Math.round((approvedCount / decidedCount) * 100) : 0;
+    for (const r of requests) {
+      if (r.status === 'Draft' || r.status === 'Submitted') pending += 1;
+      if (r.status === 'Under QA Review' || r.status === 'Revision Required') inProgress += 1;
+      if (r.status === 'Approved') {
+        completed += 1;
+        decided += 1;
+      } else if (r.status === 'Rejected') {
+        rejected += 1;
+        decided += 1;
+      } else if (r.status === 'Revision Required') {
+        revReq += 1;
+        decided += 1;
+      }
+      if (r.status === 'Submitted' || r.status === 'Under QA Review') pendingApp += 1;
+      if (r.status === 'Submitted') submitted += 1;
+      if (r.status === 'Under QA Review') underQa += 1;
+    }
 
-  const displayDepartments = Array.from(
-    new Set([
-      ...departments,
-      ...requests.map((r) => r.department).filter(Boolean),
-      ...attendanceLogs.map((a) => a.department).filter(Boolean),
-    ]),
+    return {
+      totalRequests: total,
+      pendingCount: pending,
+      inProgressCount: inProgress,
+      completedCount: completed,
+      rejectedCount: rejected,
+      pendingApproval: pendingApp,
+      revisionRequired: revReq,
+      approvedCount: completed,
+      decidedCount: decided,
+      submittedCount: submitted,
+      underQaCount: underQa,
+      approvalRate: decided > 0 ? Math.round((completed / decided) * 100) : 0,
+    };
+  }, [requests]);
+
+  const {
+    totalRequests,
+    pendingCount,
+    inProgressCount,
+    completedCount,
+    rejectedCount,
+    pendingApproval,
+    revisionRequired,
+    approvedCount,
+    decidedCount,
+    submittedCount,
+    underQaCount,
+    approvalRate,
+  } = requestMetrics;
+
+  const displayDepartments = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...departments,
+          ...requests.map((r) => r.department).filter(Boolean),
+          ...attendanceLogs.map((a) => a.department).filter(Boolean),
+        ]),
+      ),
+    [departments, requests, attendanceLogs],
   );
 
   const todayAttendanceLogs = useMemo(
@@ -306,63 +361,72 @@ export function DashboardView({
     [attendanceLogs, todayStr],
   );
 
-  const departmentAnalyticsRows: ExecutiveDepartmentAnalyticsRow[] = displayDepartments.map(
-    (dept) => {
-      const deptReqs = requests.filter((r) => r.department === dept);
-      const deptAttToday = todayAttendanceLogs.filter((a) => a.department === dept);
-      return {
-        department: dept,
-        totalTasks: deptReqs.length,
-        pendingCount: deptReqs.filter((r) => r.status === 'Draft' || r.status === 'Submitted').length,
-        inProgressCount: deptReqs.filter(
-          (r) => r.status === 'Under QA Review' || r.status === 'Revision Required',
-        ).length,
-        completedCount: deptReqs.filter((r) => r.status === 'Approved').length,
-        rejectedCount: deptReqs.filter((r) => r.status === 'Rejected').length,
-        presentToday: deptAttToday.filter((a) => a.status === 'Present').length,
-        lateToday: deptAttToday.filter((a) => a.status === 'Late').length,
-        completedShiftToday: deptAttToday.filter((a) => a.status === 'Completed').length,
-      };
-    },
+  const departmentAnalyticsRows: ExecutiveDepartmentAnalyticsRow[] = useMemo(
+    () =>
+      displayDepartments.map((dept) => {
+        const deptReqs = requests.filter((r) => r.department === dept);
+        const deptAttToday = todayAttendanceLogs.filter((a) => a.department === dept);
+        return {
+          department: dept,
+          totalTasks: deptReqs.length,
+          pendingCount: deptReqs.filter((r) => r.status === 'Draft' || r.status === 'Submitted')
+            .length,
+          inProgressCount: deptReqs.filter(
+            (r) => r.status === 'Under QA Review' || r.status === 'Revision Required',
+          ).length,
+          completedCount: deptReqs.filter((r) => r.status === 'Approved').length,
+          rejectedCount: deptReqs.filter((r) => r.status === 'Rejected').length,
+          presentToday: deptAttToday.filter((a) => a.status === 'Present').length,
+          lateToday: deptAttToday.filter((a) => a.status === 'Late').length,
+          completedShiftToday: deptAttToday.filter((a) => a.status === 'Completed').length,
+        };
+      }),
+    [displayDepartments, requests, todayAttendanceLogs],
   );
 
-  const maxDeptCount = Math.max(1, ...departmentAnalyticsRows.map((d) => d.totalTasks));
+  const maxDeptCount = useMemo(
+    () => Math.max(1, ...departmentAnalyticsRows.map((d) => d.totalTasks)),
+    [departmentAnalyticsRows],
+  );
 
   // SVG Donut chart geometry (r = 52, circumference = 2 * pi * 52 = 326.7256)
   const donutRadius = 52;
   const donutCircumference = 2 * Math.PI * donutRadius;
   const completionPct =
     totalRequests > 0 ? Math.round((completedCount / totalRequests) * 100) : 0;
-  const donutSegments = [
-    {
-      label: 'Completed',
-      count: completedCount,
-      stroke: '#059669',
-      dotClass: 'bg-emerald-600',
-      queueFilter: 'Approved' as const,
-    },
-    {
-      label: 'In Progress',
-      count: inProgressCount,
-      stroke: '#d97706',
-      dotClass: 'bg-amber-600',
-      queueFilter: 'Under QA Review' as const,
-    },
-    {
-      label: 'Pending',
-      count: pendingCount,
-      stroke: '#4f46e5',
-      dotClass: 'bg-indigo-600',
-      queueFilter: 'Submitted' as const,
-    },
-    {
-      label: 'Rejected',
-      count: rejectedCount,
-      stroke: '#be123c',
-      dotClass: 'bg-rose-700',
-      queueFilter: 'Rejected' as const,
-    },
-  ];
+  const donutSegments = useMemo(
+    () => [
+      {
+        label: 'Completed',
+        count: completedCount,
+        stroke: '#059669',
+        dotClass: 'bg-emerald-600',
+        queueFilter: 'Approved' as const,
+      },
+      {
+        label: 'In Progress',
+        count: inProgressCount,
+        stroke: '#d97706',
+        dotClass: 'bg-amber-600',
+        queueFilter: 'Under QA Review' as const,
+      },
+      {
+        label: 'Pending',
+        count: pendingCount,
+        stroke: '#4f46e5',
+        dotClass: 'bg-indigo-600',
+        queueFilter: 'Submitted' as const,
+      },
+      {
+        label: 'Rejected',
+        count: rejectedCount,
+        stroke: '#be123c',
+        dotClass: 'bg-rose-700',
+        queueFilter: 'Rejected' as const,
+      },
+    ],
+    [completedCount, inProgressCount, pendingCount, rejectedCount],
+  );
 
   const approvedActiveMembers = useMemo(
     () =>
@@ -374,73 +438,80 @@ export function DashboardView({
     [teamMembers],
   );
 
-  const scorecardRows: DepartmentScorecardRow[] = displayDepartments.map((dept) => {
-    const deptRequests = requests.filter((r) => r.department === dept);
-    const total = deptRequests.length;
-    const approved = deptRequests.filter((r) => r.status === 'Approved').length;
-    const decided = deptRequests.filter(
-      (r) => r.status === 'Approved' || r.status === 'Rejected' || r.status === 'Revision Required',
-    ).length;
-    const approvalRatePct = decided > 0 ? Math.round((approved / decided) * 100) : 0;
-    const overdue = deptRequests.filter((r) => isRequestOverdue(r, slaPolicy, nowMs)).length;
+  const scorecardRows: DepartmentScorecardRow[] = useMemo(
+    () =>
+      displayDepartments.map((dept) => {
+        const deptRequests = requests.filter((r) => r.department === dept);
+        const total = deptRequests.length;
+        const approved = deptRequests.filter((r) => r.status === 'Approved').length;
+        const decided = deptRequests.filter(
+          (r) =>
+            r.status === 'Approved' ||
+            r.status === 'Rejected' ||
+            r.status === 'Revision Required',
+        ).length;
+        const approvalRatePct = decided > 0 ? Math.round((approved / decided) * 100) : 0;
+        const overdue = deptRequests.filter((r) => isRequestOverdue(r, slaPolicy, nowMs)).length;
 
-    const withinSlaCount = deptRequests.filter((r) => {
-      const sla = getRequestSlaStatus(r, slaPolicy, nowMs);
-      if (r.status === 'Approved') return sla.metSla !== false;
-      if (r.status === 'Rejected') return true;
-      return !sla.breached;
-    }).length;
-    const slaCompliancePct = total > 0 ? Math.round((withinSlaCount / total) * 100) : 100;
+        const withinSlaCount = deptRequests.filter((r) => {
+          const sla = getRequestSlaStatus(r, slaPolicy, nowMs);
+          if (r.status === 'Approved') return sla.metSla !== false;
+          if (r.status === 'Rejected') return true;
+          return !sla.breached;
+        }).length;
+        const slaCompliancePct = total > 0 ? Math.round((withinSlaCount / total) * 100) : 100;
 
-    const turnaroundValues = deptRequests
-      .map((r) => getApprovalTurnaroundHours(r))
-      .filter((h): h is number => h !== null);
-    const avgTurnaroundHours =
-      turnaroundValues.length > 0
-        ? turnaroundValues.reduce((sum, h) => sum + h, 0) / turnaroundValues.length
-        : null;
+        const turnaroundValues = deptRequests
+          .map((r) => getApprovalTurnaroundHours(r))
+          .filter((h): h is number => h !== null);
+        const avgTurnaroundHours =
+          turnaroundValues.length > 0
+            ? turnaroundValues.reduce((sum, h) => sum + h, 0) / turnaroundValues.length
+            : null;
 
-    const deptStaff = approvedActiveMembers.filter((m) => m.department === dept);
-    const activeStaffCount = deptStaff.length;
-    const deptAttToday = todayAttendanceLogs.filter((a) => a.department === dept);
-    const uniqueAttEmails = new Set(
-      deptAttToday.map((a) => a.userEmail.trim().toLowerCase()).filter(Boolean),
-    );
-    const attendanceTodayCount =
-      uniqueAttEmails.size > 0 ? uniqueAttEmails.size : deptAttToday.length;
-    const attendanceRatePct =
-      activeStaffCount > 0
-        ? Math.min(100, Math.round((attendanceTodayCount / activeStaffCount) * 100))
-        : attendanceTodayCount > 0
-          ? 100
-          : 0;
+        const deptStaff = approvedActiveMembers.filter((m) => m.department === dept);
+        const activeStaffCount = deptStaff.length;
+        const deptAttToday = todayAttendanceLogs.filter((a) => a.department === dept);
+        const uniqueAttEmails = new Set(
+          deptAttToday.map((a) => a.userEmail.trim().toLowerCase()).filter(Boolean),
+        );
+        const attendanceTodayCount =
+          uniqueAttEmails.size > 0 ? uniqueAttEmails.size : deptAttToday.length;
+        const attendanceRatePct =
+          activeStaffCount > 0
+            ? Math.min(100, Math.round((attendanceTodayCount / activeStaffCount) * 100))
+            : attendanceTodayCount > 0
+              ? 100
+              : 0;
 
-    const avgChecklistPct =
-      total > 0
-        ? Math.round(
-            deptRequests.reduce((sum, r) => {
-              const items = r.checklist.length;
-              if (items === 0) return sum + 100;
-              const checked = r.checklist.filter((c) => c.checked).length;
-              return sum + (checked / items) * 100;
-            }, 0) / total,
-          )
-        : 0;
+        const avgChecklistPct =
+          total > 0
+            ? Math.round(
+                deptRequests.reduce((sum, r) => {
+                  const items = r.checklist.length;
+                  if (items === 0) return sum + 100;
+                  const checked = r.checklist.filter((c) => c.checked).length;
+                  return sum + (checked / items) * 100;
+                }, 0) / total,
+              )
+            : 0;
 
-    return {
-      department: dept,
-      totalRequests: total,
-      approvedCount: approved,
-      approvalRatePct,
-      overdueCount: overdue,
-      avgChecklistPct,
-      slaCompliancePct,
-      avgTurnaroundHours,
-      activeStaffCount,
-      attendanceTodayCount,
-      attendanceRatePct,
-    };
-  });
+        return {
+          department: dept,
+          totalRequests: total,
+          approvedCount: approved,
+          approvalRatePct,
+          overdueCount: overdue,
+          avgChecklistPct,
+          slaCompliancePct,
+          avgTurnaroundHours,
+          activeStaffCount,
+          attendanceTodayCount,
+          attendanceRatePct,
+        };
+      }),
+    [displayDepartments, requests, slaPolicy, nowMs, approvedActiveMembers, todayAttendanceLogs],
+  );
 
   const handleDownloadScorecard = () => {
     exportDepartmentScorecardCsv(scorecardRows);
@@ -461,11 +532,18 @@ export function DashboardView({
     onExportScorecardSuccess?.(departmentAnalyticsRows.length);
   };
 
-  const overdueCount = requests.filter((r) => isRequestOverdue(r, slaPolicy, nowMs)).length;
-  const approachingSlaCount = requests.filter((r) => {
-    const sla = getRequestSlaStatus(r, slaPolicy, nowMs);
-    return !sla.breached && sla.approaching;
-  }).length;
+  const overdueCount = useMemo(
+    () => requests.filter((r) => isRequestOverdue(r, slaPolicy, nowMs)).length,
+    [requests, slaPolicy, nowMs],
+  );
+  const approachingSlaCount = useMemo(
+    () =>
+      requests.filter((r) => {
+        const sla = getRequestSlaStatus(r, slaPolicy, nowMs);
+        return !sla.breached && sla.approaching;
+      }).length,
+    [requests, slaPolicy, nowMs],
+  );
 
   const overallSlaCompliancePct = useMemo(() => {
     if (requests.length === 0) return 100;
@@ -486,31 +564,44 @@ export function DashboardView({
     return vals.reduce((sum, h) => sum + h, 0) / vals.length;
   }, [requests]);
 
-  const portfolioBudgetUsd = projects.reduce(
-    (sum, p) => sum + toUsdEquivalent(p.estimatedBudget ?? 0, p.currency || 'USD'),
-    0,
-  );
-  const portfolioSpendUsd = projects.reduce(
-    (sum, p) => sum + toUsdEquivalent(p.actualSpend ?? 0, p.currency || 'USD'),
-    0,
-  );
-  const portfolioUtilPct = getBudgetUtilizationPct(portfolioBudgetUsd, portfolioSpendUsd);
-  const overBudgetProjectsCount = projects.filter(
-    (p) => getBudgetUtilizationPct(p.estimatedBudget ?? 0, p.actualSpend ?? 0) > 100,
-  ).length;
+  const { portfolioBudgetUsd, portfolioSpendUsd, portfolioUtilPct, overBudgetProjectsCount } =
+    useMemo(() => {
+      const budget = projects.reduce(
+        (sum, p) => sum + toUsdEquivalent(p.estimatedBudget ?? 0, p.currency || 'USD'),
+        0,
+      );
+      const spend = projects.reduce(
+        (sum, p) => sum + toUsdEquivalent(p.actualSpend ?? 0, p.currency || 'USD'),
+        0,
+      );
+      const util = getBudgetUtilizationPct(budget, spend);
+      const overCount = projects.filter(
+        (p) => getBudgetUtilizationPct(p.estimatedBudget ?? 0, p.actualSpend ?? 0) > 100,
+      ).length;
+      return {
+        portfolioBudgetUsd: budget,
+        portfolioSpendUsd: spend,
+        portfolioUtilPct: util,
+        overBudgetProjectsCount: overCount,
+      };
+    }, [projects]);
 
-  const urgentRequests = requests
-    .filter(
-      (r) =>
-        r.status !== 'Approved' &&
-        r.status !== 'Rejected' &&
-        (isRequestOverdue(r, slaPolicy, nowMs) ||
-          r.priority === 'Urgent' ||
-          r.priority === 'High' ||
-          r.status === 'Revision Required'),
-    )
-    .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
-    .slice(0, 6);
+  const urgentRequests = useMemo(
+    () =>
+      requests
+        .filter(
+          (r) =>
+            r.status !== 'Approved' &&
+            r.status !== 'Rejected' &&
+            (isRequestOverdue(r, slaPolicy, nowMs) ||
+              r.priority === 'Urgent' ||
+              r.priority === 'High' ||
+              r.status === 'Revision Required'),
+        )
+        .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
+        .slice(0, 6),
+    [requests, slaPolicy, nowMs],
+  );
 
   const slaBreachedRequests = useMemo(
     () =>
@@ -524,47 +615,58 @@ export function DashboardView({
     [requests, slaPolicy, nowMs],
   );
 
-  const kpis = [
-    {
-      label: 'Total Operational Requests',
-      value: totalRequests,
-      trend:
-        totalRequests === 0
-          ? 'Clean workspace'
-          : `${requests.filter((r) => r.status === 'Submitted').length} awaiting review`,
-      trendPositive: true,
-      icon: FileText,
-      accent: 'text-indigo-600',
-      onClick: () => onNavigateToQueue('All'),
-    },
-    {
-      label: 'Pending QA / Approval',
-      value: pendingApproval,
-      trend: `${requests.filter((r) => r.status === 'Under QA Review').length} actively in QA`,
-      trendPositive: true,
-      icon: Clock,
-      accent: 'text-amber-600',
-      onClick: () => onNavigateToQueue('Under QA Review'),
-    },
-    {
-      label: 'Revision Required',
-      value: revisionRequired,
-      trend: revisionRequired > 0 ? 'Action needed by owner' : 'Zero blockers',
-      trendPositive: revisionRequired === 0,
-      icon: AlertTriangle,
-      accent: 'text-rose-600',
-      onClick: () => onNavigateToQueue('Revision Required'),
-    },
-    {
-      label: 'Overall Approval Rate',
-      value: `${approvalRate}%`,
-      trend: `${approvedCount} of ${decidedCount} reviewed`,
-      trendPositive: approvalRate >= 70,
-      icon: CheckCircle2,
-      accent: 'text-emerald-600',
-      onClick: () => onNavigateToQueue('Approved'),
-    },
-  ];
+  const kpis = useMemo(
+    () => [
+      {
+        label: 'Total Operational Requests',
+        value: totalRequests,
+        trend:
+          totalRequests === 0 ? 'Clean workspace' : `${submittedCount} awaiting review`,
+        trendPositive: true,
+        icon: FileText,
+        accent: 'text-indigo-600',
+        onClick: () => onNavigateToQueue('All'),
+      },
+      {
+        label: 'Pending QA / Approval',
+        value: pendingApproval,
+        trend: `${underQaCount} actively in QA`,
+        trendPositive: true,
+        icon: Clock,
+        accent: 'text-amber-600',
+        onClick: () => onNavigateToQueue('Under QA Review'),
+      },
+      {
+        label: 'Revision Required',
+        value: revisionRequired,
+        trend: revisionRequired > 0 ? 'Action needed by owner' : 'Zero blockers',
+        trendPositive: revisionRequired === 0,
+        icon: AlertTriangle,
+        accent: 'text-rose-600',
+        onClick: () => onNavigateToQueue('Revision Required'),
+      },
+      {
+        label: 'Overall Approval Rate',
+        value: `${approvalRate}%`,
+        trend: `${approvedCount} of ${decidedCount} reviewed`,
+        trendPositive: approvalRate >= 70,
+        icon: CheckCircle2,
+        accent: 'text-emerald-600',
+        onClick: () => onNavigateToQueue('Approved'),
+      },
+    ],
+    [
+      totalRequests,
+      submittedCount,
+      pendingApproval,
+      underQaCount,
+      revisionRequired,
+      approvalRate,
+      approvedCount,
+      decidedCount,
+      onNavigateToQueue,
+    ],
+  );
 
   let cumulativeOffset = 0;
 
@@ -616,6 +718,11 @@ export function DashboardView({
           <PresenceBadge
             lastActiveAt={currentUser.lastActiveAt || currentUser.lastActive}
             nowMs={nowMs}
+            isOnlineOverride={resolveLivePresenceOverride(
+              currentUser,
+              onlinePresenceKeys,
+              recentlyOfflineKeys,
+            )}
           />
           <span className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-0.5 font-mono text-[11px] font-semibold text-slate-700 tabular-nums">
             {currentUser.employeeId}
@@ -1675,7 +1782,7 @@ export function DashboardView({
           </div>
         ) : (
           <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {activeDirectoryWithPresence.map(({ member }) => {
+            {activeDirectoryWithPresence.map(({ member, liveOverride }) => {
               const isSelf =
                 member.id === currentUser.id ||
                 member.email.toLowerCase() === currentUser.email.toLowerCase();
@@ -1713,6 +1820,7 @@ export function DashboardView({
                           lastActiveAt={member.lastActiveAt || member.lastActive}
                           nowMs={nowMs}
                           compact
+                          isOnlineOverride={liveOverride}
                         />
                       </div>
                     </div>

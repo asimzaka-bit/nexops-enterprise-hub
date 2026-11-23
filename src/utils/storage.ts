@@ -436,22 +436,60 @@ export interface PresenceStatusInfo {
   exactTitle: string;
 }
 
+export function resolveLivePresenceOverride(
+  member?: { id?: string; email?: string | null } | null,
+  onlinePresenceKeys?: Set<string>,
+  recentlyOfflineKeys?: Set<string>,
+): boolean | undefined {
+  if (!member) return undefined;
+  const idKey = (member.id ?? '').trim();
+  const emailKey = (member.email ?? '').trim().toLowerCase();
+
+  if (
+    onlinePresenceKeys &&
+    ((idKey && onlinePresenceKeys.has(idKey)) || (emailKey && onlinePresenceKeys.has(emailKey)))
+  ) {
+    return true;
+  }
+  if (
+    recentlyOfflineKeys &&
+    ((idKey && recentlyOfflineKeys.has(idKey)) || (emailKey && recentlyOfflineKeys.has(emailKey)))
+  ) {
+    return false;
+  }
+  return undefined;
+}
+
 export function formatPresenceStatus(
   timestamp?: string | null,
   nowMs: number = Date.now(),
+  livePresenceOverride?: boolean,
 ): PresenceStatusInfo {
   const raw = typeof timestamp === 'string' ? timestamp.trim() : '';
-  if (!raw) {
+  const tsMs = raw ? new Date(raw).getTime() : NaN;
+  const hasValidTs = Boolean(raw) && !Number.isNaN(tsMs);
+  const formattedExact = hasValidTs ? formatDateTime(raw) : '';
+
+  if (livePresenceOverride === true) {
     return {
-      isOnline: false,
-      hasActivity: false,
-      label: 'Never active',
-      exactTitle: 'No login activity recorded yet',
+      isOnline: true,
+      hasActivity: true,
+      label: 'Online',
+      exactTitle: hasValidTs
+        ? `Online now · Last heartbeat ${formattedExact}`
+        : 'Online now (Live connection)',
     };
   }
 
-  const tsMs = new Date(raw).getTime();
-  if (Number.isNaN(tsMs)) {
+  if (!hasValidTs) {
+    if (livePresenceOverride === false) {
+      return {
+        isOnline: false,
+        hasActivity: true,
+        label: 'Active just now',
+        exactTitle: 'Signed out / left just now',
+      };
+    }
     return {
       isOnline: false,
       hasActivity: false,
@@ -461,14 +499,22 @@ export function formatPresenceStatus(
   }
 
   const diffMs = Math.max(0, nowMs - tsMs);
-  const formattedExact = formatDateTime(raw);
 
-  if (diffMs <= 2 * 60 * 1000) {
+  if (livePresenceOverride !== false && diffMs <= 25 * 1000) {
     return {
       isOnline: true,
       hasActivity: true,
       label: 'Online',
       exactTitle: `Online · Last heartbeat ${formattedExact}`,
+    };
+  }
+
+  if (diffMs < 60 * 1000) {
+    return {
+      isOnline: false,
+      hasActivity: true,
+      label: 'Active just now',
+      exactTitle: `Last active ${formattedExact}`,
     };
   }
 
