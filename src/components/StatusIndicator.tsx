@@ -19,7 +19,11 @@ import {
   XCircle,
 } from 'lucide-react';
 import { Priority, RequestStatus, Role } from '../types/nexops';
-import { getBudgetHealthTone, getSlaCountdown } from '../utils/storage';
+import {
+  formatPresenceStatus,
+  getBudgetHealthTone,
+  getSlaCountdown,
+} from '../utils/storage';
 
 export function StatusBadge({ status }: { status: RequestStatus }) {
   const config: Record<
@@ -290,5 +294,62 @@ export function BudgetHealthBar({
     </div>
   );
 }
+
+export function PresenceBadge({
+  lastActiveAt,
+  nowMs,
+  compact = false,
+}: {
+  lastActiveAt?: string | null;
+  nowMs?: number;
+  compact?: boolean;
+}) {
+  const status = formatPresenceStatus(lastActiveAt, nowMs);
+
+  if (compact) {
+    return (
+      <span
+        title={status.exactTitle}
+        className={`inline-flex items-center gap-1.5 text-[11px] whitespace-nowrap ${
+          status.isOnline
+            ? 'font-semibold text-emerald-700'
+            : 'font-medium text-slate-500'
+        }`}
+      >
+        {status.isOnline ? (
+          <span className="relative flex h-2 w-2 shrink-0" aria-hidden="true">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+          </span>
+        ) : (
+          <span className="h-2 w-2 shrink-0 rounded-full bg-slate-300" aria-hidden="true" />
+        )}
+        <span>{status.label}</span>
+      </span>
+    );
+  }
+
+  return (
+    <span
+      title={status.exactTitle}
+      className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[11px] whitespace-nowrap shrink-0 ${
+        status.isOnline
+          ? 'border-emerald-200 bg-emerald-50 font-semibold text-emerald-700'
+          : 'border-slate-200 bg-slate-50 font-medium text-slate-600'
+      }`}
+    >
+      {status.isOnline ? (
+        <span className="relative flex h-2 w-2 shrink-0" aria-hidden="true">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+          <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+        </span>
+      ) : (
+        <span className="h-2 w-2 shrink-0 rounded-full bg-slate-400" aria-hidden="true" />
+      )}
+      <span>{status.label}</span>
+    </span>
+  );
+}
+
 
 

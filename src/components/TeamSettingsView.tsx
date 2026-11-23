@@ -41,6 +41,7 @@ import {
   TeamMember,
 } from '../types/nexops';
 import { formatDateTime, isSuperAdminEmail, parseSystemBackupJson } from '../utils/storage';
+import { PresenceBadge } from './StatusIndicator';
 import { UserAvatar } from './UserAvatar';
 
 interface TeamSettingsViewProps {
@@ -191,10 +192,18 @@ export function TeamSettingsView({
   const [preError, setPreError] = useState<string | null>(null);
 
   const [draftMatrix, setDraftMatrix] = useState<PermissionMatrix>(permissionMatrix);
+  const [presenceNowMs, setPresenceNowMs] = useState(() => Date.now());
 
   useEffect(() => {
     setDraftMatrix(permissionMatrix);
   }, [permissionMatrix]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setPresenceNowMs(Date.now());
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const handleTogglePermission = (role: Role, key: PermissionKey) => {
     if (!isAdmin) return;
@@ -757,6 +766,13 @@ export function TeamSettingsView({
                               <p className="text-[11px] text-slate-500">
                                 {member.employeeId} · {member.department}
                               </p>
+                              <div className="mt-0.5">
+                                <PresenceBadge
+                                  lastActiveAt={member.lastActiveAt || member.lastActive}
+                                  nowMs={presenceNowMs}
+                                  compact
+                                />
+                              </div>
                             </div>
                           </div>
                         </td>
@@ -1413,8 +1429,11 @@ export function TeamSettingsView({
                       </span>
                     )}
                   </td>
-                  <td className="px-3 py-3.5 font-mono text-xs text-slate-500 tabular-nums whitespace-nowrap">
-                    {formatDateTime(member.lastActive)}
+                  <td className="px-3 py-3.5 whitespace-nowrap">
+                    <PresenceBadge
+                      lastActiveAt={member.lastActiveAt || member.lastActive}
+                      nowMs={presenceNowMs}
+                    />
                   </td>
                   <td className="px-3 py-3.5">
                     <span

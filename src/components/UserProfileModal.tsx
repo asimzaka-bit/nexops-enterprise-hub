@@ -13,10 +13,10 @@ import {
   UserCheck,
   X,
 } from 'lucide-react';
-import { ChangeEvent, FormEvent, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { TeamMember } from '../types/nexops';
 import { isSuperAdminEmail } from '../utils/storage';
-import { RoleBadge } from './StatusIndicator';
+import { PresenceBadge, RoleBadge } from './StatusIndicator';
 import { UserAvatar } from './UserAvatar';
 
 interface UserProfileModalProps {
@@ -49,6 +49,14 @@ export function UserProfileModal({
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const [avatarBusy, setAvatarBusy] = useState(false);
   const [avatarError, setAvatarError] = useState<string | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const [signOffTitle, setSignOffTitle] = useState(user.signOffTitle || user.title);
   const [signOffError, setSignOffError] = useState<string | null>(null);
@@ -299,8 +307,12 @@ export function UserProfileModal({
               </div>
               <div>
                 <p className="text-[11px] font-medium text-slate-500">Assigned RBAC Role</p>
-                <div className="mt-1">
+                <div className="mt-1 flex flex-wrap items-center gap-2">
                   <RoleBadge role={user.role} />
+                  <PresenceBadge
+                    lastActiveAt={user.lastActiveAt || user.lastActive}
+                    nowMs={nowMs}
+                  />
                 </div>
               </div>
             </div>

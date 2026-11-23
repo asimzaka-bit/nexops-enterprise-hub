@@ -191,6 +191,122 @@ export function formatShortDate(dateStr: string): string {
   });
 }
 
+export type TimeOfDayPeriod = 'morning' | 'afternoon' | 'evening';
+
+export interface TimeOfDayGreeting {
+  period: TimeOfDayPeriod;
+  salutation: 'Good Morning' | 'Good Afternoon' | 'Good Evening';
+  fullText: string;
+}
+
+export function getTimeOfDayGreeting(
+  userName: string,
+  now: Date = new Date(),
+): TimeOfDayGreeting {
+  const hours = now.getHours();
+  let period: TimeOfDayPeriod;
+  let salutation: TimeOfDayGreeting['salutation'];
+
+  if (hours >= 5 && hours < 12) {
+    period = 'morning';
+    salutation = 'Good Morning';
+  } else if (hours >= 12 && hours < 17) {
+    period = 'afternoon';
+    salutation = 'Good Afternoon';
+  } else {
+    period = 'evening';
+    salutation = 'Good Evening';
+  }
+
+  const cleanName = (userName || 'Team Member').trim() || 'Team Member';
+  return {
+    period,
+    salutation,
+    fullText: `Hello, ${cleanName} — ${salutation}`,
+  };
+}
+
+export interface PresenceStatusInfo {
+  isOnline: boolean;
+  hasActivity: boolean;
+  label: string;
+  exactTitle: string;
+}
+
+export function formatPresenceStatus(
+  timestamp?: string | null,
+  nowMs: number = Date.now(),
+): PresenceStatusInfo {
+  const raw = typeof timestamp === 'string' ? timestamp.trim() : '';
+  if (!raw) {
+    return {
+      isOnline: false,
+      hasActivity: false,
+      label: 'Never active',
+      exactTitle: 'No login activity recorded yet',
+    };
+  }
+
+  const tsMs = new Date(raw).getTime();
+  if (Number.isNaN(tsMs)) {
+    return {
+      isOnline: false,
+      hasActivity: false,
+      label: 'Never active',
+      exactTitle: 'No login activity recorded yet',
+    };
+  }
+
+  const diffMs = Math.max(0, nowMs - tsMs);
+  const formattedExact = formatDateTime(raw);
+
+  if (diffMs <= 2 * 60 * 1000) {
+    return {
+      isOnline: true,
+      hasActivity: true,
+      label: 'Online',
+      exactTitle: `Online · Last heartbeat ${formattedExact}`,
+    };
+  }
+
+  const mins = Math.floor(diffMs / 60_000);
+  if (mins < 60) {
+    return {
+      isOnline: false,
+      hasActivity: true,
+      label: `Active ${mins} min${mins === 1 ? '' : 's'} ago`,
+      exactTitle: `Last active ${formattedExact}`,
+    };
+  }
+
+  const hours = Math.floor(diffMs / 3_600_000);
+  if (hours < 24) {
+    return {
+      isOnline: false,
+      hasActivity: true,
+      label: `Active ${hours} hour${hours === 1 ? '' : 's'} ago`,
+      exactTitle: `Last active ${formattedExact}`,
+    };
+  }
+
+  const days = Math.floor(hours / 24);
+  if (days === 1) {
+    return {
+      isOnline: false,
+      hasActivity: true,
+      label: 'Active yesterday',
+      exactTitle: `Last active ${formattedExact}`,
+    };
+  }
+
+  return {
+    isOnline: false,
+    hasActivity: true,
+    label: `Active ${days} days ago`,
+    exactTitle: `Last active ${formattedExact}`,
+  };
+}
+
 // Reference FX rates per 1 USD for multi-currency enterprise rollups & threshold checks
 export const FX_UNITS_PER_USD: Record<CurrencyCode, number> = {
   USD: 1,

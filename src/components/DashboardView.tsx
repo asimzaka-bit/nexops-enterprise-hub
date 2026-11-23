@@ -10,16 +10,20 @@ import {
   FileOutput,
   FileText,
   Megaphone,
+  Moon,
   Pin,
   PinOff,
   Plus,
+  Sun,
+  Sunset,
   Trash2,
   TrendingUp,
   UserCheck,
+  Users,
   Wallet,
   X,
 } from 'lucide-react';
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import {
   AnnouncementPriorityTag,
   AnnouncementSeverity,
@@ -29,6 +33,7 @@ import {
   OperationalRequest,
   RequestStatus,
   Role,
+  TeamMember,
 } from '../types/nexops';
 import {
   DepartmentScorecardRow,
@@ -37,22 +42,29 @@ import {
   exportExecutiveKpiSummaryCsv,
   formatCurrency,
   formatDateTime,
+  formatPresenceStatus,
   formatShortDate,
   getBudgetUtilizationPct,
   getOverdueDays,
+  getTimeOfDayGreeting,
   getTodayDateString,
   isRequestOverdue,
+  isSuperAdminEmail,
   toUsdEquivalent,
 } from '../utils/storage';
 import {
   BudgetHealthBar,
   OverdueBadge,
+  PresenceBadge,
   PriorityBadge,
   StatusBadge,
 } from './StatusIndicator';
+import { UserAvatar } from './UserAvatar';
 
 interface DashboardViewProps {
   companyName: string;
+  currentUser: TeamMember;
+  teamMembers?: TeamMember[];
   requests: OperationalRequest[];
   projects: CompanyProject[];
   attendanceLogs: AttendanceLog[];
@@ -87,6 +99,8 @@ const STATUS_ORDER: { status: RequestStatus; barColor: string }[] = [
 
 export function DashboardView({
   companyName,
+  currentUser,
+  teamMembers = [],
   requests,
   projects,
   attendanceLogs,
@@ -105,6 +119,63 @@ export function DashboardView({
 }: DashboardViewProps) {
   const isAdmin = activeRole === 'Admin';
   const todayStr = getTodayDateString();
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const greeting = useMemo(
+    () => getTimeOfDayGreeting(currentUser.name, new Date(nowMs)),
+    [currentUser.name, nowMs],
+  );
+
+  const localDateLabel = useMemo(
+    () =>
+      new Date(nowMs).toLocaleDateString('en-US', {
+        weekday: 'long',
+        month: 'short',
+        day: '2-digit',
+        year: 'numeric',
+      }),
+    [nowMs],
+  );
+
+  const activeDirectoryWithPresence = useMemo(() => {
+    const approved = teamMembers.filter(
+      (m) =>
+        m.active &&
+        ((m.approvalStatus ?? 'approved') === 'approved' || isSuperAdminEmail(m.email)),
+    );
+    return approved
+      .map((member) => {
+        const ts = member.lastActiveAt || member.lastActive;
+        const presence = formatPresenceStatus(ts, nowMs);
+        const tsMs = ts ? new Date(ts).getTime() : 0;
+        return {
+          member,
+          presence,
+          sortTime: Number.isNaN(tsMs) ? 0 : tsMs,
+        };
+      })
+      .sort((a, b) => {
+        if (a.presence.isOnline !== b.presence.isOnline) {
+          return a.presence.isOnline ? -1 : 1;
+        }
+        if (b.sortTime !== a.sortTime) {
+          return b.sortTime - a.sortTime;
+        }
+        return a.member.name.localeCompare(b.member.name);
+      });
+  }, [teamMembers, nowMs]);
+
+  const onlineMembersCount = useMemo(
+    () => activeDirectoryWithPresence.filter((item) => item.presence.isOnline).length,
+    [activeDirectoryWithPresence],
+  );
 
   // Notice Board Modal & Confirm State (Admin Only)
   const [noticeModalOpen, setNoticeModalOpen] = useState(false);
@@ -404,8 +475,61 @@ export function DashboardView({
 
   let cumulativeOffset = 0;
 
+  const GreetingIcon =
+    greeting.period === 'morning'
+      ? Sun
+      : greeting.period === 'afternoon'
+        ? Sunset
+        : Moon;
+
   return (
     <div className="space-y-6">
+      {/* Dynamic Time-of-Day Personalized Greeting Banner */}
+      <section
+        aria-label="Personalized Welcome Greeting"
+        className="flex flex-col justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-4 sm:flex-row sm:items-center sm:px-6"
+      >
+        <div className="flex min-w-0 items-start gap-3 sm:items-center">
+          <div
+            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border ${
+              greeting.period === 'morning'
+                ? 'border-amber-200 bg-amber-50 text-amber-600'
+                : greeting.period === 'afternoon'
+                  ? 'border-indigo-200 bg-indigo-50 text-indigo-600'
+                  : 'border-slate-200 bg-slate-100 text-slate-700'
+            }`}
+          >
+            <GreetingIcon className="h-5 w-5" aria-hidden="true" />
+          </div>
+          <div className="min-w-0">
+            <h2 className="break-words font-display text-lg font-bold tracking-tight text-slate-900 sm:text-xl">
+              {greeting.fullText}
+            </h2>
+            <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-500">
+              <span className="font-semibold text-slate-700">{companyName}</span>
+              <span aria-hidden="true" className="text-slate-300">
+                ·
+              </span>
+              <span>{currentUser.department}</span>
+              <span aria-hidden="true" className="text-slate-300">
+                ·
+              </span>
+              <span>{localDateLabel}</span>
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
+          <PresenceBadge
+            lastActiveAt={currentUser.lastActiveAt || currentUser.lastActive}
+            nowMs={nowMs}
+          />
+          <span className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-0.5 font-mono text-[11px] font-semibold text-slate-700 tabular-nums">
+            {currentUser.employeeId}
+          </span>
+        </div>
+      </section>
+
       {/* Executive Action Strip with Export KPI CSV & Calibri PDF Report */}
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-5 py-3.5">
         <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
@@ -1136,6 +1260,92 @@ export function DashboardView({
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+      </section>
+
+      {/* Team Online Presence & Active Directory Strip */}
+      <section
+        aria-label="Team Online Presence"
+        className="rounded-xl border border-slate-200 bg-white p-5 sm:p-6"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-4">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-600">
+              <Users className="h-4 w-4" aria-hidden="true" />
+            </div>
+            <div>
+              <h2 className="font-display text-base font-bold text-slate-900">
+                Team Online Presence
+              </h2>
+              <p className="text-xs text-slate-500">
+                Live availability and recent activity across approved workspace members
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 tabular-nums">
+              <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span>{onlineMembersCount} Online</span>
+            </span>
+            <span className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 font-mono text-xs font-medium text-slate-600 tabular-nums">
+              {activeDirectoryWithPresence.length} Active Members
+            </span>
+          </div>
+        </div>
+
+        {activeDirectoryWithPresence.length === 0 ? (
+          <div className="py-8 text-center text-xs text-slate-500">
+            No approved team members found in directory yet.
+          </div>
+        ) : (
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {activeDirectoryWithPresence.map(({ member }) => {
+              const isSelf =
+                member.id === currentUser.id ||
+                member.email.toLowerCase() === currentUser.email.toLowerCase();
+              return (
+                <div
+                  key={member.id}
+                  className={`flex items-start justify-between gap-2.5 rounded-xl border p-3.5 transition-colors ${
+                    isSelf
+                      ? 'border-indigo-200 bg-indigo-50/40'
+                      : 'border-slate-200 bg-slate-50/40 hover:bg-slate-50'
+                  }`}
+                >
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <UserAvatar
+                      name={member.name}
+                      avatarUrl={member.avatarUrl}
+                      sizeClass="h-9 w-9"
+                      textClass="text-xs"
+                      roundedClass="rounded-lg"
+                    />
+                    <div className="min-w-0">
+                      <p className="truncate text-xs font-bold text-slate-900">
+                        {member.name}
+                        {isSelf && (
+                          <span className="ml-1 text-[10px] font-semibold text-indigo-600">
+                            (You)
+                          </span>
+                        )}
+                      </p>
+                      <p className="truncate text-[11px] text-slate-500">
+                        {member.department} · {member.role}
+                      </p>
+                      <div className="mt-1.5">
+                        <PresenceBadge
+                          lastActiveAt={member.lastActiveAt || member.lastActive}
+                          nowMs={nowMs}
+                          compact
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </section>

@@ -13,6 +13,7 @@ import {
   FileSpreadsheet,
   HardDrive,
   Info,
+  LayoutGrid,
   LogOut,
   Menu,
   PenTool,
@@ -44,12 +45,14 @@ import {
   GoogleFormsColorIcon,
   GoogleSheetsColorIcon,
 } from './GoogleWorkspaceIcons';
+import { PresenceBadge } from './StatusIndicator';
 import { UserAvatar } from './UserAvatar';
 
 interface TopBarProps {
   activeSection: NavSection;
   activeRole: Role;
   currentUser: TeamMember;
+  teamMembers?: TeamMember[];
   departments: string[];
   requests: OperationalRequest[];
   auditLogs: AuditEvent[];
@@ -61,6 +64,7 @@ interface TopBarProps {
   onSelectRequestById: (requestId: string) => void;
   onSelectDepartment: (department: Department) => void;
   onSelectAuditMatch: (audit: AuditEvent) => void;
+  onSelectSection?: (section: NavSection) => void;
   notifications: AppNotification[];
   onMarkAllRead: () => void;
   onClearNotifications: () => void;
@@ -155,12 +159,15 @@ const SECTION_TITLES: Record<NavSection, { title: string; subtitle: string }> = 
 type CommandItem =
   | { kind: 'request'; request: OperationalRequest }
   | { kind: 'department'; department: Department; count: number }
+  | { kind: 'module'; section: NavSection; title: string; subtitle: string }
+  | { kind: 'user'; member: TeamMember }
   | { kind: 'audit'; audit: AuditEvent };
 
 export function TopBar({
   activeSection,
   activeRole,
   currentUser,
+  teamMembers = [],
   departments,
   requests,
   auditLogs,
@@ -172,6 +179,7 @@ export function TopBar({
   onSelectRequestById,
   onSelectDepartment,
   onSelectAuditMatch,
+  onSelectSection,
   notifications,
   onMarkAllRead,
   onClearNotifications,
@@ -186,22 +194,42 @@ export function TopBar({
   const [notifOpen, setNotifOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const [commandOpen, setCommandOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState(globalSearch);
   const [highlightedIdx, setHighlightedIdx] = useState(0);
 
   const notifRef = useRef<HTMLDivElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
   const workspaceMenuRef = useRef<HTMLDivElement>(null);
-  const searchContainerRef = useRef<HTMLDivElement>(null);
-  const desktopSearchInputRef = useRef<HTMLInputElement>(null);
-  const mobileSearchInputRef = useRef<HTMLInputElement>(null);
+  const paletteInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setCommandQuery(globalSearch);
   }, [globalSearch]);
+
+  const openCommandPalette = () => {
+    setNotifOpen(false);
+    setProfileOpen(false);
+    setWorkspaceMenuOpen(false);
+    setCommandOpen(true);
+    window.setTimeout(() => {
+      paletteInputRef.current?.focus();
+      paletteInputRef.current?.select();
+    }, 20);
+  };
+
+  const closeCommandPalette = () => {
+    setCommandOpen(false);
+  };
 
   useEffect(() => {
     const handleOutside = (e: MouseEvent) => {
@@ -213,12 +241,6 @@ export function TopBar({
       }
       if (workspaceMenuRef.current && !workspaceMenuRef.current.contains(e.target as Node)) {
         setWorkspaceMenuOpen(false);
-      }
-      if (
-        searchContainerRef.current &&
-        !searchContainerRef.current.contains(e.target as Node)
-      ) {
-        setSearchOpen(false);
       }
     };
     document.addEventListener('mousedown', handleOutside);
@@ -232,18 +254,14 @@ export function TopBar({
         e.preventDefault();
         setNotifOpen(false);
         setProfileOpen(false);
-
-        if (window.innerWidth >= 768 && desktopSearchInputRef.current) {
-          setSearchOpen(true);
-          desktopSearchInputRef.current.focus();
-          desktopSearchInputRef.current.select();
-        } else {
-          setMobileSearchOpen(true);
-          window.setTimeout(() => mobileSearchInputRef.current?.focus(), 30);
-        }
+        setWorkspaceMenuOpen(false);
+        setCommandOpen(true);
+        window.setTimeout(() => {
+          paletteInputRef.current?.focus();
+          paletteInputRef.current?.select();
+        }, 20);
       } else if (e.key === 'Escape') {
-        setSearchOpen(false);
-        setMobileSearchOpen(false);
+        setCommandOpen(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -291,6 +309,40 @@ export function TopBar({
       count: requests.filter((r) => r.department === department).length,
     }));
 
+    const availableModules = (Object.keys(SECTION_TITLES) as NavSection[])
+      .filter((section) => activeRole === 'Admin' || (section !== 'audit' && section !== 'settings'))
+      .map((section) => ({
+        section,
+        title: SECTION_TITLES[section].title,
+        subtitle: SECTION_TITLES[section].subtitle,
+      }));
+
+    const matchedModules = (
+      q
+        ? availableModules.filter(
+            (m) =>
+              m.title.toLowerCase().includes(q) ||
+              m.subtitle.toLowerCase().includes(q) ||
+              m.section.toLowerCase().includes(q),
+          )
+        : availableModules
+    ).slice(0, 5);
+
+    const activeUsers = teamMembers.filter(
+      (m) => m.active && (m.approvalStatus ?? 'approved') === 'approved',
+    );
+    const matchedUsers = (
+      q
+        ? activeUsers.filter(
+            (m) =>
+              m.name.toLowerCase().includes(q) ||
+              m.email.toLowerCase().includes(q) ||
+              m.department.toLowerCase().includes(q) ||
+              m.employeeId.toLowerCase().includes(q),
+          )
+        : []
+    ).slice(0, 4);
+
     const matchedAudits =
       activeRole === 'Admin'
         ? (q
@@ -314,11 +366,25 @@ export function TopBar({
         department: d.department,
         count: d.count,
       })),
+      ...matchedModules.map((mod) => ({
+        kind: 'module' as const,
+        section: mod.section,
+        title: mod.title,
+        subtitle: mod.subtitle,
+      })),
+      ...matchedUsers.map((member) => ({ kind: 'user' as const, member })),
       ...matchedAudits.map((audit) => ({ kind: 'audit' as const, audit })),
     ];
 
-    return { matchedRequests, matchedDepartments, matchedAudits, flatItems };
-  }, [commandQuery, requests, departments, auditLogs, activeRole]);
+    return {
+      matchedRequests,
+      matchedDepartments,
+      matchedModules,
+      matchedUsers,
+      matchedAudits,
+      flatItems,
+    };
+  }, [commandQuery, requests, departments, teamMembers, auditLogs, activeRole]);
 
   useEffect(() => {
     setHighlightedIdx(0);
@@ -329,16 +395,24 @@ export function TopBar({
       onSelectRequestById(item.request.id);
     } else if (item.kind === 'department') {
       onSelectDepartment(item.department);
+    } else if (item.kind === 'module') {
+      onSelectSection?.(item.section);
+    } else if (item.kind === 'user') {
+      if (item.member.id === currentUser.id) {
+        onOpenProfile();
+      } else if (activeRole === 'Admin') {
+        onSelectSection?.('settings');
+      } else {
+        onSelectSection?.('dashboard');
+      }
     } else {
       onSelectAuditMatch(item.audit);
     }
-    setSearchOpen(false);
-    setMobileSearchOpen(false);
+    closeCommandPalette();
   };
 
   const handleSearchInputChange = (val: string) => {
     setCommandQuery(val);
-    setSearchOpen(true);
     if (activeSection === 'requests') {
       onGlobalSearchChange(val);
     }
@@ -362,9 +436,7 @@ export function TopBar({
         executeCommandItem(items[highlightedIdx]);
       }
     } else if (e.key === 'Escape') {
-      setSearchOpen(false);
-      setMobileSearchOpen(false);
-      e.currentTarget.blur();
+      closeCommandPalette();
     }
   };
 
@@ -376,11 +448,18 @@ export function TopBar({
   };
 
   const renderCommandResultsBody = () => {
-    const { matchedRequests, matchedDepartments, matchedAudits, flatItems } = commandResults;
+    const {
+      matchedRequests,
+      matchedDepartments,
+      matchedModules,
+      matchedUsers,
+      matchedAudits,
+      flatItems,
+    } = commandResults;
     if (flatItems.length === 0) {
       return (
-        <div className="px-4 py-8 text-center text-xs text-slate-500">
-          No matching Request IDs, Titles, Departments, or Audit Logs found for &ldquo;{commandQuery}&rdquo;.
+        <div className="px-4 py-10 text-center text-xs text-slate-500">
+          No matching Requests, Departments, Modules, Users, or Audit Logs found for &ldquo;{commandQuery}&rdquo;.
         </div>
       );
     }
@@ -388,10 +467,10 @@ export function TopBar({
     let runningIdx = 0;
 
     return (
-      <div className="max-h-96 divide-y divide-slate-100 overflow-y-auto">
+      <div className="max-h-[60vh] divide-y divide-slate-100 overflow-x-hidden overflow-y-auto">
         {matchedRequests.length > 0 && (
           <div className="p-2">
-            <p className="px-2.5 py-1 text-[10px] font-bold tracking-wider text-slate-400">
+            <p className="px-2 py-1 text-[11px] font-bold tracking-wider text-slate-400">
               OPERATIONAL REQUESTS
             </p>
             <div className="mt-0.5 space-y-0.5">
@@ -403,15 +482,15 @@ export function TopBar({
                     key={req.id}
                     type="button"
                     onClick={() => executeCommandItem({ kind: 'request', request: req })}
-                    className={`flex w-full items-center justify-between gap-3 rounded-lg px-2.5 py-2 text-left transition-colors ${
+                    className={`flex w-full items-center justify-between gap-3 rounded-lg px-4 py-3 text-left transition-colors ${
                       isHighlighted ? 'bg-indigo-50 text-indigo-950' : 'hover:bg-slate-50'
                     }`}
                   >
-                    <div className="flex min-w-0 items-center gap-2.5">
+                    <div className="flex min-w-0 flex-1 items-center gap-3">
                       <ClipboardCheck className="h-4 w-4 shrink-0 text-indigo-600" />
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono text-xs font-bold text-indigo-700 tabular-nums">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="shrink-0 text-xs font-bold text-indigo-700 tabular-nums">
                             {req.id}
                           </span>
                           <span className="truncate text-xs font-semibold text-slate-900">
@@ -433,7 +512,7 @@ export function TopBar({
 
         {matchedDepartments.length > 0 && (
           <div className="p-2">
-            <p className="px-2.5 py-1 text-[10px] font-bold tracking-wider text-slate-400">
+            <p className="px-2 py-1 text-[11px] font-bold tracking-wider text-slate-400">
               DEPARTMENTS
             </p>
             <div className="mt-0.5 space-y-0.5">
@@ -451,17 +530,17 @@ export function TopBar({
                         count: d.count,
                       })
                     }
-                    className={`flex w-full items-center justify-between gap-3 rounded-lg px-2.5 py-2 text-left transition-colors ${
+                    className={`flex w-full items-center justify-between gap-3 rounded-lg px-4 py-3 text-left transition-colors ${
                       isHighlighted ? 'bg-indigo-50 text-indigo-950' : 'hover:bg-slate-50'
                     }`}
                   >
-                    <div className="flex items-center gap-2.5">
+                    <div className="flex min-w-0 flex-1 items-center gap-3">
                       <Building2 className="h-4 w-4 shrink-0 text-slate-500" />
-                      <span className="text-xs font-semibold text-slate-900">
+                      <span className="truncate text-xs font-semibold text-slate-900">
                         {d.department} Department
                       </span>
                     </div>
-                    <span className="font-mono text-[11px] text-slate-500 tabular-nums">
+                    <span className="shrink-0 whitespace-nowrap text-xs font-medium text-slate-500 tabular-nums">
                       {d.count} requests →
                     </span>
                   </button>
@@ -471,9 +550,102 @@ export function TopBar({
           </div>
         )}
 
+        {matchedModules.length > 0 && onSelectSection && (
+          <div className="p-2">
+            <p className="px-2 py-1 text-[11px] font-bold tracking-wider text-slate-400">
+              MODULES
+            </p>
+            <div className="mt-0.5 space-y-0.5">
+              {matchedModules.map((mod) => {
+                const currentIdx = runningIdx++;
+                const isHighlighted = currentIdx === highlightedIdx;
+                return (
+                  <button
+                    key={mod.section}
+                    type="button"
+                    onClick={() =>
+                      executeCommandItem({
+                        kind: 'module',
+                        section: mod.section,
+                        title: mod.title,
+                        subtitle: mod.subtitle,
+                      })
+                    }
+                    className={`flex w-full items-center justify-between gap-3 rounded-lg px-4 py-3 text-left transition-colors ${
+                      isHighlighted ? 'bg-indigo-50 text-indigo-950' : 'hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="flex min-w-0 flex-1 items-center gap-3">
+                      <LayoutGrid className="h-4 w-4 shrink-0 text-indigo-600" />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-xs font-semibold text-slate-900">
+                          {mod.title}
+                        </p>
+                        <p className="truncate text-[11px] text-slate-500">{mod.subtitle}</p>
+                      </div>
+                    </div>
+                    <span className="shrink-0 whitespace-nowrap text-xs font-medium text-indigo-600">
+                      Open →
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {matchedUsers.length > 0 && (
+          <div className="p-2">
+            <p className="px-2 py-1 text-[11px] font-bold tracking-wider text-slate-400">
+              USERS
+            </p>
+            <div className="mt-0.5 space-y-0.5">
+              {matchedUsers.map((member) => {
+                const currentIdx = runningIdx++;
+                const isHighlighted = currentIdx === highlightedIdx;
+                return (
+                  <button
+                    key={member.id}
+                    type="button"
+                    onClick={() => executeCommandItem({ kind: 'user', member })}
+                    className={`flex w-full items-center justify-between gap-3 rounded-lg px-4 py-3 text-left transition-colors ${
+                      isHighlighted ? 'bg-indigo-50 text-indigo-950' : 'hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="flex min-w-0 flex-1 items-center gap-3">
+                      <UserAvatar
+                        name={member.name}
+                        avatarUrl={member.avatarUrl}
+                        sizeClass="h-7 w-7"
+                        textClass="text-[11px]"
+                        roundedClass="rounded-lg"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-xs font-semibold text-slate-900">
+                          {member.name}
+                        </p>
+                        <p className="truncate text-[11px] text-slate-500">
+                          {member.department} · {member.role} · {member.email}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="shrink-0">
+                      <PresenceBadge
+                        lastActiveAt={member.lastActiveAt || member.lastActive}
+                        nowMs={nowMs}
+                        compact
+                      />
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {matchedAudits.length > 0 && (
           <div className="p-2">
-            <p className="px-2.5 py-1 text-[10px] font-bold tracking-wider text-slate-400">
+            <p className="px-2 py-1 text-[11px] font-bold tracking-wider text-slate-400">
               AUDIT LOGS
             </p>
             <div className="mt-0.5 space-y-0.5">
@@ -485,18 +657,18 @@ export function TopBar({
                     key={audit.id}
                     type="button"
                     onClick={() => executeCommandItem({ kind: 'audit', audit })}
-                    className={`flex w-full items-start justify-between gap-3 rounded-lg px-2.5 py-2 text-left transition-colors ${
+                    className={`flex w-full items-center justify-between gap-3 rounded-lg px-4 py-3 text-left transition-colors ${
                       isHighlighted ? 'bg-indigo-50 text-indigo-950' : 'hover:bg-slate-50'
                     }`}
                   >
-                    <div className="flex min-w-0 items-start gap-2.5">
-                      <FileSpreadsheet className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono text-[11px] font-bold text-slate-700 tabular-nums">
+                    <div className="flex min-w-0 flex-1 items-center gap-3">
+                      <FileSpreadsheet className="h-4 w-4 shrink-0 text-emerald-600" />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="shrink-0 text-[11px] font-bold text-slate-700 tabular-nums">
                             {audit.requestId}
                           </span>
-                          <span className="text-xs font-semibold text-slate-900">
+                          <span className="truncate text-xs font-semibold text-slate-900">
                             {audit.actionType}
                           </span>
                         </div>
@@ -505,7 +677,7 @@ export function TopBar({
                         </p>
                       </div>
                     </div>
-                    <span className="shrink-0 font-mono text-[10px] text-slate-400 tabular-nums">
+                    <span className="shrink-0 whitespace-nowrap text-[11px] text-slate-400 tabular-nums">
                       {formatDateTime(audit.timestamp)}
                     </span>
                   </button>
@@ -519,6 +691,7 @@ export function TopBar({
   };
 
   return (
+    <>
     <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur-xs">
       <div className="flex h-16 items-center justify-between gap-2 px-3 sm:gap-4 sm:px-6 lg:px-8">
         {/* Left: Mobile Menu + Breadcrumb / Page Title */}
@@ -541,45 +714,28 @@ export function TopBar({
           </div>
         </div>
 
-        {/* Center: Global Command Search (Ctrl+K / Cmd+K) */}
-        <div className="relative hidden max-w-md flex-1 md:block" ref={searchContainerRef}>
-          <label htmlFor="global-request-search" className="sr-only">
-            Command Search across Request IDs, Titles, Departments, and Audit Logs
-          </label>
-          <div className="relative">
-            <Search
-              className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400"
-              aria-hidden="true"
-            />
-            <input
-              ref={desktopSearchInputRef}
-              id="global-request-search"
-              type="search"
-              value={commandQuery}
-              onFocus={() => setSearchOpen(true)}
-              onChange={(e) => handleSearchInputChange(e.target.value)}
-              onKeyDown={handleSearchKeyDown}
-              placeholder="Search Request IDs, Titles, Departments, Audit..."
-              className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50 pr-16 pl-9 text-sm text-slate-900 placeholder:text-slate-400 transition-colors focus:border-indigo-500 focus:bg-white focus:outline-none"
-            />
-            <kbd className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 rounded border border-slate-200 bg-white px-1.5 py-0.5 font-mono text-[10px] font-semibold text-slate-500">
+        {/* Center: Global Command Search Trigger (opens centered Ctrl+K palette modal) */}
+        <div className="hidden max-w-md flex-1 md:block">
+          <button
+            id="global-request-search"
+            type="button"
+            onClick={openCommandPalette}
+            aria-label="Open Command Search (Ctrl K)"
+            aria-expanded={commandOpen}
+            className="flex h-9 w-full items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 text-left text-sm text-slate-400 transition-colors hover:border-slate-300 hover:bg-white focus-visible:border-indigo-500 focus-visible:outline-none"
+          >
+            <span className="flex min-w-0 items-center gap-2">
+              <Search className="h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
+              <span className="truncate text-xs sm:text-sm">
+                {commandQuery.trim()
+                  ? commandQuery
+                  : 'Search requests, departments, modules...'}
+              </span>
+            </span>
+            <kbd className="shrink-0 whitespace-nowrap rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">
               Ctrl K
             </kbd>
-          </div>
-
-          {searchOpen && (
-            <div
-              role="region"
-              aria-label="Command search results"
-              className="absolute right-0 left-0 mt-2 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl"
-            >
-              <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/70 px-3.5 py-2 text-[11px] text-slate-500">
-                <span>Instant Command Search</span>
-                <span className="font-mono">↑↓ Navigate · Enter Open · Esc Close</span>
-              </div>
-              {renderCommandResultsBody()}
-            </div>
-          )}
+          </button>
         </div>
 
         {/* Right: DB Connection Pill + Sync Now, Mobile Search, Role Switcher, New Request, Bell, Profile */}
@@ -619,10 +775,7 @@ export function TopBar({
 
           <button
             type="button"
-            onClick={() => {
-              setMobileSearchOpen(true);
-              window.setTimeout(() => mobileSearchInputRef.current?.focus(), 30);
-            }}
+            onClick={openCommandPalette}
             aria-label="Open command search"
             className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900 md:hidden"
           >
@@ -896,9 +1049,16 @@ export function TopBar({
                     {currentUser.employeeId}
                   </span>
                 </div>
-                <p className="mt-1.5 truncate font-mono text-[11px] text-slate-400">
-                  {currentUser.email}
-                </p>
+                <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2">
+                  <p className="truncate font-mono text-[11px] text-slate-400">
+                    {currentUser.email}
+                  </p>
+                  <PresenceBadge
+                    lastActiveAt={currentUser.lastActiveAt || currentUser.lastActive}
+                    nowMs={nowMs}
+                    compact
+                  />
+                </div>
                 <div className="mt-2.5 border-t border-slate-100 pt-2.5">
                   <p className="text-[11px] font-medium text-slate-500">
                     Active Permission Tier
@@ -953,40 +1113,64 @@ export function TopBar({
           </div>
         </div>
       </div>
+    </header>
 
-      {/* Mobile Command Search Overlay */}
-      {mobileSearchOpen && (
+      {/* Centered Wide Command Search Palette Modal (Desktop & Mobile) */}
+      {commandOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-start justify-center bg-slate-900/50 p-4 pt-16 backdrop-blur-xs md:hidden"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) closeCommandPalette();
+          }}
+          className="fixed inset-0 z-50 flex items-start justify-center bg-slate-900/40 px-4 pt-16 backdrop-blur-[2px] sm:pt-24"
           role="dialog"
           aria-modal="true"
-          aria-label="Mobile Command Search"
+          aria-label="Global Command Search"
         >
-          <div className="w-full max-w-lg overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
-            <div className="flex items-center gap-2 border-b border-slate-200 px-3.5 py-2.5">
+          <div className="w-[92vw] max-w-2xl overflow-hidden rounded-2xl border border-slate-200 bg-white font-sans shadow-2xl sm:w-full">
+            <div className="flex items-center gap-3 border-b border-slate-200 px-4 py-3">
               <Search className="h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
               <input
-                ref={mobileSearchInputRef}
+                ref={paletteInputRef}
                 type="search"
                 value={commandQuery}
                 onChange={(e) => handleSearchInputChange(e.target.value)}
                 onKeyDown={handleSearchKeyDown}
-                placeholder="Search Request IDs, Titles, Departments, Audit..."
-                className="h-9 flex-1 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none"
+                placeholder="Search requests, departments, modules, users..."
+                className="h-9 min-w-0 flex-1 bg-transparent text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none"
               />
+              {commandQuery && (
+                <button
+                  type="button"
+                  onClick={() => handleSearchInputChange('')}
+                  aria-label="Clear search query"
+                  className="shrink-0 rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
               <button
                 type="button"
-                onClick={() => setMobileSearchOpen(false)}
-                aria-label="Close mobile search"
-                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                onClick={closeCommandPalette}
+                aria-label="Close command search"
+                className="shrink-0 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
               >
-                <X className="h-4 w-4" />
+                Esc
               </button>
             </div>
+
             {renderCommandResultsBody()}
+
+            <div className="flex items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/80 px-4 py-2.5 text-xs text-slate-500">
+              <span className="truncate font-semibold text-slate-600">
+                Instant Command Search
+              </span>
+              <span className="shrink-0 whitespace-nowrap">
+                ↑↓ Navigate · Enter Open · Esc Close
+              </span>
+            </div>
           </div>
         </div>
       )}
-    </header>
+    </>
   );
 }

@@ -780,7 +780,8 @@ export function buildMemberFromSupabaseUser(
     signOffTitle,
     avatarUrl,
     active: isSuper ? true : existing?.active ?? true,
-    lastActive: new Date().toISOString(),
+    lastActive: existing?.lastActiveAt || '',
+    lastActiveAt: existing?.lastActiveAt || undefined,
     outOfOffice: existing?.outOfOffice,
     delegateApproverId: existing?.delegateApproverId,
     delegateApproverName: existing?.delegateApproverName,
@@ -908,6 +909,7 @@ interface NexOpsProfileDbRow {
   status?: string | null;
   role?: string | null;
   created_at?: string | null;
+  last_active_at?: string | null;
 }
 
 interface NexOpsWorkspaceEmailDbRow {
@@ -1812,6 +1814,7 @@ export const SYSTEM_STATE_KEYS = {
   PERMISSION_MATRIX: 'permission_matrix',
   ANNOUNCEMENTS: 'announcements',
   TEAM_DIRECTORY: 'team_directory',
+  USER_PRESENCE: 'user_presence',
   REQUEST_META: 'request_meta',
   WORKSPACE_GMAIL_PREFS: 'workspace_gmail_prefs',
   MASTER_KEY: 'master_key_config',
@@ -1982,7 +1985,54 @@ function writeMasterKeyConfigSync(config: MasterKeyConfig | null): void {
   }
 }
 
-function mapProfileRowToMember(row: NexOpsProfileDbRow, existing?: TeamMember): TeamMember {
+function isMissingColumnError(err: unknown, columnName: string): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const candidate = err as { code?: unknown; message?: unknown; details?: unknown; hint?: unknown };
+  const code = typeof candidate.code === 'string' ? candidate.code : '';
+  const text = [candidate.message, candidate.details, candidate.hint]
+    .filter((v): v is string => typeof v === 'string')
+    .join(' ')
+    .toLowerCase();
+  if (!text.includes(columnName.toLowerCase())) return false;
+  return (
+    code === '42703' ||
+    code === 'PGRST204' ||
+    text.includes('does not exist') ||
+    text.includes('could not find')
+  );
+}
+
+function pickLatestIso(a?: string | null, b?: string | null): string {
+  const cleanA = typeof a === 'string' ? a.trim() : '';
+  const cleanB = typeof b === 'string' ? b.trim() : '';
+  const msA = cleanA ? new Date(cleanA).getTime() : NaN;
+  const msB = cleanB ? new Date(cleanB).getTime() : NaN;
+  const validA = !Number.isNaN(msA);
+  const validB = !Number.isNaN(msB);
+  if (validA && validB) {
+    return msA >= msB ? cleanA : cleanB;
+  }
+  if (validA) return cleanA;
+  if (validB) return cleanB;
+  return '';
+}
+
+function normalizePresenceMap(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const result: Record<string, string> = {};
+  for (const [key, val] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof val === 'string' && !Number.isNaN(new Date(val).getTime())) {
+      result[key.trim().toLowerCase()] = val;
+    }
+  }
+  return result;
+}
+
+function mapProfileRowToMember(
+  row: NexOpsProfileDbRow,
+  existing?: TeamMember,
+  presenceOverride?: string | null,
+): TeamMember {
   const email = (row.email ?? existing?.email ?? '').trim();
   const isSuper = isSuperAdminEmail(email);
   const role: Role = isSuper
@@ -1995,6 +2045,10 @@ function mapProfileRowToMember(row: NexOpsProfileDbRow, existing?: TeamMember): 
     : normalizeApprovalStatus(row.status ?? existing?.approvalStatus ?? 'pending', email);
   const name = (row.full_name ?? existing?.name ?? email.split('@')[0] ?? 'Team Member').trim();
   const title = (existing?.title ?? (isSuper ? 'Primary Super Administrator' : defaultTitleForRole(role))).trim();
+  const resolvedLastActive = pickLatestIso(
+    row.last_active_at,
+    pickLatestIso(presenceOverride, existing?.lastActiveAt),
+  );
   return {
     id: row.id,
     employeeId: (row.employee_id ?? existing?.employeeId ?? deriveEmployeeCode(row.id || email)).trim(),
@@ -2010,7 +2064,8 @@ function mapProfileRowToMember(row: NexOpsProfileDbRow, existing?: TeamMember): 
     signOffTitle: (existing?.signOffTitle ?? title).trim(),
     avatarUrl: existing?.avatarUrl,
     active: isSuper ? true : approvalStatus === 'approved',
-    lastActive: row.created_at || existing?.lastActive || new Date().toISOString(),
+    lastActive: resolvedLastActive,
+    lastActiveAt: resolvedLastActive || undefined,
     outOfOffice: existing?.outOfOffice,
     delegateApproverId: existing?.delegateApproverId,
     delegateApproverName: existing?.delegateApproverName,
@@ -2052,7 +2107,7 @@ async function upsertProfileRecord(member: TeamMember): Promise<void> {
     }
   }
 
-  const payload = {
+  const basePayload: Record<string, unknown> = {
     id: targetId,
     email: cleanEmail,
     full_name: member.name,
@@ -2060,11 +2115,25 @@ async function upsertProfileRecord(member: TeamMember): Promise<void> {
     department: member.department,
     status: approvalStatus,
     role: toDbRole(role),
-    created_at: member.lastActive || new Date().toISOString(),
+    created_at: new Date().toISOString(),
   };
 
-  const { error } = await supabase.from('user_access').upsert(payload, { onConflict: 'id' });
+  const activeIso = member.lastActiveAt || member.lastActive || '';
+  const payloadWithPresence = activeIso
+    ? { ...basePayload, last_active_at: activeIso }
+    : basePayload;
+
+  const { error } = await supabase
+    .from('user_access')
+    .upsert(payloadWithPresence, { onConflict: 'id' });
   if (error) {
+    if (activeIso && isMissingColumnError(error, 'last_active_at')) {
+      const { error: fallbackErr } = await supabase
+        .from('user_access')
+        .upsert(basePayload, { onConflict: 'id' });
+      if (fallbackErr) throw fallbackErr;
+      return;
+    }
     throw error;
   }
 }
@@ -2245,6 +2314,8 @@ export const dataService = {
       ? ((announcementRes.data ?? []) as NexOpsAnnouncementDbRow[]).map(mapDbAnnouncement)
       : sysAnnouncements;
 
+    const presenceMap = normalizePresenceMap(sysMap.get(SYSTEM_STATE_KEYS.USER_PRESENCE)?.payload);
+
     const baseMembers: TeamMember[] =
       sysMap.get(SYSTEM_STATE_KEYS.TEAM_DIRECTORY) &&
       Array.isArray(sysMap.get(SYSTEM_STATE_KEYS.TEAM_DIRECTORY)?.payload)
@@ -2263,14 +2334,21 @@ export const dataService = {
           (m) => m.id === pRow.id || m.email.trim().toLowerCase() === key,
         );
         if (existing && isLegacyDemoMember(existing)) continue;
-        const mapped = mapProfileRowToMember(pRow, existing);
+        const mapped = mapProfileRowToMember(pRow, existing, presenceMap[key]);
         if (!isLegacyDemoMember(mapped)) {
           mergedByKey.set((mapped.email ?? '').trim().toLowerCase() || mapped.id, mapped);
         }
       }
     } else {
       for (const member of baseMembers) {
-        mergedByKey.set(member.email.trim().toLowerCase() || member.id, member);
+        const key = member.email.trim().toLowerCase() || member.id;
+        const pTs = presenceMap[key];
+        const latest = pickLatestIso(pTs, member.lastActiveAt);
+        mergedByKey.set(key, {
+          ...member,
+          lastActive: latest,
+          lastActiveAt: latest || undefined,
+        });
       }
     }
     const teamMembers: TeamMember[] = Array.from(mergedByKey.values()).map((m, idx) =>
@@ -2944,16 +3022,19 @@ export const dataService = {
           (m) => m.id === data.user?.id || m.email.toLowerCase() === cleanEmail,
         );
 
+        const loginNow = new Date().toISOString();
         let member: TeamMember;
         if (dbProfileRow) {
-          member = enforceMemberInvariants(
-            mapProfileRowToMember(dbProfileRow, existingMetaOnly),
-          );
+          member = enforceMemberInvariants({
+            ...mapProfileRowToMember(dbProfileRow, existingMetaOnly),
+            lastActive: loginNow,
+            lastActiveAt: loginNow,
+          });
           if (dbProfileRow.id !== data.user.id) {
             // Migrate pre-approved placeholder row onto real auth UUID while keeping approval & role
             member = enforceMemberInvariants({ ...member, id: data.user.id });
-            await upsertProfileRecord(member);
           }
+          await upsertProfileRecord(member);
         } else {
           // New user OR deleted user logging in again: never rely on stale localStorage approval/role!
           // Automatically re-insert into `public.user_access` with `status = 'pending'`.
@@ -2965,11 +3046,9 @@ export const dataService = {
             approvalStatus: isSuper ? 'approved' : 'pending',
             isSuperAdmin: isSuper,
             active: isSuper,
+            lastActive: loginNow,
+            lastActiveAt: loginNow,
           });
-          await upsertProfileRecord(member);
-        }
-
-        if (isSuper) {
           await upsertProfileRecord(member);
         }
 
@@ -2978,7 +3057,7 @@ export const dataService = {
         )
           ? local.teamMembers.map((m) =>
               m.id === member.id || m.email.toLowerCase() === member.email.toLowerCase()
-                ? { ...m, ...member, lastActive: new Date().toISOString() }
+                ? { ...m, ...member, lastActive: loginNow, lastActiveAt: loginNow }
                 : m,
             )
           : [member, ...local.teamMembers];
@@ -3567,7 +3646,8 @@ export const dataService = {
         title: cleanTitle,
         signOffTitle: cleanTitle,
         active: true,
-        lastActive: now,
+        lastActive: '',
+        lastActiveAt: undefined,
       };
 
       await upsertProfileRecord(member).catch(() => {});
@@ -3654,6 +3734,7 @@ export const dataService = {
         department: cleanDept,
         employeeId: cleanEmpId,
         lastActive: now,
+        lastActiveAt: now,
       });
 
       const local = readWorkspaceState();
@@ -4386,13 +4467,14 @@ export const dataService = {
         return base.map((m, idx) => enforceMemberInvariants(m, idx));
       }
 
-      const { data, error } = await supabase
-        .from('user_access')
-        .select('*')
-        .order('created_at', { ascending: false });
-      if (error) throw error;
+      const [profilesRes, presencePayload] = await Promise.all([
+        supabase.from('user_access').select('*').order('created_at', { ascending: false }),
+        dataService.systemState.getKey<Record<string, string>>(SYSTEM_STATE_KEYS.USER_PRESENCE),
+      ]);
+      if (profilesRes.error) throw profilesRes.error;
 
-      const rows = (data ?? []) as NexOpsProfileDbRow[];
+      const presenceMap = normalizePresenceMap(presencePayload);
+      const rows = (profilesRes.data ?? []) as NexOpsProfileDbRow[];
       const mergedByKey = new Map<string, TeamMember>();
       // `user_access` is the authoritative user directory so deleted users do not resurrect from cache
       for (const row of rows) {
@@ -4400,7 +4482,9 @@ export const dataService = {
         const existing = base.find(
           (m) => m.id === row.id || m.email.trim().toLowerCase() === key,
         );
-        const mapped = enforceMemberInvariants(mapProfileRowToMember(row, existing));
+        const mapped = enforceMemberInvariants(
+          mapProfileRowToMember(row, existing, presenceMap[key]),
+        );
         if (!isLegacyDemoMember(mapped)) {
           mergedByKey.set((mapped.email ?? '').trim().toLowerCase() || mapped.id, mapped);
         }
@@ -4414,6 +4498,63 @@ export const dataService = {
         teamMembers: result,
       });
       return result;
+    },
+
+    async sendPresenceHeartbeat(member: {
+      id: string;
+      email?: string | null;
+      name?: string;
+    }): Promise<string> {
+      const nowIso = new Date().toISOString();
+      const cleanEmail = (member.email ?? '').trim().toLowerCase();
+      const local = readWorkspaceState();
+
+      const updatedLocalMembers = local.teamMembers.map((m) =>
+        m.id === member.id || (cleanEmail && m.email.trim().toLowerCase() === cleanEmail)
+          ? { ...m, lastActive: nowIso, lastActiveAt: nowIso }
+          : m,
+      );
+      writeWorkspaceState({
+        ...local,
+        teamMembers: updatedLocalMembers,
+      });
+
+      if (!supabase) return nowIso;
+
+      let columnMissing = false;
+      try {
+        const query = cleanEmail
+          ? supabase.from('user_access').update({ last_active_at: nowIso }).ilike('email', cleanEmail)
+          : supabase.from('user_access').update({ last_active_at: nowIso }).eq('id', member.id);
+        const { error } = await query;
+        if (error) {
+          if (isMissingColumnError(error, 'last_active_at')) {
+            columnMissing = true;
+          }
+        }
+      } catch (err) {
+        if (isMissingColumnError(err, 'last_active_at')) {
+          columnMissing = true;
+        }
+      }
+
+      // If `last_active_at` is not yet added in Supabase `user_access`, mirror presence cleanly in `nexops_system_state`
+      if (columnMissing && cleanEmail) {
+        try {
+          const existingMap = normalizePresenceMap(
+            await dataService.systemState.getKey(SYSTEM_STATE_KEYS.USER_PRESENCE),
+          );
+          await dataService.systemState.upsertKey(
+            SYSTEM_STATE_KEYS.USER_PRESENCE,
+            { ...existingMap, [cleanEmail]: nowIso },
+            member.name || cleanEmail,
+          );
+        } catch {
+          // Graceful non-blocking presence fallback
+        }
+      }
+
+      return nowIso;
     },
 
     async preApproveUserByEmail(
@@ -4483,7 +4624,8 @@ export const dataService = {
         signOffTitle: localExisting?.signOffTitle || effectiveTitle,
         avatarUrl: localExisting?.avatarUrl,
         active: true,
-        lastActive: existingRow?.created_at || now,
+        lastActive: existingRow?.last_active_at || localExisting?.lastActiveAt || '',
+        lastActiveAt: existingRow?.last_active_at || localExisting?.lastActiveAt || undefined,
       });
 
       const auditEntry: AuditEvent = {

@@ -261,7 +261,12 @@ export default function App() {
         const nextMembers = exists
           ? prev.teamMembers.map((m) =>
               m.id === member.id || m.email.toLowerCase() === member.email.toLowerCase()
-                ? { ...m, ...member, lastActive: new Date().toISOString() }
+                ? {
+                    ...m,
+                    ...member,
+                    lastActive: new Date().toISOString(),
+                    lastActiveAt: new Date().toISOString(),
+                  }
                 : m,
             )
           : [member, ...prev.teamMembers];
@@ -639,6 +644,65 @@ export default function App() {
         .catch(() => {});
     }
   }, [activeSection, currentUser.role, authSession?.isAuthenticated, isApprovedUser]);
+
+  // Real-Time User Presence Heartbeat: login, visibilitychange, and 60-second background interval
+  useEffect(() => {
+    if (
+      !authSession?.isAuthenticated ||
+      authSession.identityVerified === false ||
+      !isApprovedUser ||
+      currentUser.id === 'unauthenticated'
+    ) {
+      return;
+    }
+
+    const userSnapshot = {
+      id: currentUser.id,
+      email: currentUser.email,
+      name: currentUser.name,
+    };
+
+    const sendHeartbeat = () => {
+      void dataService.team
+        .sendPresenceHeartbeat(userSnapshot)
+        .then((nowIso) => {
+          const cleanEmail = userSnapshot.email.trim().toLowerCase();
+          setState((prev) => ({
+            ...prev,
+            teamMembers: prev.teamMembers.map((m) =>
+              m.id === userSnapshot.id ||
+              (cleanEmail && m.email.trim().toLowerCase() === cleanEmail)
+                ? { ...m, lastActive: nowIso, lastActiveAt: nowIso }
+                : m,
+            ),
+          }));
+        })
+        .catch(() => {});
+    };
+
+    sendHeartbeat();
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        sendHeartbeat();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    const heartbeatTimer = window.setInterval(sendHeartbeat, 60_000);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.clearInterval(heartbeatTimer);
+    };
+  }, [
+    authSession?.isAuthenticated,
+    authSession?.identityVerified,
+    isApprovedUser,
+    currentUser.id,
+    currentUser.email,
+    currentUser.name,
+  ]);
 
   useEffect(() => {
     if (!authSession?.isAuthenticated || !supabase) return;
@@ -1061,7 +1125,12 @@ export default function App() {
         const nextMembers = exists
           ? prev.teamMembers.map((m) =>
               m.id === user.id || m.email.toLowerCase() === user.email.toLowerCase()
-                ? { ...m, ...user, lastActive: new Date().toISOString() }
+                ? {
+                    ...m,
+                    ...user,
+                    lastActive: new Date().toISOString(),
+                    lastActiveAt: new Date().toISOString(),
+                  }
                 : m,
             )
           : [user, ...prev.teamMembers];
@@ -1385,6 +1454,15 @@ export default function App() {
   };
 
   const handleSignOut = async () => {
+    if (currentUser.id !== 'unauthenticated') {
+      await dataService.team
+        .sendPresenceHeartbeat({
+          id: currentUser.id,
+          email: currentUser.email,
+          name: currentUser.name,
+        })
+        .catch(() => {});
+    }
     await dataService.auth.signOut();
     await disconnectGoogleWorkspace().catch(() => {});
     setGoogleToken(null);
@@ -4501,6 +4579,7 @@ export default function App() {
             activeSection={activeSection}
             activeRole={currentUser.role}
             currentUser={currentUser}
+            teamMembers={state.teamMembers}
             departments={branding.departments}
             requests={state.requests}
             auditLogs={state.globalAuditLogs}
@@ -4512,6 +4591,7 @@ export default function App() {
             onSelectRequestById={handleInspectRequestById}
             onSelectDepartment={handleSelectDepartmentFromSearch}
             onSelectAuditMatch={handleSelectAuditFromSearch}
+            onSelectSection={setActiveSection}
             notifications={state.notifications}
             onMarkAllRead={handleMarkAllRead}
             onClearNotifications={handleClearNotifications}
@@ -4543,6 +4623,8 @@ export default function App() {
                 {activeSection === 'dashboard' && (
                   <DashboardView
                     companyName={branding.companyName}
+                    currentUser={currentUser}
+                    teamMembers={state.teamMembers}
                     requests={state.requests}
                     projects={state.projects}
                     attendanceLogs={state.attendanceLogs}

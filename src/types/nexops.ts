@@ -565,6 +565,7 @@ export interface TeamMember {
   avatarUrl?: string;
   active: boolean;
   lastActive: string;
+  lastActiveAt?: string | null;
   outOfOffice?: boolean;
   delegateApproverId?: string;
   delegateApproverName?: string;
