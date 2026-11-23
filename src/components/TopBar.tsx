@@ -693,9 +693,9 @@ export function TopBar({
   return (
     <>
     <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur-xs">
-      <div className="flex h-16 items-center justify-between gap-2 px-3 sm:gap-4 sm:px-6 lg:px-8">
+      <div className="flex h-16 w-full max-w-full items-center justify-between gap-2 px-3 sm:gap-4 sm:px-6 md:gap-2 md:px-4">
         {/* Left: Mobile Menu + Breadcrumb / Page Title */}
-        <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+        <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
           <button
             type="button"
             onClick={onOpenMobileMenu}
@@ -714,22 +714,20 @@ export function TopBar({
           </div>
         </div>
 
-        {/* Center: Global Command Search Trigger (opens centered Ctrl+K palette modal) */}
-        <div className="hidden max-w-md flex-1 md:block">
+        {/* Center: Compact Desktop Command Search Trigger (opens centered Ctrl+K palette modal) */}
+        <div className="hidden shrink-0 md:block md:w-44 xl:w-56">
           <button
             id="global-request-search"
             type="button"
             onClick={openCommandPalette}
             aria-label="Open Command Search (Ctrl K)"
             aria-expanded={commandOpen}
-            className="flex h-9 w-full items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 text-left text-sm text-slate-400 transition-colors hover:border-slate-300 hover:bg-white focus-visible:border-indigo-500 focus-visible:outline-none"
+            className="flex h-8 w-full items-center justify-between gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-left text-xs text-slate-400 transition-colors hover:border-slate-300 hover:bg-white focus-visible:border-indigo-500 focus-visible:outline-none"
           >
-            <span className="flex min-w-0 items-center gap-2">
-              <Search className="h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
-              <span className="truncate text-xs sm:text-sm">
-                {commandQuery.trim()
-                  ? commandQuery
-                  : 'Search requests, departments, modules...'}
+            <span className="flex min-w-0 items-center gap-1.5">
+              <Search className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden="true" />
+              <span className="truncate text-xs">
+                {commandQuery.trim() ? commandQuery : 'Quick search...'}
               </span>
             </span>
             <kbd className="shrink-0 whitespace-nowrap rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">
@@ -739,11 +737,11 @@ export function TopBar({
         </div>
 
         {/* Right: DB Connection Pill + Sync Now, Mobile Search, Role Switcher, New Request, Bell, Profile */}
-        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2.5">
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2.5 md:gap-1.5">
           {/* Live Database Connection Status & Sync Now */}
-          <div className="hidden items-center gap-1.5 xl:flex">
+          <div className="hidden shrink-0 items-center gap-1.5 xl:flex">
             <span
-              className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-[11px] font-semibold whitespace-nowrap ${
+              className={`inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-semibold whitespace-nowrap ${
                 dbConnected
                   ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
                   : 'border-slate-200 bg-slate-100 text-slate-700'
@@ -764,10 +762,10 @@ export function TopBar({
               onClick={onSyncNow}
               disabled={isSyncing}
               title="Refresh data from database"
-              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 hover:text-slate-900 disabled:opacity-60 whitespace-nowrap"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold whitespace-nowrap text-slate-700 transition-colors hover:bg-slate-50 hover:text-slate-900 disabled:opacity-60"
             >
               <RefreshCw
-                className={`h-3.5 w-3.5 text-indigo-600 ${isSyncing ? 'animate-spin' : ''}`}
+                className={`h-3.5 w-3.5 shrink-0 text-indigo-600 ${isSyncing ? 'animate-spin' : ''}`}
               />
               <span>{isSyncing ? 'Syncing' : 'Sync Now'}</span>
             </button>
@@ -777,14 +775,14 @@ export function TopBar({
             type="button"
             onClick={openCommandPalette}
             aria-label="Open command search"
-            className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900 md:hidden"
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900 md:hidden"
           >
             <Search className="h-4 w-4" />
           </button>
 
           {/* Unified Workspace Launcher (Gmail, Google Docs, Google Sheets, Google Forms) */}
           {onSelectWorkspaceTool && (
-            <div className="relative" ref={workspaceMenuRef}>
+            <div className="relative shrink-0" ref={workspaceMenuRef}>
               <button
                 type="button"
                 onClick={() => {
@@ -794,13 +792,13 @@ export function TopBar({
                 }}
                 aria-expanded={workspaceMenuOpen}
                 aria-label="Open Workspace Suite (Gmail, Docs, Sheets, Forms)"
-                className={`inline-flex h-9 items-center gap-1 rounded-lg border px-2 text-xs font-semibold transition-colors whitespace-nowrap sm:gap-1.5 sm:px-2.5 ${
+                className={`inline-flex h-9 shrink-0 items-center gap-1 rounded-lg border px-2 text-xs font-semibold whitespace-nowrap transition-colors sm:gap-1.5 sm:px-2.5 md:h-auto md:py-1.5 ${
                   activeSection === 'workspace' || workspaceMenuOpen
                     ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
                     : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 hover:text-slate-900'
                 }`}
               >
-                <Briefcase className="h-3.5 w-3.5 text-indigo-600 shrink-0" />
+                <Briefcase className="h-3.5 w-3.5 shrink-0 text-indigo-600" />
                 <span className="hidden sm:inline">Workspace</span>
                 <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-400" />
               </button>
@@ -828,7 +826,7 @@ export function TopBar({
                           className={`flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors ${
                             isToolSelected
                               ? 'bg-indigo-50 text-indigo-900'
-                              : 'hover:bg-slate-50 text-slate-800'
+                              : 'text-slate-800 hover:bg-slate-50'
                           }`}
                         >
                           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white">
@@ -854,11 +852,18 @@ export function TopBar({
           {/* Read-Only Authenticated Role Pill (Strictly from Profile) */}
           <div
             title="Permission role assigned by your corporate profile"
-            className="hidden h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-xs font-medium text-slate-800 sm:inline-flex"
+            className="hidden shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-medium whitespace-nowrap text-slate-800 sm:inline-flex"
           >
             {getRoleIcon(activeRole)}
-            <span className="max-w-[160px] truncate font-semibold text-slate-900 whitespace-nowrap">
-              {activeRole === 'Admin' ? 'Admin' : 'Viewer (Read-Only)'}
+            <span className="font-semibold whitespace-nowrap text-slate-900">
+              {activeRole === 'Admin' ? (
+                'Admin'
+              ) : (
+                <>
+                  <span>Viewer</span>
+                  <span className="hidden 2xl:inline"> (Read-Only)</span>
+                </>
+              )}
             </span>
           </div>
 
@@ -867,7 +872,7 @@ export function TopBar({
             <button
               type="button"
               onClick={onOpenCreateModal}
-              className="inline-flex h-9 items-center gap-1 rounded-lg bg-indigo-600 px-2.5 text-xs font-semibold text-white transition-colors hover:bg-indigo-700 focus-visible:outline-2 focus-visible:outline-indigo-600 whitespace-nowrap shrink-0 sm:gap-1.5 sm:px-3.5"
+              className="inline-flex h-9 shrink-0 items-center gap-1 rounded-lg bg-indigo-600 px-2.5 text-xs font-semibold whitespace-nowrap text-white transition-colors hover:bg-indigo-700 focus-visible:outline-2 focus-visible:outline-indigo-600 sm:gap-1.5 sm:px-3 md:h-auto md:px-2.5 md:py-1.5"
             >
               <Plus className="h-3.5 w-3.5 shrink-0" />
               <span className="hidden sm:inline">New Request</span>
@@ -876,7 +881,7 @@ export function TopBar({
           )}
 
           {/* Notification Bell */}
-          <div className="relative" ref={notifRef}>
+          <div className="relative shrink-0" ref={notifRef}>
             <button
               type="button"
               onClick={() => {
@@ -886,7 +891,7 @@ export function TopBar({
               }}
               aria-label={`Notifications (${unreadCount} unread)`}
               aria-expanded={notifOpen}
-              className="relative inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-indigo-600"
+              className="relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-indigo-600 md:h-8 md:w-8"
             >
               <Bell className="h-4 w-4" />
               {unreadCount > 0 && (
@@ -995,7 +1000,7 @@ export function TopBar({
           </div>
 
           {/* User Profile Menu */}
-          <div className="relative" ref={profileRef}>
+          <div className="relative shrink-0" ref={profileRef}>
             <button
               type="button"
               onClick={() => {
@@ -1005,20 +1010,20 @@ export function TopBar({
               }}
               aria-expanded={profileOpen}
               aria-label="Open user profile menu"
-              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white pr-1.5 pl-1 text-left transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-indigo-600 sm:gap-2 sm:pr-2 sm:pl-1.5"
+              className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white pr-1.5 pl-1 text-left whitespace-nowrap transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-indigo-600 sm:gap-2 sm:pr-2 sm:pl-1.5 md:h-auto md:gap-1.5 md:px-2.5 md:py-1.5"
             >
               <UserAvatar
                 name={currentUser.name}
                 avatarUrl={currentUser.avatarUrl}
-                sizeClass="h-6 w-6"
-                textClass="text-xs"
+                sizeClass="h-6 w-6 md:h-5 md:w-5"
+                textClass="text-xs md:text-[10px]"
                 roundedClass="rounded-md"
               />
-              <span className="hidden max-w-[136px] flex-col leading-tight sm:flex">
-                <span className="truncate text-[11px] font-semibold text-slate-900">
+              <span className="hidden max-w-[104px] flex-col leading-tight sm:flex 2xl:max-w-[136px]">
+                <span className="truncate text-xs font-semibold text-slate-900">
                   {currentUser.name}
                 </span>
-                <span className="truncate font-mono text-[10px] text-slate-500">
+                <span className="hidden truncate font-mono text-[10px] text-slate-500 2xl:block">
                   {currentUser.email}
                 </span>
               </span>
