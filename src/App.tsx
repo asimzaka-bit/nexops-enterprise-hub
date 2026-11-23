@@ -4461,7 +4461,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
+    <div className="min-h-screen max-w-full overflow-x-hidden bg-slate-50 text-slate-900">
       {/* Main App Shell (hidden during window.print() when OfficialReportModal is open) */}
       <div className={reportModalState.open ? 'no-print' : ''}>
         {/* Fixed Left Sidebar */}
@@ -4493,7 +4493,7 @@ export default function App() {
 
         {/* Main Content Shell */}
         <div
-          className={`flex min-h-screen flex-col transition-all duration-200 ease-in-out ${
+          className={`flex min-h-screen min-w-0 max-w-full flex-col transition-all duration-200 ease-in-out ${
             sidebarCollapsed ? 'lg:pl-20' : 'lg:pl-64'
           }`}
         >
@@ -4535,7 +4535,7 @@ export default function App() {
             onRestoreAnnouncement={handleRestoreAnnouncement}
           />
 
-          <main className="mx-auto w-full max-w-[1360px] flex-1 px-4 py-6 sm:px-6 lg:px-8">
+          <main className="mx-auto w-full min-w-0 max-w-[1360px] flex-1 px-3 py-4 sm:px-6 sm:py-6 lg:px-8">
             {isHydrating ? (
               <WorkspaceSkeleton />
             ) : (

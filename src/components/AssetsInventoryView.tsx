@@ -604,14 +604,14 @@ export function AssetsInventoryView({
       {/* Register New Asset Modal */}
       {registerOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-xs"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs sm:p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="register-asset-title"
         >
           <div className="flex max-h-[90vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
-              <div>
+            <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3.5 sm:px-6 sm:py-4">
+              <div className="min-w-0">
                 <h2
                   id="register-asset-title"
                   className="font-display text-base font-bold text-slate-900"
@@ -626,13 +626,13 @@ export function AssetsInventoryView({
                 type="button"
                 onClick={() => setRegisterOpen(false)}
                 aria-label="Close modal"
-                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
 
-            <form onSubmit={handleRegisterSubmit} className="flex-1 space-y-4 overflow-y-auto px-6 py-5">
+            <form onSubmit={handleRegisterSubmit} className="flex-1 space-y-4 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
               {regError && (
                 <div
                   role="alert"
@@ -850,21 +850,21 @@ export function AssetsInventoryView({
       {/* Assign / Transfer Asset Modal */}
       {transferTarget && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-xs"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs sm:p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="transfer-asset-title"
         >
-          <div className="w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
-              <div>
+          <div className="flex max-h-[90vh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+            <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3.5 sm:px-6 sm:py-4">
+              <div className="min-w-0">
                 <h2
                   id="transfer-asset-title"
                   className="font-display text-base font-bold text-slate-900"
                 >
                   Assign / Transfer Asset
                 </h2>
-                <p className="mt-0.5 font-mono text-xs text-indigo-700">
+                <p className="mt-0.5 truncate font-mono text-xs text-indigo-700">
                   {transferTarget.tag} · {transferTarget.name}
                 </p>
               </div>
@@ -872,13 +872,13 @@ export function AssetsInventoryView({
                 type="button"
                 onClick={() => setTransferTarget(null)}
                 aria-label="Close modal"
-                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
 
-            <form onSubmit={handleTransferSubmit} className="space-y-4 px-6 py-5">
+            <form onSubmit={handleTransferSubmit} className="flex-1 space-y-4 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
               {txError && (
                 <div
                   role="alert"
@@ -931,7 +931,7 @@ export function AssetsInventoryView({
                 </div>
               )}
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
                   <label htmlFor="tx-dept" className="block text-xs font-semibold text-slate-700">
                     Department
@@ -1006,21 +1006,21 @@ export function AssetsInventoryView({
       {/* Log Maintenance Modal */}
       {maintenanceTarget && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-xs"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs sm:p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="maintenance-asset-title"
         >
-          <div className="w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
-              <div>
+          <div className="flex max-h-[90vh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+            <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3.5 sm:px-6 sm:py-4">
+              <div className="min-w-0">
                 <h2
                   id="maintenance-asset-title"
                   className="font-display text-base font-bold text-slate-900"
                 >
                   Log Asset Maintenance
                 </h2>
-                <p className="mt-0.5 font-mono text-xs text-indigo-700">
+                <p className="mt-0.5 truncate font-mono text-xs text-indigo-700">
                   {maintenanceTarget.tag} · {maintenanceTarget.name}
                 </p>
               </div>
@@ -1028,13 +1028,13 @@ export function AssetsInventoryView({
                 type="button"
                 onClick={() => setMaintenanceTarget(null)}
                 aria-label="Close modal"
-                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
 
-            <form onSubmit={handleMaintenanceSubmit} className="space-y-4 px-6 py-5">
+            <form onSubmit={handleMaintenanceSubmit} className="flex-1 space-y-4 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
               {mntError && (
                 <div
                   role="alert"
@@ -1044,7 +1044,7 @@ export function AssetsInventoryView({
                 </div>
               )}
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
                   <label htmlFor="mnt-cond" className="block text-xs font-semibold text-slate-700">
                     Updated Condition
@@ -1122,21 +1122,21 @@ export function AssetsInventoryView({
       {/* Asset Custody & Approval History Modal */}
       {activeHistoryAsset && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-xs"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs sm:p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="history-asset-title"
         >
           <div className="flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
-              <div>
+            <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3.5 sm:px-6 sm:py-4">
+              <div className="min-w-0">
                 <h2
                   id="history-asset-title"
                   className="font-display text-base font-bold text-slate-900"
                 >
                   Asset Audit &amp; Custody History
                 </h2>
-                <p className="mt-0.5 text-xs text-slate-500">
+                <p className="mt-0.5 truncate text-xs text-slate-500">
                   <span className="font-mono font-semibold text-indigo-700">
                     {activeHistoryAsset.tag}
                   </span>{' '}
@@ -1147,13 +1147,13 @@ export function AssetsInventoryView({
                 type="button"
                 onClick={() => setHistoryTarget(null)}
                 aria-label="Close modal"
-                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
 
-            <div className="flex-1 space-y-3 overflow-y-auto px-6 py-5">
+            <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
               {activeHistoryAsset.history.length === 0 ? (
                 <p className="py-8 text-center text-xs text-slate-500">
                   No custody or maintenance history recorded yet.

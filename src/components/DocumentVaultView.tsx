@@ -525,13 +525,13 @@ export function DocumentVaultView({
       {/* Add Document Modal */}
       {showAddModal && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-xs"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs sm:p-4"
           role="dialog"
           aria-modal="true"
         >
-          <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white shadow-xl">
-            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
-              <div>
+          <div className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl">
+            <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3.5 sm:px-5 sm:py-4">
+              <div className="min-w-0">
                 <h3 className="font-display text-base font-bold text-slate-900">
                   Add Document to Vault
                 </h3>
@@ -542,13 +542,13 @@ export function DocumentVaultView({
               <button
                 type="button"
                 onClick={() => setShowAddModal(false)}
-                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-4 p-5">
+            <form onSubmit={handleSubmit} className="flex-1 space-y-4 overflow-y-auto p-4 sm:p-5">
               {formError && (
                 <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700">
                   {formError}
@@ -620,7 +620,7 @@ export function DocumentVaultView({
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700">Source Method</label>
-                <div className="mt-1.5 grid grid-cols-3 gap-2">
+                <div className="mt-1.5 grid grid-cols-1 gap-2 sm:grid-cols-3">
                   {[
                     { id: 'google_drive' as const, label: 'Google Drive Link' },
                     { id: 'external_link' as const, label: 'External URL' },
@@ -715,13 +715,13 @@ export function DocumentVaultView({
       {/* In-App Preview Modal for Linked Documents */}
       {previewDoc && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-2.5 backdrop-blur-xs sm:p-4"
           role="dialog"
           aria-modal="true"
         >
-          <div className="flex h-[82vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3.5">
-              <div className="min-w-0">
+          <div className="flex h-[85vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-4 py-3 sm:px-5 sm:py-3.5">
+              <div className="min-w-0 flex-1">
                 <h3 className="truncate font-display text-sm font-bold text-slate-900">
                   {previewDoc.title}
                 </h3>
@@ -729,7 +729,7 @@ export function DocumentVaultView({
                   {previewDoc.folder} · {previewDoc.department} · {previewDoc.accessTag}
                 </p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex shrink-0 items-center gap-2">
                 {previewDoc.url && (
                   <a
                     href={previewDoc.url}

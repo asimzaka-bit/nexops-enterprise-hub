@@ -261,13 +261,13 @@ export function AnnouncementBanner({
       {/* Publish Official Circular Modal (Admin Only) */}
       {publishOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-xs"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs sm:p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="publish-notice-heading"
         >
-          <div className="w-full max-w-lg overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+          <div className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3.5 sm:px-6 sm:py-4">
               <div className="flex items-center gap-2">
                 <Megaphone className="h-4 w-4 text-indigo-600" />
                 <h2
@@ -287,7 +287,7 @@ export function AnnouncementBanner({
               </button>
             </div>
 
-            <form onSubmit={handlePublishSubmit} className="space-y-4 px-6 py-5">
+            <form onSubmit={handlePublishSubmit} className="flex-1 space-y-4 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
               {formError && (
                 <div
                   role="alert"
@@ -400,13 +400,13 @@ export function AnnouncementBanner({
       {/* Archived Circulars Modal */}
       {archiveOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-xs"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs sm:p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="archived-notices-heading"
         >
           <div className="flex max-h-[85vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3.5 sm:px-6 sm:py-4">
               <div className="flex items-center gap-2">
                 <History className="h-4 w-4 text-slate-600" />
                 <h2
@@ -426,7 +426,7 @@ export function AnnouncementBanner({
               </button>
             </div>
 
-            <div className="flex-1 space-y-3 overflow-y-auto p-6">
+            <div className="flex-1 space-y-3 overflow-y-auto p-4 sm:p-6">
               {archivedNotices.length === 0 ? (
                 <p className="text-center text-xs text-slate-500">No archived circulars.</p>
               ) : (

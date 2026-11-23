@@ -769,18 +769,18 @@ export function LeavesView({
       {/* Request Leave Modal */}
       {createModalOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-xs"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs sm:p-4"
           role="dialog"
           aria-modal="true"
           aria-label="Request Leave"
         >
-          <div className="w-full max-w-lg overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
-              <div>
+          <div className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+            <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3.5 sm:px-6 sm:py-4">
+              <div className="min-w-0">
                 <h3 className="font-display text-base font-bold text-slate-900">
                   Request Leave
                 </h3>
-                <p className="text-xs text-slate-500">
+                <p className="truncate text-xs text-slate-500">
                   Submitting as {currentUser.name} ({currentUser.employeeId} · {currentUser.department})
                 </p>
               </div>
@@ -788,13 +788,13 @@ export function LeavesView({
                 type="button"
                 onClick={() => setCreateModalOpen(false)}
                 aria-label="Close modal"
-                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
 
-            <form onSubmit={handleCreateSubmit} className="space-y-4 p-6">
+            <form onSubmit={handleCreateSubmit} className="flex-1 space-y-4 overflow-y-auto p-4 sm:p-6">
               {formError && (
                 <div
                   role="alert"
@@ -922,18 +922,18 @@ export function LeavesView({
       {/* Optional Written Remarks Leave Decision Modal */}
       {decisionTarget && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-xs"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs sm:p-4"
           role="dialog"
           aria-modal="true"
           aria-label="Leave Approval Decision"
         >
-          <div className="w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
-              <div>
+          <div className="flex max-h-[90vh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+            <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3.5 sm:px-6 sm:py-4">
+              <div className="min-w-0">
                 <h3 className="font-display text-base font-bold text-slate-900">
                   Decision Notes · {decisionTarget.leave.code}
                 </h3>
-                <p className="text-xs text-slate-500">
+                <p className="truncate text-xs text-slate-500">
                   {decisionTarget.leave.employeeName} · {decisionTarget.leave.leaveType} (
                   {decisionTarget.leave.totalDays}d)
                 </p>
@@ -942,13 +942,13 @@ export function LeavesView({
                 type="button"
                 onClick={() => setDecisionTarget(null)}
                 aria-label="Close decision modal"
-                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
 
-            <form onSubmit={handleDecisionSubmit} className="space-y-4 p-6">
+            <form onSubmit={handleDecisionSubmit} className="flex-1 space-y-4 overflow-y-auto p-4 sm:p-6">
               <div>
                 <label className="block text-xs font-semibold text-slate-700">
                   Decision Action

@@ -172,15 +172,15 @@ export function UserProfileModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-xs"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs sm:p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="profile-modal-title"
     >
       <div className="flex max-h-[90vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
         {/* Modal Header */}
-        <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50/70 px-6 py-4">
-          <div className="flex items-center gap-3">
+        <div className="flex items-center justify-between gap-2 border-b border-slate-200 bg-slate-50/70 px-4 py-3.5 sm:px-6 sm:py-4">
+          <div className="flex min-w-0 items-center gap-3">
             <UserAvatar
               name={user.name}
               avatarUrl={user.avatarUrl}
@@ -188,28 +188,28 @@ export function UserProfileModal({
               textClass="text-sm"
               roundedClass="rounded-xl"
             />
-            <div>
+            <div className="min-w-0">
               <h2
                 id="profile-modal-title"
-                className="font-display text-base font-bold text-slate-900"
+                className="truncate font-display text-base font-bold text-slate-900"
               >
                 Corporate Profile &amp; Digital Sign-Off
               </h2>
-              <p className="text-xs text-slate-500">{user.email}</p>
+              <p className="truncate text-xs text-slate-500">{user.email}</p>
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close profile modal"
-            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+            className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
           >
             <X className="h-5 w-5" />
           </button>
         </div>
 
         {/* Scrollable Content */}
-        <div className="flex-1 space-y-6 overflow-y-auto p-6">
+        <div className="flex-1 space-y-6 overflow-y-auto p-4 sm:p-6">
           {/* Profile Picture Upload & Management */}
           <section className="rounded-xl border border-slate-200 bg-white p-5">
             <div className="flex flex-wrap items-center justify-between gap-4">

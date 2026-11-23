@@ -78,15 +78,15 @@ export function OfficialReportModal({
 
   return (
     <div
-      className="print-report-overlay fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs"
+      className="print-report-overlay fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-2.5 backdrop-blur-xs sm:p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="official-report-heading"
     >
       <div className="print-report-dialog flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
         {/* Non-Printable Modal Action Bar */}
-        <div className="no-print flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-6 py-3.5">
-          <div className="flex flex-wrap items-center gap-3">
+        <div className="no-print flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 sm:px-6 sm:py-3.5">
+          <div className="flex min-w-0 flex-wrap items-center gap-2.5 sm:gap-3">
             <h2
               id="official-report-heading"
               className="font-display text-sm font-bold text-slate-900"
@@ -97,7 +97,7 @@ export function OfficialReportModal({
               aria-label="Select report scope"
               value={selectedScope}
               onChange={(e) => setSelectedScope(e.target.value)}
-              className="h-8 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-800 focus:border-indigo-500 focus:outline-none"
+              className="h-8 max-w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-800 focus:border-indigo-500 focus:outline-none"
             >
               <option value="EXECUTIVE">Executive Portfolio Summary (All Requests)</option>
               {requests.map((r) => (
@@ -203,7 +203,8 @@ export function OfficialReportModal({
                   <h3 className="font-display text-sm font-bold text-slate-900">
                     02. Department Workload &amp; Today&apos;s Attendance Summary
                   </h3>
-                  <table className="mt-3 w-full border-collapse border border-slate-200 text-left text-xs">
+                  <div className="mt-3 overflow-x-auto">
+                    <table className="w-full min-w-[540px] border-collapse border border-slate-200 text-left text-xs">
                     <thead>
                       <tr className="bg-slate-50 font-semibold text-slate-600">
                         <th className="border-b border-slate-200 px-3 py-2">Department</th>
@@ -262,6 +263,7 @@ export function OfficialReportModal({
                       })}
                     </tbody>
                   </table>
+                  </div>
                 </section>
 
                 {/* Individual Request Register with QA & Audit Summary */}
@@ -481,7 +483,8 @@ function SingleRequestReportBody({ request }: { request: OperationalRequest }) {
           </span>
         </div>
 
-        <table className="mt-3 w-full border-collapse border border-slate-200 text-left text-xs">
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full min-w-[520px] border-collapse border border-slate-200 text-left text-xs">
           <thead>
             <tr className="bg-slate-50 font-semibold text-slate-600">
               <th className="border-b border-slate-200 px-3 py-2">State</th>
@@ -526,7 +529,8 @@ function SingleRequestReportBody({ request }: { request: OperationalRequest }) {
               </tr>
             ))}
           </tbody>
-        </table>
+          </table>
+        </div>
       </section>
 
       {/* Full Chronological Audit Trail */}
@@ -534,7 +538,8 @@ function SingleRequestReportBody({ request }: { request: OperationalRequest }) {
         <h4 className="font-display text-sm font-bold text-slate-900">
           Full Chronological Audit Trail ({request.auditTrail.length} Events)
         </h4>
-        <table className="mt-3 w-full border-collapse border border-slate-200 text-left text-xs">
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full min-w-[560px] border-collapse border border-slate-200 text-left text-xs">
           <thead>
             <tr className="bg-slate-50 font-semibold text-slate-600">
               <th className="border-b border-slate-200 px-3 py-2">Timestamp</th>
@@ -568,7 +573,8 @@ function SingleRequestReportBody({ request }: { request: OperationalRequest }) {
                 </tr>
               ))}
           </tbody>
-        </table>
+          </table>
+        </div>
       </section>
     </div>
   );

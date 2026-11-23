@@ -833,7 +833,7 @@ export function SopVaultView({
       {/* SOP Reader & Employee Compliance Sign-Off Modal */}
       {activeReaderSop && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-xs"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs sm:p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="sop-reader-title"
@@ -846,7 +846,7 @@ export function SopVaultView({
             return (
               <div className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
                 {/* Modal Header */}
-                <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-4">
+                <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-4 py-3.5 sm:gap-4 sm:px-6 sm:py-4">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="rounded-md border border-indigo-200 bg-indigo-50 px-2 py-0.5 font-mono text-xs font-bold text-indigo-700 tabular-nums">
@@ -892,7 +892,7 @@ export function SopVaultView({
                 </div>
 
                 {/* Modal Body */}
-                <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
+                <div className="flex-1 space-y-5 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
                   {/* Structured SOP Sections */}
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
@@ -1033,7 +1033,7 @@ export function SopVaultView({
                 </div>
 
                 {/* Modal Footer: Digital Sign-Off Action */}
-                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-6 py-4">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-4 py-3.5 sm:px-6 sm:py-4">
                   <div className="min-w-0">
                     <p className="text-xs font-semibold text-slate-900">
                       Signing Identity: {currentUser.name}
@@ -1085,14 +1085,14 @@ export function SopVaultView({
       {/* Publish New SOP Modal (Admin / Manager Only) */}
       {publishOpen && canManageSops && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-xs"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs sm:p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="publish-sop-title"
         >
           <div className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
-              <div>
+            <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3.5 sm:px-6 sm:py-4">
+              <div className="min-w-0">
                 <h2
                   id="publish-sop-title"
                   className="font-display text-base font-bold text-slate-900"
@@ -1107,7 +1107,7 @@ export function SopVaultView({
                 type="button"
                 onClick={() => setPublishOpen(false)}
                 aria-label="Close publish modal"
-                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -1115,7 +1115,7 @@ export function SopVaultView({
 
             <form
               onSubmit={handlePublishSubmit}
-              className="flex-1 space-y-4 overflow-y-auto px-6 py-5"
+              className="flex-1 space-y-4 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5"
             >
               {pubError && (
                 <div

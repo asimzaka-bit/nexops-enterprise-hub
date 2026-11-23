@@ -2456,7 +2456,7 @@ export function WorkspaceToolsView({
                   value={adHocUrl}
                   onChange={(e) => setAdHocUrl(e.target.value)}
                   placeholder={`Open any ${docMeta.singular} URL inline...`}
-                  className="h-8 w-full min-w-[210px] rounded-lg border border-slate-200 bg-slate-50 px-2.5 font-mono text-[11px] text-slate-800 focus:border-[#0B57D0] focus:bg-white focus:outline-none sm:w-64"
+                  className="h-8 min-w-0 flex-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 font-mono text-[11px] text-slate-800 focus:border-[#0B57D0] focus:bg-white focus:outline-none sm:w-64 sm:flex-none"
                 />
                 <button
                   type="submit"
@@ -2795,12 +2795,12 @@ export function WorkspaceToolsView({
       {/* =================================================================== */}
       {confirmation && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-xs"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs sm:p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="workspace-confirm-title"
         >
-          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
+          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl sm:p-6">
             <div className="flex items-start gap-3">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-700">
                 <AlertTriangle className="h-5 w-5" />

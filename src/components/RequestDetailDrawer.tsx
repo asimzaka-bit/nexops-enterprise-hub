@@ -427,9 +427,9 @@ export function RequestDetailDrawer({
       <div className="flex-1" onClick={onClose} />
 
       {/* Split-View Drawer Panel */}
-      <div className="flex h-full w-full max-w-5xl flex-col border-l border-slate-200 bg-white shadow-2xl">
+      <div className="flex h-full w-full max-w-5xl flex-col overflow-hidden border-l border-slate-200 bg-white shadow-2xl">
         {/* Drawer Header */}
-        <div className="flex items-start justify-between gap-4 border-b border-slate-200 bg-slate-50/70 px-6 py-4">
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 bg-slate-50/70 px-4 py-3.5 sm:gap-4 sm:px-6 sm:py-4">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-mono text-xs font-bold text-indigo-700 tabular-nums">
@@ -541,7 +541,7 @@ export function RequestDetailDrawer({
         {/* Split-View Body */}
         <div className="grid flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-12">
           {/* Left Pane: Details, Deliverable & QA Verification Checklist */}
-          <div className="space-y-6 border-b border-slate-200 p-6 lg:col-span-7 lg:border-r lg:border-b-0">
+          <div className="space-y-6 border-b border-slate-200 p-4 sm:p-6 lg:col-span-7 lg:border-r lg:border-b-0">
             {/* Revision Alert if Revision Required */}
             {request.status === 'Revision Required' && request.revisionReason && (
               <div

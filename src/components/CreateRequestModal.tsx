@@ -199,19 +199,19 @@ export function CreateRequestModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-xs"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs sm:p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="create-request-title"
     >
       <div className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
-          <div>
-            <div className="flex items-center gap-2.5">
+        <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3.5 sm:px-6 sm:py-4">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
               <h2
                 id="create-request-title"
-                className="font-display text-lg font-bold text-slate-900"
+                className="font-display text-base font-bold text-slate-900 sm:text-lg"
               >
                 {templateSource ? 'Duplicate Request from Template' : 'New Operational Request'}
               </h2>
@@ -229,14 +229,14 @@ export function CreateRequestModal({
             type="button"
             onClick={onClose}
             aria-label="Close modal"
-            className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
+            className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
           >
             <X className="h-5 w-5" />
           </button>
         </div>
 
         {/* Form Body */}
-        <form onSubmit={onFormSubmit} className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
+        <form onSubmit={onFormSubmit} className="flex-1 space-y-5 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
           {templateSource && (
             <div className="flex items-center gap-2.5 rounded-lg border border-indigo-200 bg-indigo-50/70 px-3.5 py-2.5 text-xs text-indigo-900">
               <Copy className="h-4 w-4 shrink-0 text-indigo-600" />
