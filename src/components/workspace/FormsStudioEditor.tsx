@@ -374,9 +374,9 @@ export function FormsStudioEditor({
   };
 
   return (
-    <div className="flex flex-col bg-[#F0EBF8]/45">
+    <div className="flex flex-col bg-[#F0EBF8]/45 dark:bg-slate-950">
       {/* Forms Top Sub-Toolbar */}
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-4 py-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-4 py-2.5 dark:border-slate-800 dark:bg-slate-900">
         <div className="flex flex-wrap items-center gap-1.5">
           {!readOnly && (
             <button
@@ -385,7 +385,7 @@ export function FormsStudioEditor({
               className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition-colors ${
                 activeTab === 'questions'
                   ? 'bg-[#7248B9] text-white'
-                  : 'text-slate-600 hover:bg-slate-100'
+                  : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
               }`}
             >
               <FilePlus2 className="h-3.5 w-3.5" />
@@ -398,7 +398,7 @@ export function FormsStudioEditor({
             className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition-colors ${
               activeTab === 'preview'
                 ? 'bg-[#7248B9] text-white'
-                : 'text-slate-600 hover:bg-slate-100'
+                : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
             }`}
           >
             <Eye className="h-3.5 w-3.5" />
@@ -410,7 +410,7 @@ export function FormsStudioEditor({
             className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition-colors ${
               activeTab === 'responses'
                 ? 'bg-[#7248B9] text-white'
-                : 'text-slate-600 hover:bg-slate-100'
+                : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
             }`}
           >
             <BarChart3 className="h-3.5 w-3.5" />
@@ -422,12 +422,12 @@ export function FormsStudioEditor({
           <button
             type="button"
             onClick={() => void handleCopyShareLink()}
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
           >
             {copiedLink ? (
-              <Check className="h-3.5 w-3.5 text-emerald-600" />
+              <Check className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
             ) : (
-              <Copy className="h-3.5 w-3.5 text-[#7248B9]" />
+              <Copy className="h-3.5 w-3.5 text-[#7248B9] dark:text-violet-400" />
             )}
             <span>{copiedLink ? 'Link Copied' : 'Copy Form Link'}</span>
           </button>
@@ -438,7 +438,7 @@ export function FormsStudioEditor({
                 type="button"
                 disabled={syncingGoogle}
                 onClick={() => void handleImportFromGoogleForm()}
-                className="inline-flex h-8 items-center gap-1 rounded-lg border border-violet-200 bg-white px-2.5 text-[11px] font-semibold text-[#7248B9] hover:bg-violet-50 disabled:opacity-60"
+                className="inline-flex h-8 items-center gap-1 rounded-lg border border-violet-200 bg-white px-2.5 text-[11px] font-semibold text-[#7248B9] hover:bg-violet-50 disabled:opacity-60 dark:border-violet-900/60 dark:bg-slate-800 dark:text-violet-300 dark:hover:bg-violet-950/50"
               >
                 {syncingGoogle ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -463,7 +463,7 @@ export function FormsStudioEditor({
             <button
               type="button"
               onClick={() => void persistForm(formState)}
-              className="inline-flex h-8 items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 text-[11px] font-semibold text-emerald-800"
+              className="inline-flex h-8 items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 text-[11px] font-semibold text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/60 dark:text-emerald-300"
             >
               {saveState === 'saving' ? (
                 <Loader2 className="h-3 w-3 animate-spin" />
@@ -483,7 +483,7 @@ export function FormsStudioEditor({
           {activeTab === 'questions' && !readOnly && (
             <>
               {/* Header Card */}
-              <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xs">
+              <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xs dark:border-slate-800 dark:bg-slate-900">
                 <div className="h-2.5 bg-[#7248B9]" />
                 <div className="space-y-2.5 p-5">
                   <input
@@ -493,7 +493,7 @@ export function FormsStudioEditor({
                       updateForm((prev) => ({ ...prev, title: e.target.value }))
                     }
                     placeholder="Form Title"
-                    className="w-full border-b border-transparent pb-1 text-xl font-bold text-slate-900 focus:border-[#7248B9] focus:outline-none"
+                    className="w-full border-b border-transparent bg-transparent pb-1 text-xl font-bold text-slate-900 placeholder:text-slate-400 focus:border-[#7248B9] focus:outline-none dark:text-slate-100 dark:placeholder:text-slate-500"
                   />
                   <textarea
                     rows={2}
@@ -502,7 +502,7 @@ export function FormsStudioEditor({
                       updateForm((prev) => ({ ...prev, description: e.target.value }))
                     }
                     placeholder="Form description or instructions..."
-                    className="w-full resize-none border-b border-transparent text-xs text-slate-600 focus:border-[#7248B9] focus:outline-none"
+                    className="w-full resize-none border-b border-transparent bg-transparent text-xs text-slate-600 placeholder:text-slate-400 focus:border-[#7248B9] focus:outline-none dark:text-slate-300 dark:placeholder:text-slate-500"
                   />
                 </div>
               </div>
@@ -516,7 +516,7 @@ export function FormsStudioEditor({
                 return (
                   <div
                     key={q.id}
-                    className="rounded-xl border border-slate-200 border-l-4 border-l-[#7248B9] bg-white p-5 shadow-2xs space-y-3"
+                    className="space-y-3 rounded-xl border border-slate-200 border-l-4 border-l-[#7248B9] bg-white p-5 shadow-2xs dark:border-slate-800 dark:border-l-[#7248B9] dark:bg-slate-900"
                   >
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-12">
                       <input
@@ -524,7 +524,7 @@ export function FormsStudioEditor({
                         value={q.title}
                         onChange={(e) => handleUpdateQuestion(q.id, { title: e.target.value })}
                         placeholder="Question text"
-                        className="h-9 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-900 focus:border-[#7248B9] focus:bg-white focus:outline-none sm:col-span-8"
+                        className="h-9 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-900 placeholder:text-slate-400 focus:border-[#7248B9] focus:bg-white focus:outline-none sm:col-span-8 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:bg-slate-950"
                       />
                       <select
                         aria-label="Question type"
@@ -534,7 +534,7 @@ export function FormsStudioEditor({
                             type: e.target.value as FormQuestionType,
                           })
                         }
-                        className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-800 focus:border-[#7248B9] focus:outline-none sm:col-span-4"
+                        className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-800 focus:border-[#7248B9] focus:outline-none sm:col-span-4 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                       >
                         {(Object.keys(QUESTION_TYPE_LABELS) as FormQuestionType[]).map((t) => (
                           <option key={t} value={t}>
@@ -548,7 +548,7 @@ export function FormsStudioEditor({
                       <div className="space-y-2 pl-1">
                         {(q.options ?? []).map((opt, optIdx) => (
                           <div key={optIdx} className="flex items-center gap-2">
-                            <span className="text-xs font-semibold text-slate-400">
+                            <span className="text-xs font-semibold text-slate-400 dark:text-slate-500">
                               {q.type === 'dropdown' ? `${optIdx + 1}.` : q.type === 'checkboxes' ? '☐' : '○'}
                             </span>
                             <input
@@ -559,7 +559,7 @@ export function FormsStudioEditor({
                                 nextOpts[optIdx] = e.target.value;
                                 handleUpdateQuestion(q.id, { options: nextOpts });
                               }}
-                              className="h-8 flex-1 rounded-lg border border-slate-200 px-2.5 text-xs text-slate-800 focus:border-[#7248B9] focus:outline-none"
+                              className="h-8 flex-1 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-800 focus:border-[#7248B9] focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                             />
                             {(q.options?.length ?? 0) > 1 && (
                               <button
@@ -568,7 +568,7 @@ export function FormsStudioEditor({
                                   const nextOpts = (q.options ?? []).filter((_, i) => i !== optIdx);
                                   handleUpdateQuestion(q.id, { options: nextOpts });
                                 }}
-                                className="rounded p-1 text-slate-400 hover:text-rose-600"
+                                className="rounded p-1 text-slate-400 hover:text-rose-600 dark:text-slate-500 dark:hover:text-rose-400"
                               >
                                 <Trash2 className="h-3.5 w-3.5" />
                               </button>
@@ -585,14 +585,14 @@ export function FormsStudioEditor({
                               ],
                             })
                           }
-                          className="inline-flex items-center gap-1 text-xs font-semibold text-[#7248B9] hover:underline"
+                          className="inline-flex items-center gap-1 text-xs font-semibold text-[#7248B9] hover:underline dark:text-violet-400"
                         >
                           <Plus className="h-3.5 w-3.5" />
                           <span>Add option</span>
                         </button>
                       </div>
                     ) : (
-                      <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                      <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-400">
                         {q.type === 'short_answer' && 'Short-answer text response field'}
                         {q.type === 'paragraph' && 'Long-answer paragraph text area'}
                         {q.type === 'file_upload' && 'File attachment upload field (PDF, Doc, Sheet, Image)'}
@@ -600,14 +600,14 @@ export function FormsStudioEditor({
                       </div>
                     )}
 
-                    <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2.5 dark:border-slate-800">
                       <div className="flex items-center gap-1">
                         <button
                           type="button"
                           onClick={() => handleMoveQuestion(index, -1)}
                           disabled={index === 0}
                           title="Move Up"
-                          className="rounded p-1.5 text-slate-500 hover:bg-slate-100 disabled:opacity-30"
+                          className="rounded p-1.5 text-slate-500 hover:bg-slate-100 disabled:opacity-30 dark:text-slate-400 dark:hover:bg-slate-800"
                         >
                           <ArrowUp className="h-3.5 w-3.5" />
                         </button>
@@ -616,7 +616,7 @@ export function FormsStudioEditor({
                           onClick={() => handleMoveQuestion(index, 1)}
                           disabled={index === formState.questions.length - 1}
                           title="Move Down"
-                          className="rounded p-1.5 text-slate-500 hover:bg-slate-100 disabled:opacity-30"
+                          className="rounded p-1.5 text-slate-500 hover:bg-slate-100 disabled:opacity-30 dark:text-slate-400 dark:hover:bg-slate-800"
                         >
                           <ArrowDown className="h-3.5 w-3.5" />
                         </button>
@@ -624,7 +624,7 @@ export function FormsStudioEditor({
                           type="button"
                           onClick={() => handleDuplicateQuestion(index)}
                           title="Duplicate Question"
-                          className="rounded p-1.5 text-slate-500 hover:bg-slate-100"
+                          className="rounded p-1.5 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
                         >
                           <Copy className="h-3.5 w-3.5" />
                         </button>
@@ -632,13 +632,13 @@ export function FormsStudioEditor({
                           type="button"
                           onClick={() => handleDeleteQuestion(q.id)}
                           title="Delete Question"
-                          className="rounded p-1.5 text-slate-500 hover:bg-rose-50 hover:text-rose-600"
+                          className="rounded p-1.5 text-slate-500 hover:bg-rose-50 hover:text-rose-600 dark:text-slate-400 dark:hover:bg-rose-950/50 dark:hover:text-rose-400"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
                       </div>
 
-                      <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-700">
+                      <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-300">
                         <input
                           type="checkbox"
                           checked={q.required}
@@ -655,7 +655,7 @@ export function FormsStudioEditor({
               })}
 
               {/* Add Question Bar */}
-              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-dashed border-violet-300 bg-white p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-dashed border-violet-300 bg-white p-3 dark:border-violet-800/70 dark:bg-slate-900">
                 <button
                   type="button"
                   onClick={() => handleAddQuestion('short_answer')}
@@ -678,7 +678,7 @@ export function FormsStudioEditor({
                       key={t}
                       type="button"
                       onClick={() => handleAddQuestion(t)}
-                      className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-violet-50 hover:text-[#7248B9]"
+                      className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-violet-50 hover:text-[#7248B9] dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-violet-950/60 dark:hover:text-violet-300"
                     >
                       {label}
                     </button>
@@ -691,12 +691,12 @@ export function FormsStudioEditor({
           {/* 2. LIVE FORM PREVIEW */}
           {activeTab === 'preview' && (
             <form onSubmit={handleSubmitPreviewForm} className="space-y-4">
-              <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xs">
+              <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xs dark:border-slate-800 dark:bg-slate-900">
                 <div className="h-2.5 bg-[#7248B9]" />
                 <div className="p-5">
-                  <h2 className="text-xl font-bold text-slate-900">{formState.title}</h2>
+                  <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">{formState.title}</h2>
                   {formState.description && (
-                    <p className="mt-1 text-xs leading-relaxed text-slate-600">
+                    <p className="mt-1 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
                       {formState.description}
                     </p>
                   )}
@@ -708,11 +708,11 @@ export function FormsStudioEditor({
                 return (
                   <div
                     key={q.id}
-                    className="rounded-xl border border-slate-200 bg-white p-5 shadow-2xs space-y-2.5"
+                    className="space-y-2.5 rounded-xl border border-slate-200 bg-white p-5 shadow-2xs dark:border-slate-800 dark:bg-slate-900"
                   >
-                    <label className="block text-sm font-semibold text-slate-900">
+                    <label className="block text-sm font-semibold text-slate-900 dark:text-slate-100">
                       {q.title}
-                      {q.required && <span className="ml-1 text-rose-600">*</span>}
+                      {q.required && <span className="ml-1 text-rose-600 dark:text-rose-400">*</span>}
                     </label>
 
                     {q.type === 'short_answer' && (
@@ -724,7 +724,7 @@ export function FormsStudioEditor({
                           setPreviewAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))
                         }
                         placeholder="Your answer"
-                        className="h-9 w-full rounded-lg border border-slate-200 px-3 text-xs focus:border-[#7248B9] focus:outline-none disabled:bg-slate-50"
+                        className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-900 placeholder:text-slate-400 focus:border-[#7248B9] focus:outline-none disabled:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:disabled:bg-slate-900"
                       />
                     )}
 
@@ -737,7 +737,7 @@ export function FormsStudioEditor({
                           setPreviewAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))
                         }
                         placeholder="Your detailed response"
-                        className="w-full rounded-lg border border-slate-200 p-3 text-xs focus:border-[#7248B9] focus:outline-none disabled:bg-slate-50"
+                        className="w-full rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-900 placeholder:text-slate-400 focus:border-[#7248B9] focus:outline-none disabled:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:disabled:bg-slate-900"
                       />
                     )}
 
@@ -746,7 +746,7 @@ export function FormsStudioEditor({
                         {(q.options ?? []).map((opt) => (
                           <label
                             key={opt}
-                            className="flex cursor-pointer items-center gap-2 text-xs text-slate-800"
+                            className="flex cursor-pointer items-center gap-2 text-xs text-slate-800 dark:text-slate-200"
                           >
                             <input
                               type="radio"
@@ -772,7 +772,7 @@ export function FormsStudioEditor({
                           return (
                             <label
                               key={opt}
-                              className="flex cursor-pointer items-center gap-2 text-xs text-slate-800"
+                              className="flex cursor-pointer items-center gap-2 text-xs text-slate-800 dark:text-slate-200"
                             >
                               <input
                                 type="checkbox"
@@ -800,7 +800,7 @@ export function FormsStudioEditor({
                         onChange={(e) =>
                           setPreviewAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))
                         }
-                        className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs focus:border-[#7248B9] focus:outline-none"
+                        className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-900 focus:border-[#7248B9] focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                       >
                         <option value="">Choose...</option>
                         {(q.options ?? []).map((opt) => (
@@ -819,13 +819,13 @@ export function FormsStudioEditor({
                         onChange={(e) =>
                           setPreviewAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))
                         }
-                        className="h-9 rounded-lg border border-slate-200 px-3 text-xs focus:border-[#7248B9] focus:outline-none"
+                        className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-900 focus:border-[#7248B9] focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                       />
                     )}
 
                     {q.type === 'file_upload' && (
-                      <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100">
-                        <Paperclip className="h-3.5 w-3.5 text-[#7248B9]" />
+                      <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700">
+                        <Paperclip className="h-3.5 w-3.5 text-[#7248B9] dark:text-violet-400" />
                         <span>
                           {typeof value === 'string' && value ? value : 'Select file to attach'}
                         </span>
@@ -854,7 +854,7 @@ export function FormsStudioEditor({
                   <button
                     type="button"
                     onClick={() => setPreviewAnswers({})}
-                    className="text-xs font-semibold text-[#7248B9] hover:underline"
+                    className="text-xs font-semibold text-[#7248B9] hover:underline dark:text-violet-400"
                   >
                     Clear form
                   </button>
@@ -873,13 +873,13 @@ export function FormsStudioEditor({
           {/* 3. RESPONSES VIEWER & CSV EXPORT */}
           {activeTab === 'responses' && (
             <div className="space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white p-4 shadow-2xs">
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white p-4 shadow-2xs dark:border-slate-800 dark:bg-slate-900">
                 <div>
-                  <h3 className="text-base font-bold text-slate-900">
+                  <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">
                     {formState.responses.length} Response
                     {formState.responses.length === 1 ? '' : 's'}
                   </h3>
-                  <p className="text-xs text-slate-500">
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
                     Recorded submissions for {formState.title}
                   </p>
                 </div>
@@ -889,7 +889,7 @@ export function FormsStudioEditor({
                       type="button"
                       disabled={syncingGoogle}
                       onClick={() => void handlePullGoogleResponses()}
-                      className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-3 text-xs font-semibold text-[#7248B9] hover:bg-violet-100"
+                      className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-3 text-xs font-semibold text-[#7248B9] hover:bg-violet-100 dark:border-violet-900/60 dark:bg-violet-950/60 dark:text-violet-300 dark:hover:bg-violet-950"
                     >
                       {syncingGoogle ? (
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -903,7 +903,7 @@ export function FormsStudioEditor({
                     type="button"
                     onClick={handleExportResponsesCsv}
                     disabled={formState.responses.length === 0}
-                    className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                    className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                   >
                     <Download className="h-3.5 w-3.5" />
                     <span>Export CSV</span>
@@ -912,13 +912,13 @@ export function FormsStudioEditor({
               </div>
 
               {formState.responses.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-slate-200 bg-white px-6 py-14 text-center text-xs text-slate-500">
+                <div className="rounded-xl border border-dashed border-slate-200 bg-white px-6 py-14 text-center text-xs text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
                   No responses captured yet. Switch to Live Form Preview to submit or test responses.
                 </div>
               ) : (
-                <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-2xs">
+                <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-2xs dark:border-slate-800 dark:bg-slate-900">
                   <table className="w-full text-left text-xs">
-                    <thead className="border-b border-slate-200 bg-slate-50 text-[11px] font-bold text-slate-700">
+                    <thead className="border-b border-slate-200 bg-slate-50 text-[11px] font-bold text-slate-700 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-300">
                       <tr>
                         <th className="px-4 py-2.5">Submitted By</th>
                         <th className="px-4 py-2.5">Timestamp</th>
@@ -929,20 +929,20 @@ export function FormsStudioEditor({
                         ))}
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-100">
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                       {formState.responses.map((resp) => (
-                        <tr key={resp.id} className="hover:bg-slate-50">
-                          <td className="px-4 py-2.5 font-semibold text-slate-800">
+                        <tr key={resp.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                          <td className="px-4 py-2.5 font-semibold text-slate-800 dark:text-slate-100">
                             {resp.submittedBy}
                           </td>
-                          <td className="px-4 py-2.5 font-mono text-[11px] text-slate-500">
+                          <td className="px-4 py-2.5 font-mono text-[11px] text-slate-500 dark:text-slate-400">
                             {new Date(resp.submittedAt).toLocaleString()}
                           </td>
                           {formState.questions.map((q) => {
                             const ans = resp.answers[q.id];
                             const formatted = Array.isArray(ans) ? ans.join(', ') : ans || '—';
                             return (
-                              <td key={q.id} className="px-4 py-2.5 text-slate-700">
+                              <td key={q.id} className="px-4 py-2.5 text-slate-700 dark:text-slate-300">
                                 {formatted}
                               </td>
                             );

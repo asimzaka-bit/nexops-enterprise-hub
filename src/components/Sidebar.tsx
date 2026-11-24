@@ -49,6 +49,7 @@ interface SidebarProps {
   openActionItemsCount?: number;
   workspaceLinksCount?: number;
   pendingUsersCount?: number;
+  pendingEditorChangesCount?: number;
   collapsed: boolean;
   onToggleCollapse: () => void;
   mobileOpen: boolean;
@@ -95,6 +96,7 @@ export function Sidebar({
   openActionItemsCount,
   workspaceLinksCount,
   pendingUsersCount,
+  pendingEditorChangesCount,
   collapsed,
   onToggleCollapse,
   mobileOpen,
@@ -165,7 +167,7 @@ export function Sidebar({
             id: 'settings' as NavSection,
             label: 'Admin Panel & Settings',
             icon: Users,
-            badge: pendingUsersCount,
+            badge: (pendingUsersCount ?? 0) + (pendingEditorChangesCount ?? 0),
           },
         ]
       : []),

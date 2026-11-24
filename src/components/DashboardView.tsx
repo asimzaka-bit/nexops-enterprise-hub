@@ -624,7 +624,7 @@ export function DashboardView({
           totalRequests === 0 ? 'Clean workspace' : `${submittedCount} awaiting review`,
         trendPositive: true,
         icon: FileText,
-        accent: 'text-indigo-600',
+        accent: 'text-indigo-600 dark:text-indigo-400',
         onClick: () => onNavigateToQueue('All'),
       },
       {
@@ -633,7 +633,7 @@ export function DashboardView({
         trend: `${underQaCount} actively in QA`,
         trendPositive: true,
         icon: Clock,
-        accent: 'text-amber-600',
+        accent: 'text-amber-600 dark:text-amber-400',
         onClick: () => onNavigateToQueue('Under QA Review'),
       },
       {
@@ -642,7 +642,7 @@ export function DashboardView({
         trend: revisionRequired > 0 ? 'Action needed by owner' : 'Zero blockers',
         trendPositive: revisionRequired === 0,
         icon: AlertTriangle,
-        accent: 'text-rose-600',
+        accent: 'text-rose-600 dark:text-rose-400',
         onClick: () => onNavigateToQueue('Revision Required'),
       },
       {
@@ -651,7 +651,7 @@ export function DashboardView({
         trend: `${approvedCount} of ${decidedCount} reviewed`,
         trendPositive: approvalRate >= 70,
         icon: CheckCircle2,
-        accent: 'text-emerald-600',
+        accent: 'text-emerald-600 dark:text-emerald-400',
         onClick: () => onNavigateToQueue('Approved'),
       },
     ],
@@ -682,31 +682,31 @@ export function DashboardView({
       {/* Dynamic Time-of-Day Personalized Greeting Banner */}
       <section
         aria-label="Personalized Welcome Greeting"
-        className="flex flex-col justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-4 sm:flex-row sm:items-center sm:px-6"
+        className="flex flex-col justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-4 dark:border-slate-800 dark:bg-slate-900 sm:flex-row sm:items-center sm:px-6"
       >
         <div className="flex min-w-0 items-start gap-3 sm:items-center">
           <div
             className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border ${
               greeting.period === 'morning'
-                ? 'border-amber-200 bg-amber-50 text-amber-600'
+                ? 'border-amber-200 bg-amber-50 text-amber-600 dark:border-amber-900/60 dark:bg-amber-950/50 dark:text-amber-300'
                 : greeting.period === 'afternoon'
-                  ? 'border-indigo-200 bg-indigo-50 text-indigo-600'
-                  : 'border-slate-200 bg-slate-100 text-slate-700'
+                  ? 'border-indigo-200 bg-indigo-50 text-indigo-600 dark:border-indigo-900/60 dark:bg-indigo-950/50 dark:text-indigo-300'
+                  : 'border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300'
             }`}
           >
             <GreetingIcon className="h-5 w-5" aria-hidden="true" />
           </div>
           <div className="min-w-0">
-            <h2 className="break-words font-display text-lg font-bold tracking-tight text-slate-900 sm:text-xl">
+            <h2 className="break-words font-display text-lg font-bold tracking-tight text-slate-900 dark:text-slate-100 sm:text-xl">
               {greeting.fullText}
             </h2>
-            <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-500">
-              <span className="font-semibold text-slate-700">{companyName}</span>
-              <span aria-hidden="true" className="text-slate-300">
+            <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-500 dark:text-slate-400">
+              <span className="font-semibold text-slate-700 dark:text-slate-200">{companyName}</span>
+              <span aria-hidden="true" className="text-slate-300 dark:text-slate-600">
                 ·
               </span>
               <span>{currentUser.department}</span>
-              <span aria-hidden="true" className="text-slate-300">
+              <span aria-hidden="true" className="text-slate-300 dark:text-slate-600">
                 ·
               </span>
               <span>{localDateLabel}</span>
@@ -724,17 +724,17 @@ export function DashboardView({
               recentlyOfflineKeys,
             )}
           />
-          <span className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-0.5 font-mono text-[11px] font-semibold text-slate-700 tabular-nums">
+          <span className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-0.5 font-mono text-[11px] font-semibold text-slate-700 tabular-nums dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
             {currentUser.employeeId}
           </span>
         </div>
       </section>
 
       {/* Executive Action Strip with Dynamic SLA Status & Export Actions */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3.5 sm:px-5">
-        <div className="flex flex-wrap items-center gap-2.5 text-xs text-slate-600 sm:gap-3">
-          <span className="font-semibold text-slate-900">Executive Governance Snapshot</span>
-          <span aria-hidden="true" className="text-slate-300">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3.5 dark:border-slate-800 dark:bg-slate-900 sm:px-5">
+        <div className="flex flex-wrap items-center gap-2.5 text-xs text-slate-600 dark:text-slate-300 sm:gap-3">
+          <span className="font-semibold text-slate-900 dark:text-slate-100">Executive Governance Snapshot</span>
+          <span aria-hidden="true" className="text-slate-300 dark:text-slate-600">
             ·
           </span>
           <span className="tabular-nums">
@@ -744,7 +744,7 @@ export function DashboardView({
                 onClick={() =>
                   onNavigateToOverdueQueue ? onNavigateToOverdueQueue() : onNavigateToQueue('All')
                 }
-                className="inline-flex items-center gap-1.5 rounded-md border border-rose-200 bg-rose-50 px-2 py-0.5 font-semibold text-rose-700 transition-colors hover:bg-rose-100"
+                className="inline-flex items-center gap-1.5 rounded-md border border-rose-200 bg-rose-50 px-2 py-0.5 font-semibold text-rose-700 transition-colors hover:bg-rose-100 dark:border-rose-900/60 dark:bg-rose-950/50 dark:text-rose-300 dark:hover:bg-rose-950"
               >
                 <span className="relative flex h-2 w-2 shrink-0" aria-hidden="true">
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-500 opacity-75" />
@@ -755,27 +755,27 @@ export function DashboardView({
                 </span>
               </button>
             ) : (
-              <span className="inline-flex items-center gap-1.5 font-semibold text-emerald-700">
-                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+              <span className="inline-flex items-center gap-1.5 font-semibold text-emerald-700 dark:text-emerald-400">
+                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
                 <span>All active SLAs on track</span>
               </span>
             )}
           </span>
           {approachingSlaCount > 0 && (
             <>
-              <span aria-hidden="true" className="text-slate-300">
+              <span aria-hidden="true" className="text-slate-300 dark:text-slate-600">
                 ·
               </span>
-              <span className="rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 font-semibold text-amber-800 tabular-nums">
+              <span className="rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 font-semibold text-amber-800 tabular-nums dark:border-amber-900/60 dark:bg-amber-950/50 dark:text-amber-300">
                 {approachingSlaCount} approaching SLA
               </span>
             </>
           )}
-          <span aria-hidden="true" className="text-slate-300">
+          <span aria-hidden="true" className="text-slate-300 dark:text-slate-600">
             ·
           </span>
-          <span className="inline-flex items-center gap-1 font-mono text-slate-700 tabular-nums">
-            <UserCheck className="h-3.5 w-3.5 text-emerald-600" />
+          <span className="inline-flex items-center gap-1 font-mono text-slate-700 tabular-nums dark:text-slate-300">
+            <UserCheck className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
             {todayAttendanceLogs.length} Staff Clocked In Today
           </span>
         </div>
@@ -785,7 +785,7 @@ export function DashboardView({
           <div
             role="tablist"
             aria-label="Dashboard view mode"
-            className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-100 p-0.5"
+            className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-100 p-0.5 dark:border-slate-700 dark:bg-slate-800"
           >
             <button
               type="button"
@@ -794,8 +794,8 @@ export function DashboardView({
               onClick={() => setDashboardTab('overview')}
               className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors whitespace-nowrap ${
                 dashboardTab === 'overview'
-                  ? 'bg-white text-slate-900 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
+                  ? 'bg-white text-slate-900 shadow-xs dark:bg-slate-900 dark:text-slate-100'
+                  : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
               }`}
             >
               Overview
@@ -807,8 +807,8 @@ export function DashboardView({
               onClick={() => setDashboardTab('analytics')}
               className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors whitespace-nowrap ${
                 dashboardTab === 'analytics'
-                  ? 'bg-white text-slate-900 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
+                  ? 'bg-white text-slate-900 shadow-xs dark:bg-slate-900 dark:text-slate-100'
+                  : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
               }`}
             >
               Department &amp; SLA Analytics
@@ -818,7 +818,7 @@ export function DashboardView({
           <button
             type="button"
             onClick={handleExportExecutiveKpiCsv}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-800 transition-colors hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 whitespace-nowrap"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-800 transition-colors hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-indigo-700 dark:hover:bg-indigo-950/60 dark:hover:text-indigo-300 whitespace-nowrap"
           >
             <Download className="h-3.5 w-3.5" />
             <span>Export KPI Summary CSV</span>
@@ -840,18 +840,18 @@ export function DashboardView({
       {/* Prominent Company Notice Board & Announcements Widget */}
       <section
         aria-label="Company Notice Board & Announcements"
-        className="rounded-xl border border-slate-200 bg-white p-5"
+        className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900"
       >
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3.5">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3.5 dark:border-slate-800">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-600">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-600 dark:border-indigo-900/60 dark:bg-indigo-950/50 dark:text-indigo-400">
               <Megaphone className="h-4 w-4" />
             </div>
             <div>
-              <h2 className="font-display text-base font-bold text-slate-900">
+              <h2 className="font-display text-base font-bold text-slate-900 dark:text-slate-100">
                 Company Notice Board &amp; Announcements
               </h2>
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-slate-500 dark:text-slate-400">
                 Official circulars, policy updates, and company notices
               </p>
             </div>
@@ -861,13 +861,13 @@ export function DashboardView({
             <button
               type="button"
               onClick={openPostNotice}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-slate-800"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-slate-800 dark:bg-indigo-600 dark:hover:bg-indigo-500"
             >
               <Plus className="h-3.5 w-3.5" />
               <span>Post Official Notice</span>
             </button>
           ) : (
-            <span className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-500">
+            <span className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
               Official Notices ({activeNotices.length})
             </span>
           )}
@@ -875,11 +875,11 @@ export function DashboardView({
 
         {activeNotices.length === 0 ? (
           <div className="py-8 text-center">
-            <Megaphone className="mx-auto h-7 w-7 text-slate-300" />
-            <p className="mt-2 text-xs font-semibold text-slate-800">
+            <Megaphone className="mx-auto h-7 w-7 text-slate-300 dark:text-slate-600" />
+            <p className="mt-2 text-xs font-semibold text-slate-800 dark:text-slate-200">
               No active company announcements
             </p>
-            <p className="mt-0.5 text-xs text-slate-500">
+            <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
               {isAdmin
                 ? 'Post circulars, holiday schedules, or HR policy notices using the button above.'
                 : 'Official company announcements posted by Administrators will appear here.'}
@@ -902,10 +902,10 @@ export function DashboardView({
                   key={notice.id}
                   className={`flex flex-col justify-between rounded-xl border p-4 ${
                     tag === 'Urgent'
-                      ? 'border-rose-200 bg-rose-50/50'
+                      ? 'border-rose-200 bg-rose-50/50 dark:border-rose-900/60 dark:bg-rose-950/30'
                       : notice.pinned
-                        ? 'border-indigo-200 bg-indigo-50/40'
-                        : 'border-slate-200 bg-slate-50/50'
+                        ? 'border-indigo-200 bg-indigo-50/40 dark:border-indigo-900/60 dark:bg-indigo-950/30'
+                        : 'border-slate-200 bg-slate-50/50 dark:border-slate-800 dark:bg-slate-950/50'
                   }`}
                 >
                   <div>
@@ -914,17 +914,17 @@ export function DashboardView({
                         <span
                           className={`rounded border px-2 py-0.5 text-[10px] font-bold uppercase ${
                             tag === 'Urgent'
-                              ? 'border-rose-300 bg-rose-100 text-rose-800'
+                              ? 'border-rose-300 bg-rose-100 text-rose-800 dark:border-rose-800 dark:bg-rose-950/70 dark:text-rose-300'
                               : tag === 'HR'
-                                ? 'border-amber-300 bg-amber-100 text-amber-900'
-                                : 'border-indigo-200 bg-indigo-100 text-indigo-800'
+                                ? 'border-amber-300 bg-amber-100 text-amber-900 dark:border-amber-800 dark:bg-amber-950/70 dark:text-amber-300'
+                                : 'border-indigo-200 bg-indigo-100 text-indigo-800 dark:border-indigo-800 dark:bg-indigo-950/70 dark:text-indigo-300'
                           }`}
                         >
                           {tag}
                         </span>
                         {notice.pinned && (
-                          <span className="inline-flex items-center gap-1 rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-slate-700">
-                            <Pin className="h-2.5 w-2.5 text-indigo-600" />
+                          <span className="inline-flex items-center gap-1 rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                            <Pin className="h-2.5 w-2.5 text-indigo-600 dark:text-indigo-400" />
                             Pinned
                           </span>
                         )}
@@ -936,7 +936,7 @@ export function DashboardView({
                             type="button"
                             onClick={() => onTogglePinAnnouncement(notice.id)}
                             title={notice.pinned ? 'Unpin notice' : 'Pin notice'}
-                            className="rounded border border-slate-200 bg-white p-1 text-slate-500 hover:bg-slate-100 hover:text-indigo-700"
+                            className="rounded border border-slate-200 bg-white p-1 text-slate-500 hover:bg-slate-100 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-indigo-300"
                           >
                             {notice.pinned ? (
                               <PinOff className="h-3.5 w-3.5" />
@@ -948,26 +948,26 @@ export function DashboardView({
                             type="button"
                             onClick={() => openEditNotice(notice)}
                             title="Edit notice"
-                            className="rounded border border-slate-200 bg-white p-1 text-slate-500 hover:bg-slate-100 hover:text-indigo-700"
+                            className="rounded border border-slate-200 bg-white p-1 text-slate-500 hover:bg-slate-100 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-indigo-300"
                           >
                             <Edit3 className="h-3.5 w-3.5" />
                           </button>
                           {isConfirmingDel ? (
-                            <div className="inline-flex items-center gap-1 rounded border border-rose-200 bg-rose-50 px-1.5 py-0.5">
+                            <div className="inline-flex items-center gap-1 rounded border border-rose-200 bg-rose-50 px-1.5 py-0.5 dark:border-rose-900/60 dark:bg-rose-950/60">
                               <button
                                 type="button"
                                 onClick={() => {
                                   onDeleteAnnouncement(notice.id);
                                   setConfirmDeleteNoticeId(null);
                                 }}
-                                className="text-[10px] font-bold text-rose-700 hover:underline"
+                                className="text-[10px] font-bold text-rose-700 hover:underline dark:text-rose-300"
                               >
                                 Delete
                               </button>
                               <button
                                 type="button"
                                 onClick={() => setConfirmDeleteNoticeId(null)}
-                                className="text-[10px] text-slate-600"
+                                className="text-[10px] text-slate-600 dark:text-slate-300"
                               >
                                 Cancel
                               </button>
@@ -977,7 +977,7 @@ export function DashboardView({
                               type="button"
                               onClick={() => setConfirmDeleteNoticeId(notice.id)}
                               title="Delete notice"
-                              className="rounded border border-slate-200 bg-white p-1 text-slate-500 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"
+                              className="rounded border border-slate-200 bg-white p-1 text-slate-500 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400 dark:hover:border-rose-900/60 dark:hover:bg-rose-950/60 dark:hover:text-rose-300"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
@@ -986,13 +986,13 @@ export function DashboardView({
                       )}
                     </div>
 
-                    <h3 className="mt-2 text-sm font-bold text-slate-900">{notice.title}</h3>
-                    <p className="mt-1 text-xs leading-relaxed text-slate-700">
+                    <h3 className="mt-2 text-sm font-bold text-slate-900 dark:text-slate-100">{notice.title}</h3>
+                    <p className="mt-1 text-xs leading-relaxed text-slate-700 dark:text-slate-300">
                       {notice.message}
                     </p>
                   </div>
 
-                  <p className="mt-3 border-t border-slate-200/70 pt-2 font-mono text-[10px] text-slate-500">
+                  <p className="mt-3 border-t border-slate-200/70 pt-2 font-mono text-[10px] text-slate-500 dark:border-slate-800 dark:text-slate-400">
                     Posted by {notice.publishedBy} · {formatDateTime(notice.publishedAt)}
                     {notice.updatedAt && notice.updatedAt !== notice.publishedAt
                       ? ' (Edited)'
@@ -1014,19 +1014,19 @@ export function DashboardView({
               key={kpi.label}
               type="button"
               onClick={kpi.onClick}
-              className="group flex flex-col justify-between rounded-xl border border-slate-200 bg-white p-5 text-left transition-colors hover:border-slate-300 hover:bg-slate-50/40 focus-visible:outline-2 focus-visible:outline-indigo-600"
+              className="group flex flex-col justify-between rounded-xl border border-slate-200 bg-white p-5 text-left transition-colors hover:border-slate-300 hover:bg-slate-50/40 focus-visible:outline-2 focus-visible:outline-indigo-600 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700 dark:hover:bg-slate-800/50"
             >
               <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-medium text-slate-500">{kpi.label}</span>
+                <span className="text-xs font-medium text-slate-500 dark:text-slate-400">{kpi.label}</span>
                 <Icon className={`h-4 w-4 shrink-0 ${kpi.accent}`} aria-hidden="true" />
               </div>
               <div className="mt-3 flex items-baseline justify-between gap-2">
-                <span className="font-display text-2xl font-bold tracking-tight text-slate-900 tabular-nums sm:text-3xl">
+                <span className="font-display text-2xl font-bold tracking-tight text-slate-900 tabular-nums dark:text-slate-100 sm:text-3xl">
                   {kpi.value}
                 </span>
                 <span
                   className={`inline-flex items-center gap-1 text-xs font-medium ${
-                    kpi.trendPositive ? 'text-emerald-700' : 'text-rose-700'
+                    kpi.trendPositive ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-700 dark:text-rose-400'
                   }`}
                 >
                   <TrendingUp className="h-3 w-3 shrink-0" aria-hidden="true" />
@@ -1041,17 +1041,17 @@ export function DashboardView({
       {/* Executive Visual Analytics Row: Task Completion Donut + Dept Workload & Attendance */}
       <section className="grid grid-cols-1 gap-6 lg:grid-cols-12">
         {/* Task Completion Breakdown (SVG Donut Chart) */}
-        <div className="rounded-xl border border-slate-200 bg-white p-6 lg:col-span-5">
-          <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-4">
+        <div className="rounded-xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900 lg:col-span-5">
+          <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-4 dark:border-slate-800">
             <div>
-              <h2 className="font-display text-base font-bold text-slate-900">
+              <h2 className="font-display text-base font-bold text-slate-900 dark:text-slate-100">
                 Task Completion Breakdown
               </h2>
-              <p className="mt-0.5 text-xs text-slate-500">
+              <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                 Pending vs. In Progress vs. Completed governance distribution
               </p>
             </div>
-            <span className="font-mono text-xs font-semibold text-slate-500 tabular-nums">
+            <span className="font-mono text-xs font-semibold text-slate-500 tabular-nums dark:text-slate-400">
               {totalRequests} total
             </span>
           </div>
@@ -1064,7 +1064,7 @@ export function DashboardView({
                   cy="66"
                   r={donutRadius}
                   fill="none"
-                  stroke="#f1f5f9"
+                  className="stroke-slate-100 dark:stroke-slate-800"
                   strokeWidth="16"
                 />
                 {totalRequests > 0 &&
@@ -1090,14 +1090,14 @@ export function DashboardView({
                   })}
               </svg>
               <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-                <span className="font-display text-xl font-bold text-slate-900 tabular-nums">
+                <span className="font-display text-xl font-bold text-slate-900 tabular-nums dark:text-slate-100">
                   {completionPct}%
                 </span>
-                <span className="text-[10px] font-semibold text-slate-500">Completed</span>
+                <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">Completed</span>
               </div>
             </div>
 
-            <div className="w-full flex-1 divide-y divide-slate-100">
+            <div className="w-full flex-1 divide-y divide-slate-100 dark:divide-slate-800">
               {donutSegments.map((seg) => {
                 const pct =
                   totalRequests > 0 ? Math.round((seg.count / totalRequests) * 100) : 0;
@@ -1106,14 +1106,14 @@ export function DashboardView({
                     key={seg.label}
                     type="button"
                     onClick={() => onNavigateToQueue(seg.queueFilter)}
-                    className="flex w-full items-center justify-between py-2 text-left text-xs transition-colors hover:bg-slate-50"
+                    className="flex w-full items-center justify-between py-2 text-left text-xs transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50"
                   >
-                    <span className="flex items-center gap-2 font-semibold text-slate-800">
+                    <span className="flex items-center gap-2 font-semibold text-slate-800 dark:text-slate-200">
                       <span className={`h-2.5 w-2.5 rounded-xs ${seg.dotClass}`} />
                       {seg.label}
                     </span>
-                    <span className="font-mono text-slate-600 tabular-nums">
-                      {seg.count} <span className="text-slate-400">({pct}%)</span>
+                    <span className="font-mono text-slate-600 tabular-nums dark:text-slate-300">
+                      {seg.count} <span className="text-slate-400 dark:text-slate-500">({pct}%)</span>
                     </span>
                   </button>
                 );
@@ -1122,22 +1122,22 @@ export function DashboardView({
           </div>
 
           {/* Granular 6-stage pipeline bar */}
-          <div className="mt-5 border-t border-slate-100 pt-4">
-            <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-slate-100">
+          <div className="mt-5 border-t border-slate-100 pt-4 dark:border-slate-800">
+            <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
               {STATUS_ORDER.map(({ status, barColor }) => {
                 const count = requests.filter((r) => r.status === status).length;
                 if (count === 0 || totalRequests === 0) return null;
                 return (
                   <div
                     key={status}
-                    className={`${barColor} h-full border-r border-white last:border-r-0`}
+                    className={`${barColor} h-full border-r border-white last:border-r-0 dark:border-slate-900`}
                     style={{ width: `${(count / totalRequests) * 100}%` }}
                     title={`${status}: ${count}`}
                   />
                 );
               })}
             </div>
-            <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500">
+            <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400">
               {STATUS_ORDER.map(({ status, barColor }) => {
                 const count = requests.filter((r) => r.status === status).length;
                 return (
@@ -1152,17 +1152,17 @@ export function DashboardView({
         </div>
 
         {/* Department-Wise Workload & Attendance Summary */}
-        <div className="rounded-xl border border-slate-200 bg-white p-6 lg:col-span-7">
-          <div className="flex items-center justify-between gap-4 border-b border-slate-100 pb-4">
+        <div className="rounded-xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900 lg:col-span-7">
+          <div className="flex items-center justify-between gap-4 border-b border-slate-100 pb-4 dark:border-slate-800">
             <div>
-              <h2 className="font-display text-base font-bold text-slate-900">
+              <h2 className="font-display text-base font-bold text-slate-900 dark:text-slate-100">
                 Department Workload &amp; Attendance Summary
               </h2>
-              <p className="mt-0.5 text-xs text-slate-500">
+              <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                 Task volume, completion progress &amp; today&apos;s staff attendance across departments
               </p>
             </div>
-            <span className="font-mono text-xs font-medium text-slate-500 tabular-nums">
+            <span className="font-mono text-xs font-medium text-slate-500 tabular-nums dark:text-slate-400">
               {todayStr}
             </span>
           </div>
@@ -1180,19 +1180,19 @@ export function DashboardView({
               return (
                 <div key={item.department} className="space-y-1.5">
                   <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                    <span className="font-semibold text-slate-800">{item.department}</span>
+                    <span className="font-semibold text-slate-800 dark:text-slate-200">{item.department}</span>
                     <div className="flex flex-wrap items-center gap-3 font-mono text-[11px] tabular-nums">
-                      <span className="text-slate-600">
+                      <span className="text-slate-600 dark:text-slate-400">
                         {item.totalTasks} tasks ({item.completedCount} done ·{' '}
                         {item.pendingCount + item.inProgressCount} active)
                       </span>
-                      <span className="rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 font-semibold text-emerald-700">
+                      <span className="rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 font-semibold text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/50 dark:text-emerald-300">
                         Attendance Today: {todayAttTotal}
                         {item.lateToday > 0 ? ` (${item.lateToday} Late)` : ''}
                       </span>
                     </div>
                   </div>
-                  <div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-100">
+                  <div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
                     <div
                       className="flex h-full rounded-full bg-indigo-600 transition-all duration-300"
                       style={{ width: `${Math.max(totalPct, item.totalTasks > 0 ? 8 : 0)}%` }}
@@ -1211,7 +1211,7 @@ export function DashboardView({
             })}
           </div>
 
-          <div className="mt-5 flex flex-wrap items-center gap-5 border-t border-slate-100 pt-4 text-xs text-slate-500">
+          <div className="mt-5 flex flex-wrap items-center gap-5 border-t border-slate-100 pt-4 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
             <span className="inline-flex items-center gap-2">
               <span className="h-2.5 w-2.5 rounded-xs bg-emerald-500" aria-hidden="true" />
               Completed tasks
@@ -1225,15 +1225,15 @@ export function DashboardView({
       </section>
 
       {/* Financial Cost-Center & Budget Variance Tracker */}
-      <section className="rounded-xl border border-slate-200 bg-white p-6">
-        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-100 pb-4">
+      <section className="rounded-xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900">
+        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-100 pb-4 dark:border-slate-800">
           <div className="flex items-center gap-2.5">
-            <Wallet className="h-4 w-4 text-indigo-600 shrink-0" aria-hidden="true" />
+            <Wallet className="h-4 w-4 text-indigo-600 shrink-0 dark:text-indigo-400" aria-hidden="true" />
             <div>
-              <h2 className="font-display text-base font-bold text-slate-900">
+              <h2 className="font-display text-base font-bold text-slate-900 dark:text-slate-100">
                 Financial Cost-Center &amp; Budget Variance Tracker
               </h2>
-              <p className="mt-0.5 text-xs text-slate-500">
+              <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                 Multi-currency project &amp; vendor budget utilization normalized in USD equivalent
               </p>
             </div>
@@ -1243,7 +1243,7 @@ export function DashboardView({
             <button
               type="button"
               onClick={onNavigateToProjects}
-              className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-700"
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300"
             >
               <span>Manage Cost Centers</span>
               <ArrowRight className="h-3.5 w-3.5" />
@@ -1252,28 +1252,28 @@ export function DashboardView({
         </div>
 
         <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
-            <p className="text-[11px] font-medium text-slate-500">
+          <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-950/60">
+            <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
               Portfolio Estimated Budget (USD eq.)
             </p>
-            <p className="mt-1 font-display text-xl font-bold text-slate-900 tabular-nums">
+            <p className="mt-1 font-display text-xl font-bold text-slate-900 tabular-nums dark:text-slate-100">
               {formatCurrency(portfolioBudgetUsd, 'USD')}
             </p>
           </div>
-          <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
-            <p className="text-[11px] font-medium text-slate-500">
+          <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-950/60">
+            <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
               Portfolio Actual Spend (USD eq.)
             </p>
-            <p className="mt-1 font-display text-xl font-bold text-slate-900 tabular-nums">
+            <p className="mt-1 font-display text-xl font-bold text-slate-900 tabular-nums dark:text-slate-100">
               {formatCurrency(portfolioSpendUsd, 'USD')}
             </p>
           </div>
-          <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+          <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-950/60">
             <div className="flex items-center justify-between">
-              <p className="text-[11px] font-medium text-slate-500">Overall Utilization</p>
+              <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">Overall Utilization</p>
               <span
                 className={`font-mono text-[11px] font-bold ${
-                  overBudgetProjectsCount > 0 ? 'text-rose-700' : 'text-emerald-700'
+                  overBudgetProjectsCount > 0 ? 'text-rose-700 dark:text-rose-400' : 'text-emerald-700 dark:text-emerald-400'
                 }`}
               >
                 {overBudgetProjectsCount > 0
@@ -1297,23 +1297,23 @@ export function DashboardView({
               return (
                 <div
                   key={proj.id}
-                  className="rounded-xl border border-slate-200 bg-white p-3.5"
+                  className="rounded-xl border border-slate-200 bg-white p-3.5 dark:border-slate-800 dark:bg-slate-950/50"
                 >
                   <div className="flex items-center justify-between gap-2">
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5">
-                        <span className="font-mono text-[11px] font-bold text-indigo-700">
+                        <span className="font-mono text-[11px] font-bold text-indigo-700 dark:text-indigo-400">
                           {proj.code}
                         </span>
-                        <span className="rounded border border-slate-200 bg-slate-50 px-1 py-0.5 font-mono text-[10px] font-semibold text-slate-600">
+                        <span className="rounded border border-slate-200 bg-slate-50 px-1 py-0.5 font-mono text-[10px] font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
                           {cur}
                         </span>
                       </div>
-                      <p className="mt-0.5 truncate text-xs font-bold text-slate-900">
+                      <p className="mt-0.5 truncate text-xs font-bold text-slate-900 dark:text-slate-100">
                         {proj.name}
                       </p>
                     </div>
-                    <span className="font-mono text-[11px] font-semibold text-slate-600 tabular-nums shrink-0">
+                    <span className="font-mono text-[11px] font-semibold text-slate-600 tabular-nums shrink-0 dark:text-slate-300">
                       {formatCurrency(spend, cur)} / {formatCurrency(est, cur)}
                     </span>
                   </div>
@@ -1333,16 +1333,16 @@ export function DashboardView({
       {/* Department Performance & SLA Analytics (Visible in both Overview & Dedicated Sub-Tab) */}
       <section
         aria-label="Department Performance and SLA Analytics"
-        className="rounded-xl border border-slate-200 bg-white"
+        className="rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
       >
-        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 px-4 py-4 sm:px-6">
+        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 px-4 py-4 dark:border-slate-800 sm:px-6">
           <div className="flex items-center gap-2.5">
-            <BarChart3 className="h-4 w-4 text-indigo-600 shrink-0" aria-hidden="true" />
+            <BarChart3 className="h-4 w-4 text-indigo-600 shrink-0 dark:text-indigo-400" aria-hidden="true" />
             <div>
-              <h2 className="font-display text-base font-bold text-slate-900">
+              <h2 className="font-display text-base font-bold text-slate-900 dark:text-slate-100">
                 Department Performance &amp; SLA Analytics
               </h2>
-              <p className="mt-0.5 text-xs text-slate-500">
+              <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                 Cross-department comparison of request throughput, SLA compliance %, approval
                 turnaround speed, and today&apos;s staff attendance
               </p>
@@ -1350,16 +1350,16 @@ export function DashboardView({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700 tabular-nums">
+            <span className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700 tabular-nums dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
               Overall SLA Compliance: {overallSlaCompliancePct}%
             </span>
-            <span className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700 tabular-nums">
+            <span className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700 tabular-nums dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
               Avg Turnaround: {formatTurnaroundDuration(overallAvgTurnaroundHours)}
             </span>
             <button
               type="button"
               onClick={handleDownloadScorecard}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-800 transition-colors hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 whitespace-nowrap"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-800 transition-colors hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-indigo-700 dark:hover:bg-indigo-950/60 dark:hover:text-indigo-300 whitespace-nowrap"
             >
               <Download className="h-3.5 w-3.5" />
               <span>Download Scorecard CSV</span>
@@ -1368,7 +1368,7 @@ export function DashboardView({
         </div>
 
         {/* Responsive Department Performance Summary Cards */}
-        <div className="grid grid-cols-1 gap-3 border-b border-slate-200 bg-slate-50/40 p-4 sm:grid-cols-2 sm:p-6 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 border-b border-slate-200 bg-slate-50/40 p-4 dark:border-slate-800 dark:bg-slate-950/40 sm:grid-cols-2 sm:p-6 xl:grid-cols-3">
           {scorecardRows.map((row) => {
             const slaPct = row.slaCompliancePct ?? 100;
             const attRate = row.attendanceRatePct ?? 0;
@@ -1377,22 +1377,22 @@ export function DashboardView({
             return (
               <div
                 key={`card-${row.department}`}
-                className="flex flex-col justify-between rounded-xl border border-slate-200 bg-white p-4"
+                className="flex flex-col justify-between rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900"
               >
                 <div>
                   <div className="flex items-start justify-between gap-2">
                     <div>
-                      <h3 className="text-sm font-bold text-slate-900">{row.department}</h3>
-                      <p className="mt-0.5 text-xs text-slate-500 tabular-nums">
+                      <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">{row.department}</h3>
+                      <p className="mt-0.5 text-xs text-slate-500 tabular-nums dark:text-slate-400">
                         {row.approvedCount} approved of {row.totalRequests} total requests
                       </p>
                     </div>
                     {row.overdueCount > 0 ? (
-                      <span className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-rose-50 px-2 py-0.5 text-[11px] font-bold text-rose-700 tabular-nums">
+                      <span className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-rose-50 px-2 py-0.5 text-[11px] font-bold text-rose-700 tabular-nums dark:border-rose-900/60 dark:bg-rose-950/50 dark:text-rose-300">
                         {row.overdueCount} SLA Breach{row.overdueCount > 1 ? 'es' : ''}
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                      <span className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/50 dark:text-emerald-300">
                         SLA Healthy
                       </span>
                     )}
@@ -1401,12 +1401,12 @@ export function DashboardView({
                   {/* SLA Compliance Progress Bar */}
                   <div className="mt-3.5">
                     <div className="flex items-center justify-between text-xs">
-                      <span className="font-medium text-slate-600">SLA Compliance Rate</span>
-                      <span className="font-mono font-bold text-slate-900 tabular-nums">
+                      <span className="font-medium text-slate-600 dark:text-slate-400">SLA Compliance Rate</span>
+                      <span className="font-mono font-bold text-slate-900 tabular-nums dark:text-slate-100">
                         {row.totalRequests > 0 ? `${slaPct}%` : '—'}
                       </span>
                     </div>
-                    <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                    <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
                       <div
                         className={`h-full rounded-full transition-all duration-300 ${
                           slaPct >= 85
@@ -1422,18 +1422,18 @@ export function DashboardView({
                 </div>
 
                 {/* Turnaround & Attendance Metrics */}
-                <div className="mt-4 grid grid-cols-2 gap-2.5 border-t border-slate-100 pt-3 text-xs">
+                <div className="mt-4 grid grid-cols-2 gap-2.5 border-t border-slate-100 pt-3 text-xs dark:border-slate-800">
                   <div>
-                    <p className="text-[11px] text-slate-500">Avg Turnaround</p>
-                    <p className="mt-0.5 font-mono font-bold text-slate-900 tabular-nums">
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">Avg Turnaround</p>
+                    <p className="mt-0.5 font-mono font-bold text-slate-900 tabular-nums dark:text-slate-100">
                       {formatTurnaroundDuration(row.avgTurnaroundHours ?? null)}
                     </p>
                   </div>
                   <div>
-                    <p className="text-[11px] text-slate-500">Staff Attendance Today</p>
-                    <p className="mt-0.5 font-mono font-bold text-slate-900 tabular-nums">
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">Staff Attendance Today</p>
+                    <p className="mt-0.5 font-mono font-bold text-slate-900 tabular-nums dark:text-slate-100">
                       {attToday}/{staffCount}{' '}
-                      <span className="text-[11px] font-medium text-slate-500">
+                      <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
                         ({attRate}%)
                       </span>
                     </p>
@@ -1448,7 +1448,7 @@ export function DashboardView({
         <div className="overflow-x-auto">
           <table className="w-full min-w-[880px] border-collapse text-left text-sm">
             <thead>
-              <tr className="border-b border-slate-200 bg-slate-50/70 text-xs font-semibold text-slate-500">
+              <tr className="border-b border-slate-200 bg-slate-50/70 text-xs font-semibold text-slate-500 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-400">
                 <th className="py-3 pr-3 pl-6">Department</th>
                 <th className="px-3 py-3 text-right">Approved / Total</th>
                 <th className="px-3 py-3">SLA Compliance %</th>
@@ -1458,30 +1458,30 @@ export function DashboardView({
                 <th className="py-3 pr-6 pl-3">Avg QA Checklist %</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {scorecardRows.map((row) => {
                 const slaPct = row.slaCompliancePct ?? 100;
                 const attRate = row.attendanceRatePct ?? 0;
                 const staffCount = row.activeStaffCount ?? 0;
                 const attToday = row.attendanceTodayCount ?? 0;
                 return (
-                  <tr key={row.department} className="transition-colors hover:bg-slate-50/70">
-                    <td className="py-3.5 pr-3 pl-6 font-semibold text-slate-900 whitespace-nowrap">
+                  <tr key={row.department} className="transition-colors hover:bg-slate-50/70 dark:hover:bg-slate-800/40">
+                    <td className="py-3.5 pr-3 pl-6 font-semibold text-slate-900 whitespace-nowrap dark:text-slate-100">
                       {row.department}
                     </td>
-                    <td className="px-3 py-3.5 text-right font-mono text-xs font-semibold text-slate-800 tabular-nums whitespace-nowrap">
+                    <td className="px-3 py-3.5 text-right font-mono text-xs font-semibold text-slate-800 tabular-nums whitespace-nowrap dark:text-slate-200">
                       {row.approvedCount} / {row.totalRequests}
-                      <span className="ml-1.5 text-[11px] font-normal text-slate-400">
+                      <span className="ml-1.5 text-[11px] font-normal text-slate-400 dark:text-slate-500">
                         ({row.approvalRatePct}%)
                       </span>
                     </td>
                     <td className="px-3 py-3.5">
                       <div className="flex items-center gap-2.5">
-                        <div className="h-2 w-24 overflow-hidden rounded-full bg-slate-100">
+                        <div className="h-2 w-24 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
                           <div
                             className={`h-full rounded-full ${
                               row.totalRequests === 0
-                                ? 'bg-slate-300'
+                                ? 'bg-slate-300 dark:bg-slate-700'
                                 : slaPct >= 85
                                   ? 'bg-emerald-600'
                                   : slaPct >= 60
@@ -1491,48 +1491,48 @@ export function DashboardView({
                             style={{ width: `${row.totalRequests > 0 ? slaPct : 0}%` }}
                           />
                         </div>
-                        <span className="font-mono text-xs font-semibold text-slate-800 tabular-nums">
+                        <span className="font-mono text-xs font-semibold text-slate-800 tabular-nums dark:text-slate-200">
                           {row.totalRequests > 0 ? `${slaPct}%` : '—'}
                         </span>
                       </div>
                     </td>
-                    <td className="px-3 py-3.5 text-right font-mono text-xs font-semibold text-slate-800 tabular-nums whitespace-nowrap">
+                    <td className="px-3 py-3.5 text-right font-mono text-xs font-semibold text-slate-800 tabular-nums whitespace-nowrap dark:text-slate-200">
                       {formatTurnaroundDuration(row.avgTurnaroundHours ?? null)}
                     </td>
                     <td className="px-3 py-3.5 text-right font-mono text-xs tabular-nums">
                       {row.overdueCount > 0 ? (
-                        <span className="inline-flex items-center rounded-md border border-rose-200 bg-rose-50 px-2 py-0.5 font-bold text-rose-700">
+                        <span className="inline-flex items-center rounded-md border border-rose-200 bg-rose-50 px-2 py-0.5 font-bold text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/50 dark:text-rose-300">
                           {row.overdueCount}
                         </span>
                       ) : (
-                        <span className="font-medium text-emerald-700">0</span>
+                        <span className="font-medium text-emerald-700 dark:text-emerald-400">0</span>
                       )}
                     </td>
                     <td className="px-3 py-3.5 whitespace-nowrap">
                       <div className="flex items-center gap-2">
-                        <span className="font-mono text-xs font-semibold text-slate-800 tabular-nums">
+                        <span className="font-mono text-xs font-semibold text-slate-800 tabular-nums dark:text-slate-200">
                           {attToday}/{staffCount}
                         </span>
-                        <span className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-slate-600 tabular-nums">
+                        <span className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-slate-600 tabular-nums dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
                           {attRate}%
                         </span>
                       </div>
                     </td>
                     <td className="py-3.5 pr-6 pl-3">
                       <div className="flex items-center gap-2.5">
-                        <div className="h-2 w-24 overflow-hidden rounded-full bg-slate-100">
+                        <div className="h-2 w-24 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
                           <div
                             className={`h-full rounded-full ${
                               row.avgChecklistPct >= 80
                                 ? 'bg-indigo-600'
                                 : row.avgChecklistPct >= 50
                                   ? 'bg-amber-500'
-                                  : 'bg-slate-400'
+                                  : 'bg-slate-400 dark:bg-slate-600'
                             }`}
                             style={{ width: `${row.avgChecklistPct}%` }}
                           />
                         </div>
-                        <span className="font-mono text-xs font-semibold text-slate-800 tabular-nums">
+                        <span className="font-mono text-xs font-semibold text-slate-800 tabular-nums dark:text-slate-200">
                           {row.avgChecklistPct}%
                         </span>
                       </div>
@@ -1548,14 +1548,14 @@ export function DashboardView({
       {dashboardTab === 'analytics' && (
         <section
           aria-label="Active SLA Breach Escalation Watchlist"
-          className="rounded-xl border border-slate-200 bg-white"
+          className="rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
         >
-          <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 px-4 py-4 sm:px-6">
+          <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 px-4 py-4 dark:border-slate-800 sm:px-6">
             <div>
-              <h2 className="font-display text-base font-bold text-slate-900">
+              <h2 className="font-display text-base font-bold text-slate-900 dark:text-slate-100">
                 Active SLA Escalations &amp; Breached Requests
               </h2>
-              <p className="mt-0.5 text-xs text-slate-500">
+              <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                 Requests exceeding configured SLA windows ({slaPolicy.urgentHours}h Urgent ·{' '}
                 {slaPolicy.highHours}h High · {slaPolicy.mediumHours}h Medium ·{' '}
                 {slaPolicy.lowHours}h Low)
@@ -1566,7 +1566,7 @@ export function DashboardView({
               onClick={() =>
                 onNavigateToOverdueQueue ? onNavigateToOverdueQueue() : onNavigateToQueue('All')
               }
-              className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-700"
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300"
             >
               <span>Filter Overdue in Queue</span>
               <ArrowRight className="h-3.5 w-3.5" />
@@ -1576,10 +1576,10 @@ export function DashboardView({
           {slaBreachedRequests.length === 0 ? (
             <div className="px-6 py-10 text-center">
               <CheckCircle2 className="mx-auto h-7 w-7 text-emerald-500" />
-              <p className="mt-2 text-sm font-semibold text-slate-900">
+              <p className="mt-2 text-sm font-semibold text-slate-900 dark:text-slate-100">
                 Zero SLA Breaches Across All Departments
               </p>
-              <p className="mt-0.5 text-xs text-slate-500">
+              <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                 All active requests are currently operating within target SLA response windows.
               </p>
             </div>
@@ -1587,7 +1587,7 @@ export function DashboardView({
             <div className="overflow-x-auto">
               <table className="w-full min-w-[760px] border-collapse text-left text-sm">
                 <thead>
-                  <tr className="border-b border-slate-200 bg-slate-50/70 text-xs font-semibold text-slate-500">
+                  <tr className="border-b border-slate-200 bg-slate-50/70 text-xs font-semibold text-slate-500 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-400">
                     <th className="py-3 pr-3 pl-6">Request ID</th>
                     <th className="px-3 py-3">Operational Deliverable</th>
                     <th className="px-3 py-3">Department</th>
@@ -1596,19 +1596,19 @@ export function DashboardView({
                     <th className="py-3 pr-6 pl-3 text-right">Action</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                   {slaBreachedRequests.map((req) => (
-                    <tr key={req.id} className="bg-rose-50/20 hover:bg-rose-50/45">
-                      <td className="py-3.5 pr-3 pl-6 font-mono text-xs font-bold text-indigo-700 tabular-nums whitespace-nowrap">
+                    <tr key={req.id} className="bg-rose-50/20 hover:bg-rose-50/45 dark:bg-rose-950/15 dark:hover:bg-rose-950/30">
+                      <td className="py-3.5 pr-3 pl-6 font-mono text-xs font-bold text-indigo-700 tabular-nums whitespace-nowrap dark:text-indigo-400">
                         {req.id}
                       </td>
                       <td className="px-3 py-3.5">
-                        <p className="max-w-xs truncate font-semibold text-slate-900">{req.title}</p>
-                        <p className="text-xs text-slate-500">
+                        <p className="max-w-xs truncate font-semibold text-slate-900 dark:text-slate-100">{req.title}</p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
                           {req.category} · Owner: {req.submittedBy}
                         </p>
                       </td>
-                      <td className="px-3 py-3.5 text-xs font-medium text-slate-700 whitespace-nowrap">
+                      <td className="px-3 py-3.5 text-xs font-medium text-slate-700 whitespace-nowrap dark:text-slate-300">
                         {req.department}
                       </td>
                       <td className="px-3 py-3.5">
@@ -1628,7 +1628,7 @@ export function DashboardView({
                         <button
                           type="button"
                           onClick={() => onOpenRequest(req)}
-                          className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 transition-colors hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 whitespace-nowrap"
+                          className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 transition-colors hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-indigo-700 dark:hover:bg-indigo-950/60 dark:hover:text-indigo-300 whitespace-nowrap"
                         >
                           <span>Inspect</span>
                           <ArrowUpRight className="h-3.5 w-3.5" />
@@ -1647,20 +1647,20 @@ export function DashboardView({
         <>
 
       {/* Urgent Attention Table */}
-      <section className="rounded-xl border border-slate-200 bg-white">
-        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 px-6 py-4">
+      <section className="rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 px-6 py-4 dark:border-slate-800">
           <div>
-            <h2 className="font-display text-base font-bold text-slate-900">
+            <h2 className="font-display text-base font-bold text-slate-900 dark:text-slate-100">
               Urgent Attention Queue
             </h2>
-            <p className="mt-0.5 text-xs text-slate-500">
+            <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
               High/Urgent priority submissions and revision blockers requiring immediate action
             </p>
           </div>
           <button
             type="button"
             onClick={() => onNavigateToQueue('All')}
-            className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-700"
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300"
           >
             <span>View Full Queue</span>
             <ArrowRight className="h-3.5 w-3.5" />
@@ -1669,10 +1669,10 @@ export function DashboardView({
 
         {urgentRequests.length === 0 ? (
           <div className="px-6 py-10 text-center">
-            <p className="text-sm font-medium text-slate-700">
+            <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
               All high-priority and urgent items have been resolved.
             </p>
-            <p className="mt-1 text-xs text-slate-500">
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
               New urgent requests will automatically surface here.
             </p>
           </div>
@@ -1680,7 +1680,7 @@ export function DashboardView({
           <div className="overflow-x-auto">
             <table className="w-full min-w-[720px] border-collapse text-left text-sm">
               <thead>
-                <tr className="border-b border-slate-200 bg-slate-50/70 text-xs font-semibold text-slate-500">
+                <tr className="border-b border-slate-200 bg-slate-50/70 text-xs font-semibold text-slate-500 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-400">
                   <th className="py-3 pr-3 pl-6">Request ID</th>
                   <th className="px-3 py-3">Operational Deliverable</th>
                   <th className="px-3 py-3">Department</th>
@@ -1690,24 +1690,24 @@ export function DashboardView({
                   <th className="py-3 pr-6 pl-3 text-right">Action</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {urgentRequests.map((req) => {
                   const overdue = isRequestOverdue(req, slaPolicy, nowMs);
                   return (
                     <tr
                       key={req.id}
-                      className="transition-colors hover:bg-slate-50/80"
+                      className="transition-colors hover:bg-slate-50/80 dark:hover:bg-slate-800/40"
                     >
-                      <td className="py-3.5 pr-3 pl-6 font-mono text-xs font-semibold text-slate-900 tabular-nums whitespace-nowrap">
+                      <td className="py-3.5 pr-3 pl-6 font-mono text-xs font-semibold text-slate-900 tabular-nums whitespace-nowrap dark:text-slate-100">
                         {req.id}
                       </td>
                       <td className="px-3 py-3.5">
-                        <p className="max-w-xs truncate font-medium text-slate-900">{req.title}</p>
-                        <p className="text-xs text-slate-500">
+                        <p className="max-w-xs truncate font-medium text-slate-900 dark:text-slate-100">{req.title}</p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
                           {req.category} · {req.submittedBy}
                         </p>
                       </td>
-                      <td className="px-3 py-3.5 text-xs font-medium text-slate-700 whitespace-nowrap">
+                      <td className="px-3 py-3.5 text-xs font-medium text-slate-700 whitespace-nowrap dark:text-slate-300">
                         {req.department}
                       </td>
                       <td className="px-3 py-3.5">
@@ -1721,7 +1721,7 @@ export function DashboardView({
                       </td>
                       <td
                         className={`px-3 py-3.5 font-mono text-xs tabular-nums whitespace-nowrap ${
-                          overdue ? 'font-semibold text-rose-700' : 'text-slate-600'
+                          overdue ? 'font-semibold text-rose-700 dark:text-rose-400' : 'text-slate-600 dark:text-slate-400'
                         }`}
                       >
                         {formatShortDate(req.dueDate)}
@@ -1730,7 +1730,7 @@ export function DashboardView({
                         <button
                           type="button"
                           onClick={() => onOpenRequest(req)}
-                          className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 transition-colors hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 whitespace-nowrap"
+                          className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 transition-colors hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-indigo-700 dark:hover:bg-indigo-950/60 dark:hover:text-indigo-300 whitespace-nowrap"
                         >
                           <span>Review</span>
                           <ArrowUpRight className="h-3.5 w-3.5" />
@@ -1748,36 +1748,36 @@ export function DashboardView({
       {/* Team Online Presence & Active Directory Strip */}
       <section
         aria-label="Team Online Presence"
-        className="rounded-xl border border-slate-200 bg-white p-5 sm:p-6"
+        className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900 sm:p-6"
       >
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-4 dark:border-slate-800">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-600">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-600 dark:border-emerald-900/60 dark:bg-emerald-950/50 dark:text-emerald-400">
               <Users className="h-4 w-4" aria-hidden="true" />
             </div>
             <div>
-              <h2 className="font-display text-base font-bold text-slate-900">
+              <h2 className="font-display text-base font-bold text-slate-900 dark:text-slate-100">
                 Team Online Presence
               </h2>
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-slate-500 dark:text-slate-400">
                 Live availability and recent activity across approved workspace members
               </p>
             </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 tabular-nums">
+            <span className="inline-flex items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 tabular-nums dark:border-emerald-900/60 dark:bg-emerald-950/50 dark:text-emerald-300">
               <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
               <span>{onlineMembersCount} Online</span>
             </span>
-            <span className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 font-mono text-xs font-medium text-slate-600 tabular-nums">
+            <span className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 font-mono text-xs font-medium text-slate-600 tabular-nums dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
               {activeDirectoryWithPresence.length} Active Members
             </span>
           </div>
         </div>
 
         {activeDirectoryWithPresence.length === 0 ? (
-          <div className="py-8 text-center text-xs text-slate-500">
+          <div className="py-8 text-center text-xs text-slate-500 dark:text-slate-400">
             No approved team members found in directory yet.
           </div>
         ) : (
@@ -1791,8 +1791,8 @@ export function DashboardView({
                   key={member.id}
                   className={`flex items-start justify-between gap-2.5 rounded-xl border p-3.5 transition-colors ${
                     isSelf
-                      ? 'border-indigo-200 bg-indigo-50/40'
-                      : 'border-slate-200 bg-slate-50/40 hover:bg-slate-50'
+                      ? 'border-indigo-200 bg-indigo-50/40 dark:border-indigo-800/70 dark:bg-indigo-950/30'
+                      : 'border-slate-200 bg-slate-50/40 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950/40 dark:hover:bg-slate-800/50'
                   }`}
                 >
                   <div className="flex min-w-0 items-center gap-2.5">
@@ -1804,15 +1804,15 @@ export function DashboardView({
                       roundedClass="rounded-lg"
                     />
                     <div className="min-w-0">
-                      <p className="truncate text-xs font-bold text-slate-900">
+                      <p className="truncate text-xs font-bold text-slate-900 dark:text-slate-100">
                         {member.name}
                         {isSelf && (
-                          <span className="ml-1 text-[10px] font-semibold text-indigo-600">
+                          <span className="ml-1 text-[10px] font-semibold text-indigo-600 dark:text-indigo-400">
                             (You)
                           </span>
                         )}
                       </p>
-                      <p className="truncate text-[11px] text-slate-500">
+                      <p className="truncate text-[11px] text-slate-500 dark:text-slate-400">
                         {member.department} · {member.role}
                       </p>
                       <div className="mt-1.5">
@@ -1837,22 +1837,22 @@ export function DashboardView({
       {/* Post / Edit Official Notice Modal (Admin Only) */}
       {noticeModalOpen && isAdmin && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs sm:p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs dark:bg-slate-950/75 sm:p-4"
           role="dialog"
           aria-modal="true"
         >
-          <div className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3.5 sm:px-6 sm:py-4">
+          <div className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3.5 dark:border-slate-800 sm:px-6 sm:py-4">
               <div className="flex items-center gap-2">
-                <Megaphone className="h-4 w-4 text-indigo-600" />
-                <h3 className="font-display text-base font-bold text-slate-900">
+                <Megaphone className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                <h3 className="font-display text-base font-bold text-slate-900 dark:text-slate-100">
                   {editingNotice ? 'Edit Official Company Notice' : 'Post Official Company Notice'}
                 </h3>
               </div>
               <button
                 type="button"
                 onClick={() => setNoticeModalOpen(false)}
-                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -1860,14 +1860,14 @@ export function DashboardView({
 
             <form onSubmit={handleNoticeSubmit} className="flex-1 space-y-4 overflow-y-auto p-4 sm:p-6">
               {noticeError && (
-                <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700">
+                <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/50 dark:text-rose-300">
                   {noticeError}
                 </div>
               )}
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700">
-                  Headline <span className="text-rose-600">*</span>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Headline <span className="text-rose-600 dark:text-rose-400">*</span>
                 </label>
                 <input
                   type="text"
@@ -1875,19 +1875,19 @@ export function DashboardView({
                   value={noticeTitle}
                   onChange={(e) => setNoticeTitle(e.target.value)}
                   placeholder="e.g., Official Holiday Notice & Updated Attendance Cutoff"
-                  className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                  className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
                 />
               </div>
 
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700">
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
                     Priority Tag
                   </label>
                   <select
                     value={noticeTag}
                     onChange={(e) => setNoticeTag(e.target.value as AnnouncementPriorityTag)}
-                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                   >
                     <option value="General">General</option>
                     <option value="HR">HR</option>
@@ -1896,12 +1896,12 @@ export function DashboardView({
                 </div>
 
                 <div className="flex items-end pb-2">
-                  <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-700">
+                  <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-300">
                     <input
                       type="checkbox"
                       checked={noticePinned}
                       onChange={(e) => setNoticePinned(e.target.checked)}
-                      className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                      className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-950"
                     />
                     Pin to top of Notice Board
                   </label>
@@ -1909,8 +1909,8 @@ export function DashboardView({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700">
-                  Circular / Policy Details <span className="text-rose-600">*</span>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Circular / Policy Details <span className="text-rose-600 dark:text-rose-400">*</span>
                 </label>
                 <textarea
                   rows={4}
@@ -1918,15 +1918,15 @@ export function DashboardView({
                   value={noticeMessage}
                   onChange={(e) => setNoticeMessage(e.target.value)}
                   placeholder="Write official circular text, effective dates, and action items..."
-                  className="mt-1.5 w-full rounded-lg border border-slate-200 p-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                  className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
                 />
               </div>
 
-              <div className="flex items-center justify-end gap-2 border-t border-slate-100 pt-3">
+              <div className="flex items-center justify-end gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
                 <button
                   type="button"
                   onClick={() => setNoticeModalOpen(false)}
-                  className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                  className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
                 >
                   Cancel
                 </button>

@@ -60,10 +60,10 @@ export function AuditLogsView({
   return (
     <div className="space-y-5">
       {/* Header Controls */}
-      <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between dark:border-slate-800 dark:bg-slate-900">
         <div className="relative flex-1">
           <Search
-            className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400"
+            className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-slate-500"
             aria-hidden="true"
           />
           <input
@@ -71,7 +71,7 @@ export function AuditLogsView({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search security audit trail by Actor, Email, Target ID, Action, or Details..."
-            className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50 pr-3 pl-9 text-sm text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:bg-white focus:outline-none"
+            className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50 pr-3 pl-9 text-sm text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:bg-white focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:bg-slate-900"
           />
         </div>
 
@@ -83,7 +83,7 @@ export function AuditLogsView({
             id="audit-action-filter"
             value={actionFilter}
             onChange={(e) => setActionFilter(e.target.value as AuditActionType | 'All')}
-            className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 focus:border-indigo-500 focus:outline-none"
+            className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
           >
             {ACTION_TYPES.map((type) => (
               <option key={type} value={type}>
@@ -96,7 +96,7 @@ export function AuditLogsView({
             type="button"
             onClick={handleExport}
             disabled={filteredLogs.length === 0}
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-slate-900 px-3.5 text-xs font-semibold text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap"
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-slate-900 px-3.5 text-xs font-semibold text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap dark:bg-indigo-600 dark:hover:bg-indigo-700"
           >
             <Download className="h-3.5 w-3.5" />
             <span>Export CSV Report</span>
@@ -105,9 +105,9 @@ export function AuditLogsView({
       </div>
 
       {/* Ledger Summary Bar */}
-      <div className="flex items-center justify-between px-1 text-xs text-slate-500">
+      <div className="flex items-center justify-between px-1 text-xs text-slate-500 dark:text-slate-400">
         <span className="inline-flex items-center gap-1.5 font-medium">
-          <FileSpreadsheet className="h-3.5 w-3.5 text-slate-400" />
+          <FileSpreadsheet className="h-3.5 w-3.5 text-slate-400 dark:text-slate-500" />
           <span>Admin-Only Security Audit Trail</span>
         </span>
         <span className="font-mono tabular-nums">
@@ -116,13 +116,13 @@ export function AuditLogsView({
       </div>
 
       {/* Audit Ledger Table */}
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
         {filteredLogs.length === 0 ? (
           <div className="px-6 py-14 text-center">
-            <p className="font-display text-sm font-semibold text-slate-900">
+            <p className="font-display text-sm font-semibold text-slate-900 dark:text-slate-100">
               No audit records match your search criteria
             </p>
-            <p className="mt-1 text-xs text-slate-500">
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
               Adjust your search filter or action type to inspect historical compliance events.
             </p>
           </div>
@@ -130,7 +130,7 @@ export function AuditLogsView({
           <div className="overflow-x-auto">
             <table className="w-full min-w-[920px] border-collapse text-left text-sm">
               <thead>
-                <tr className="border-b border-slate-200 bg-slate-50/80 text-xs font-semibold text-slate-500">
+                <tr className="border-b border-slate-200 bg-slate-50/80 text-xs font-semibold text-slate-500 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400">
                   <th className="py-3 pr-3 pl-5">Timestamp</th>
                   <th className="px-3 py-3">Actor &amp; Email</th>
                   <th className="px-3 py-3">Action Type</th>
@@ -138,27 +138,31 @@ export function AuditLogsView({
                   <th className="py-3 pr-5 pl-3">Event Details</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {filteredLogs.map((log) => {
                   const isRequestTarget = log.requestId.startsWith('REQ-');
                   return (
-                    <tr key={log.id} className="hover:bg-slate-50/70">
-                      <td className="py-3.5 pr-3 pl-5 font-mono text-xs text-slate-500 tabular-nums whitespace-nowrap">
+                    <tr key={log.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/50">
+                      <td className="py-3.5 pr-3 pl-5 font-mono text-xs text-slate-500 tabular-nums whitespace-nowrap dark:text-slate-400">
                         {formatDateTime(log.timestamp)}
                       </td>
                       <td className="px-3 py-3.5 whitespace-nowrap">
-                        <p className="text-xs font-semibold text-slate-900">{log.actorName}</p>
+                        <p className="text-xs font-semibold text-slate-900 dark:text-slate-100">
+                          {log.actorName}
+                        </p>
                         {log.actorEmail && (
-                          <p className="font-mono text-[11px] text-indigo-700">{log.actorEmail}</p>
+                          <p className="font-mono text-[11px] text-indigo-700 dark:text-indigo-400">
+                            {log.actorEmail}
+                          </p>
                         )}
-                        <p className="text-[11px] text-slate-500">
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
                           {log.actorSignOffTitle
                             ? `${log.actorSignOffTitle} · ${log.actorRole}`
                             : log.actorRole}
                         </p>
                       </td>
                       <td className="px-3 py-3.5 whitespace-nowrap">
-                        <span className="inline-flex items-center rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-700">
+                        <span className="inline-flex items-center rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
                           {log.actionType}
                         </span>
                       </td>
@@ -167,16 +171,16 @@ export function AuditLogsView({
                           <button
                             type="button"
                             onClick={() => onInspectRequest(log.requestId)}
-                            className="inline-flex items-center gap-1 font-semibold text-indigo-700 hover:text-indigo-900 hover:underline"
+                            className="inline-flex items-center gap-1 font-semibold text-indigo-700 hover:text-indigo-900 hover:underline dark:text-indigo-400 dark:hover:text-indigo-300"
                           >
                             <span>{log.requestId}</span>
                             <ArrowUpRight className="h-3 w-3" />
                           </button>
                         ) : (
-                          <span className="text-slate-600">{log.requestId}</span>
+                          <span className="text-slate-600 dark:text-slate-300">{log.requestId}</span>
                         )}
                       </td>
-                      <td className="py-3.5 pr-5 pl-3 text-xs leading-relaxed text-slate-700">
+                      <td className="py-3.5 pr-5 pl-3 text-xs leading-relaxed text-slate-700 dark:text-slate-300">
                         {log.details}
                       </td>
                     </tr>

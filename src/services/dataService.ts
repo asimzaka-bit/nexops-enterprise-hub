@@ -296,6 +296,7 @@ import {
   NavSection,
   NexOpsState,
   OperationalRequest,
+  PendingEditorChange,
   PermissionMatrix,
   ProjectStatus,
   ProjectType,
@@ -525,6 +526,9 @@ function readWorkspaceState(): NexOpsState {
       subtasks: Array.isArray(parsed.subtasks) ? parsed.subtasks : [],
       taskComments: Array.isArray(parsed.taskComments) ? parsed.taskComments : [],
       vaultDocuments: Array.isArray(parsed.vaultDocuments) ? parsed.vaultDocuments : [],
+      pendingEditorChanges: Array.isArray(parsed.pendingEditorChanges)
+        ? parsed.pendingEditorChanges
+        : [],
       permissionMatrix: normalizePermissionMatrix(parsed.permissionMatrix),
     };
   } catch {
@@ -631,7 +635,19 @@ function writeWorkspaceState(state: NexOpsState): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   } catch {
-    // Ignore storage quota or private-mode restrictions
+    try {
+      const compactState: NexOpsState = {
+        ...state,
+        vaultDocuments: state.vaultDocuments.map((doc) => ({
+          ...doc,
+          fileDataUrl:
+            doc.fileDataUrl && doc.fileDataUrl.length <= 131072 ? doc.fileDataUrl : undefined,
+        })),
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(compactState));
+    } catch {
+      // Ignore storage quota or private-mode restrictions
+    }
   }
 }
 
@@ -1841,6 +1857,8 @@ export const SYSTEM_STATE_KEYS = {
   REQUEST_META: 'request_meta',
   WORKSPACE_GMAIL_PREFS: 'workspace_gmail_prefs',
   MASTER_KEY: 'master_key_config',
+  DOCUMENT_VAULT: 'document_vault_items',
+  PENDING_EDITOR_CHANGES: 'pending_editor_changes',
 } as const;
 
 interface SyncedRequestMetaBundle {
@@ -2462,9 +2480,41 @@ export const dataService = {
       ? ((subtaskRes.data ?? []) as NexOpsSubtaskDbRow[]).map(mapDbSubtask)
       : localSnapshot.subtasks;
 
-    const vaultDocuments: DocumentVaultItem[] = !vaultRes.error
-      ? ((vaultRes.data ?? []) as NexOpsVaultDocumentDbRow[]).map(mapDbVaultDocument)
-      : localSnapshot.vaultDocuments;
+    const sysVaultRow = sysMap.get(SYSTEM_STATE_KEYS.DOCUMENT_VAULT);
+    const sysVaultDocs: DocumentVaultItem[] =
+      sysVaultRow && Array.isArray(sysVaultRow.payload)
+        ? (sysVaultRow.payload as DocumentVaultItem[])
+        : [];
+    const sysVaultById = new Map(sysVaultDocs.map((d) => [d.id, d]));
+
+    let vaultDocuments: DocumentVaultItem[];
+    if (!vaultRes.error) {
+      const dbDocs = ((vaultRes.data ?? []) as NexOpsVaultDocumentDbRow[]).map((row) => {
+        const mapped = mapDbVaultDocument(row);
+        const meta = sysVaultById.get(mapped.id);
+        return meta
+          ? {
+              ...mapped,
+              storageBucket: meta.storageBucket ?? mapped.storageBucket,
+              storagePath: meta.storagePath ?? mapped.storagePath,
+              storageProvider: meta.storageProvider ?? mapped.storageProvider,
+            }
+          : mapped;
+      });
+      const dbIds = new Set(dbDocs.map((d) => d.id));
+      const extraSysDocs = sysVaultDocs.filter((d) => !dbIds.has(d.id));
+      vaultDocuments = [...dbDocs, ...extraSysDocs];
+    } else if (sysVaultDocs.length > 0) {
+      vaultDocuments = sysVaultDocs;
+    } else {
+      vaultDocuments = localSnapshot.vaultDocuments;
+    }
+
+    const pendingChangesRow = sysMap.get(SYSTEM_STATE_KEYS.PENDING_EDITOR_CHANGES);
+    const pendingEditorChanges: PendingEditorChange[] =
+      pendingChangesRow && Array.isArray(pendingChangesRow.payload)
+        ? (pendingChangesRow.payload as PendingEditorChange[])
+        : localSnapshot.pendingEditorChanges;
 
     const projectLinksMap = readRequestProjectsMap();
     const assetLinksMap = readRequestAssetsMap();
@@ -2637,6 +2687,7 @@ export const dataService = {
       subtasks,
       taskComments,
       vaultDocuments,
+      pendingEditorChanges,
       permissionMatrix,
     };
 
@@ -2807,6 +2858,11 @@ export const dataService = {
         {
           state_key: SYSTEM_STATE_KEYS.BRANDING,
           payload: brandingOverride ?? readBrandingConfig(),
+          updated_at: now,
+        },
+        {
+          state_key: SYSTEM_STATE_KEYS.PENDING_EDITOR_CHANGES,
+          payload: nextState.pendingEditorChanges ?? [],
           updated_at: now,
         },
       ];
@@ -3987,6 +4043,61 @@ export const dataService = {
       }
     },
 
+    async updateContent(
+      updatedRequest: OperationalRequest,
+      auditEntry: AuditEvent,
+    ): Promise<void> {
+      if (updatedRequest.projectId && updatedRequest.projectCode && updatedRequest.projectName) {
+        saveRequestProjectLink(updatedRequest.id, {
+          projectId: updatedRequest.projectId,
+          projectCode: updatedRequest.projectCode,
+          projectName: updatedRequest.projectName,
+        });
+      }
+      if (updatedRequest.assetId && updatedRequest.assetTag && updatedRequest.assetName) {
+        saveRequestAssetLink(updatedRequest.id, {
+          assetId: updatedRequest.assetId,
+          assetTag: updatedRequest.assetTag,
+          assetName: updatedRequest.assetName,
+        });
+      }
+      saveRequestMeta(updatedRequest.id, {
+        dueDate: updatedRequest.dueDate,
+        deliverableUrl: updatedRequest.deliverableUrl,
+        checklist: updatedRequest.checklist,
+        updatedAt: updatedRequest.updatedAt,
+        currency: updatedRequest.currency,
+        estimatedCost: updatedRequest.estimatedCost,
+        actualSpend: updatedRequest.actualSpend,
+        momCode: updatedRequest.momCode,
+        assignedReviewer: updatedRequest.assignedReviewer,
+        delegatedFromReviewer: updatedRequest.delegatedFromReviewer,
+        stage1Approval: updatedRequest.stage1Approval ?? null,
+        stage2Approval: updatedRequest.stage2Approval ?? null,
+      });
+
+      if (!supabase) {
+        return;
+      }
+
+      const { error } = await supabase
+        .from('operations_data')
+        .update({
+          title: updatedRequest.title,
+          description: updatedRequest.description,
+          category: updatedRequest.category,
+          department: updatedRequest.department,
+          priority: updatedRequest.priority,
+        })
+        .eq('id', updatedRequest.id);
+      if (error) throw error;
+
+      await Promise.all([
+        dataService.auditLogs.append(auditEntry),
+        syncRequestMetaBundleToCloud(auditEntry.actorName),
+      ]);
+    },
+
     async remove(requestId: string, auditEntry?: AuditEvent): Promise<void> {
       if (!supabase) return;
       await Promise.allSettled([
@@ -4223,23 +4334,144 @@ export const dataService = {
   },
 
   // -------------------------------------------------------------------------
-  // 8e. Department Document Vault (`document_vault`)
+  // 8e. Department Document Vault (`document_vault` + Supabase Storage)
   // -------------------------------------------------------------------------
   documentVault: {
-    async upsert(item: DocumentVaultItem, auditEntry?: AuditEvent): Promise<void> {
-      if (!supabase) return;
-      const { error } = await supabase
-        .from('document_vault')
-        .upsert(toVaultDocumentDbRow(item), { onConflict: 'id' });
-      if (error) throw error;
-      if (auditEntry) await dataService.auditLogs.append(auditEntry);
+    async uploadFile(
+      file: File,
+      meta: { id: string; folder: DocumentVaultFolder; department: Department },
+    ): Promise<{
+      url?: string;
+      fileDataUrl?: string;
+      storageBucket?: string;
+      storagePath?: string;
+      storageProvider: 'supabase_storage' | 'cloud_metadata';
+    }> {
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const folderSlug = meta.folder.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+      const deptSlug = meta.department.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+      const storagePath = `${deptSlug}/${folderSlug}/${meta.id}-${safeName}`;
+
+      if (supabase) {
+        const candidateBuckets = ['document-vault', 'nexops-vault'];
+        for (const bucket of candidateBuckets) {
+          try {
+            const { error: uploadErr } = await supabase.storage
+              .from(bucket)
+              .upload(storagePath, file, {
+                cacheControl: '3600',
+                upsert: true,
+                contentType: file.type || 'application/octet-stream',
+              });
+            if (!uploadErr) {
+              const { data: pubData } = supabase.storage.from(bucket).getPublicUrl(storagePath);
+              const publicUrl = pubData?.publicUrl;
+              if (publicUrl) {
+                return {
+                  url: publicUrl,
+                  storageBucket: bucket,
+                  storagePath,
+                  storageProvider: 'supabase_storage',
+                };
+              }
+            }
+          } catch {
+            // Try next bucket or metadata fallback
+          }
+        }
+      }
+
+      // Fallback when Supabase Storage bucket is not pre-configured or offline
+      let fileDataUrl: string | undefined;
+      if (file.size <= 3 * 1024 * 1024) {
+        fileDataUrl = await new Promise<string | undefined>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () =>
+            resolve(typeof reader.result === 'string' ? reader.result : undefined);
+          reader.onerror = () => resolve(undefined);
+          reader.readAsDataURL(file);
+        });
+      }
+
+      return {
+        fileDataUrl,
+        storageProvider: 'cloud_metadata',
+      };
     },
 
-    async remove(itemId: string, auditEntry?: AuditEvent): Promise<void> {
+    async upsert(
+      item: DocumentVaultItem,
+      auditEntry?: AuditEvent,
+      allDocs?: DocumentVaultItem[],
+    ): Promise<void> {
       if (!supabase) return;
-      const { error } = await supabase.from('document_vault').delete().eq('id', itemId);
-      if (error) throw error;
-      if (auditEntry) await dataService.auditLogs.append(auditEntry);
+      let dbErr: unknown = null;
+      try {
+        const { error } = await supabase
+          .from('document_vault')
+          .upsert(toVaultDocumentDbRow(item), { onConflict: 'id' });
+        if (error) dbErr = error;
+      } catch (err) {
+        dbErr = err;
+      }
+
+      if (allDocs) {
+        const lightweightDocs = allDocs.map((d) => ({
+          ...d,
+          fileDataUrl:
+            d.fileDataUrl && d.fileDataUrl.length <= 262144 ? d.fileDataUrl : undefined,
+        }));
+        await dataService.systemState
+          .upsertKey(SYSTEM_STATE_KEYS.DOCUMENT_VAULT, lightweightDocs, item.uploadedBy)
+          .catch(() => {
+            if (dbErr) throw dbErr;
+          });
+      } else if (dbErr) {
+        throw dbErr;
+      }
+
+      if (auditEntry) await dataService.auditLogs.append(auditEntry).catch(() => {});
+    },
+
+    async remove(
+      itemId: string,
+      auditEntry?: AuditEvent,
+      targetItem?: DocumentVaultItem,
+      remainingDocs?: DocumentVaultItem[],
+    ): Promise<void> {
+      if (!supabase) return;
+
+      if (targetItem?.storageBucket && targetItem?.storagePath) {
+        await supabase.storage
+          .from(targetItem.storageBucket)
+          .remove([targetItem.storagePath])
+          .catch(() => {});
+      }
+
+      let dbErr: unknown = null;
+      try {
+        const { error } = await supabase.from('document_vault').delete().eq('id', itemId);
+        if (error) dbErr = error;
+      } catch (err) {
+        dbErr = err;
+      }
+
+      if (remainingDocs) {
+        const lightweightDocs = remainingDocs.map((d) => ({
+          ...d,
+          fileDataUrl:
+            d.fileDataUrl && d.fileDataUrl.length <= 262144 ? d.fileDataUrl : undefined,
+        }));
+        await dataService.systemState
+          .upsertKey(SYSTEM_STATE_KEYS.DOCUMENT_VAULT, lightweightDocs, auditEntry?.actorName)
+          .catch(() => {
+            if (dbErr) throw dbErr;
+          });
+      } else if (dbErr) {
+        throw dbErr;
+      }
+
+      if (auditEntry) await dataService.auditLogs.append(auditEntry).catch(() => {});
     },
   },
 
@@ -4898,6 +5130,32 @@ export const dataService = {
         .delete()
         .in('id', ids)
         .then(() => {}, () => {});
+    },
+  },
+
+  editorChanges: {
+    async saveAll(
+      changes: PendingEditorChange[],
+      updatedBy: string,
+      auditEntry?: AuditEvent,
+    ): Promise<void> {
+      const local = readWorkspaceState();
+      writeWorkspaceState({
+        ...local,
+        pendingEditorChanges: changes,
+      });
+      if (!supabase) return;
+      const tasks: Promise<void>[] = [
+        dataService.systemState.upsertKey(
+          SYSTEM_STATE_KEYS.PENDING_EDITOR_CHANGES,
+          changes,
+          updatedBy,
+        ),
+      ];
+      if (auditEntry) {
+        tasks.push(dataService.auditLogs.append(auditEntry));
+      }
+      await Promise.all(tasks);
     },
   },
 };

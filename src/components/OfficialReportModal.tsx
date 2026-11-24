@@ -78,18 +78,18 @@ export function OfficialReportModal({
 
   return (
     <div
-      className="print-report-overlay fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-2.5 backdrop-blur-xs sm:p-4"
+      className="print-report-overlay fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-2.5 backdrop-blur-xs sm:p-4 dark:bg-slate-950/80"
       role="dialog"
       aria-modal="true"
       aria-labelledby="official-report-heading"
     >
-      <div className="print-report-dialog flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+      <div className="print-report-dialog flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900">
         {/* Non-Printable Modal Action Bar */}
-        <div className="no-print flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 sm:px-6 sm:py-3.5">
+        <div className="no-print flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 sm:px-6 sm:py-3.5 dark:border-slate-800 dark:bg-slate-950/60">
           <div className="flex min-w-0 flex-wrap items-center gap-2.5 sm:gap-3">
             <h2
               id="official-report-heading"
-              className="font-display text-sm font-bold text-slate-900"
+              className="font-display text-sm font-bold text-slate-900 dark:text-slate-100"
             >
               Official Governance Report Preview
             </h2>
@@ -97,7 +97,7 @@ export function OfficialReportModal({
               aria-label="Select report scope"
               value={selectedScope}
               onChange={(e) => setSelectedScope(e.target.value)}
-              className="h-8 max-w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-800 focus:border-indigo-500 focus:outline-none"
+              className="h-8 max-w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-800 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
             >
               <option value="EXECUTIVE">Executive Portfolio Summary (All Requests)</option>
               {requests.map((r) => (
@@ -121,16 +121,16 @@ export function OfficialReportModal({
               type="button"
               onClick={onClose}
               aria-label="Close report preview"
-              className="rounded-lg border border-slate-200 bg-white p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+              className="rounded-lg border border-slate-200 bg-white p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-100"
             >
               <X className="h-4 w-4" />
             </button>
           </div>
         </div>
 
-        {/* Printable Document Body */}
-        <div className="print-report-scroll flex-1 overflow-y-auto bg-white p-4 sm:p-8 md:p-10">
-          <div id="official-print-report" className="mx-auto max-w-3xl space-y-7 text-slate-900">
+        {/* Printable Document Body (kept crisp white paper for WYSIWYG print/PDF fidelity) */}
+        <div className="print-report-scroll flex-1 overflow-y-auto bg-slate-100/80 p-4 sm:p-8 md:p-10 dark:bg-slate-950/90">
+          <div id="official-print-report" className="mx-auto max-w-3xl space-y-7 rounded-xl bg-white p-5 text-slate-900 shadow-sm sm:p-8">
             {/* Corporate Letterhead */}
             <header className="flex flex-wrap items-start justify-between gap-4 border-b-2 border-slate-900 pb-5">
               <NexOpsLogo

@@ -326,6 +326,9 @@ export interface DocumentVaultItem {
   fileSize?: number;
   mimeType?: string;
   fileDataUrl?: string;
+  storageBucket?: string;
+  storagePath?: string;
+  storageProvider?: 'supabase_storage' | 'cloud_metadata' | 'external_link';
   uploadedBy: string;
   uploadedByEmail: string;
   createdAt: string;
@@ -615,8 +618,199 @@ export interface AppNotification {
   recipientEmail?: string;
   recipientRole?: Role | 'all';
   actorEmail?: string;
-  category?: 'user_approval' | 'task' | 'leave' | 'mention' | 'system';
+  category?: 'user_approval' | 'editor_approval' | 'task' | 'leave' | 'mention' | 'system';
   severity: 'info' | 'warning' | 'success' | 'danger';
+}
+
+export type PendingEditorChangeModule =
+  | 'requests'
+  | 'projects'
+  | 'assets'
+  | 'sops'
+  | 'vault'
+  | 'meetings';
+
+export type PendingEditorChangeAction = 'create' | 'update' | 'delete';
+
+export type PendingEditorChangeStatus = 'pending' | 'approved' | 'rejected';
+
+export interface PendingEditorChangeDiff {
+  field: string;
+  before: string;
+  after: string;
+}
+
+export type EditorChangePayload =
+  | {
+      op: 'request_create';
+      request: OperationalRequest;
+    }
+  | {
+      op: 'request_bulk_import';
+      requests: OperationalRequest[];
+    }
+  | {
+      op: 'request_update';
+      requestId: string;
+      patch: Partial<
+        Pick<
+          OperationalRequest,
+          | 'title'
+          | 'category'
+          | 'department'
+          | 'priority'
+          | 'dueDate'
+          | 'description'
+          | 'deliverableUrl'
+          | 'projectId'
+          | 'projectCode'
+          | 'projectName'
+          | 'assetId'
+          | 'assetTag'
+          | 'assetName'
+          | 'currency'
+          | 'estimatedCost'
+          | 'actualSpend'
+          | 'checklist'
+        >
+      >;
+    }
+  | {
+      op: 'request_delete';
+      requestId: string;
+    }
+  | {
+      op: 'request_toggle_checklist';
+      requestId: string;
+      itemId: string;
+      nextChecked: boolean;
+      label: string;
+    }
+  | {
+      op: 'request_update_financials';
+      requestId: string;
+      actualSpend: number;
+    }
+  | {
+      op: 'request_add_subtask';
+      requestId: string;
+      title: string;
+    }
+  | {
+      op: 'request_toggle_subtask';
+      requestId: string;
+      subtaskId: string;
+      nextCompleted: boolean;
+    }
+  | {
+      op: 'request_delete_subtask';
+      requestId: string;
+      subtaskId: string;
+    }
+  | {
+      op: 'request_add_comment';
+      requestId: string;
+      comment: string;
+    }
+  | {
+      op: 'request_add_task_comment';
+      requestId: string;
+      body: string;
+      mentions: string[];
+    }
+  | {
+      op: 'project_create';
+      project: CompanyProject;
+    }
+  | {
+      op: 'project_update';
+      projectId: string;
+      patch: Partial<Omit<CompanyProject, 'id' | 'updatedAt'>>;
+    }
+  | {
+      op: 'project_delete';
+      projectId: string;
+    }
+  | {
+      op: 'asset_create';
+      asset: CompanyAsset;
+    }
+  | {
+      op: 'asset_transfer';
+      assetId: string;
+      patch: {
+        assignedTo: string;
+        department: Department;
+        condition: AssetCondition;
+        status: AssetStatus;
+        notes?: string;
+      };
+    }
+  | {
+      op: 'asset_maintenance';
+      assetId: string;
+      patch: {
+        condition: AssetCondition;
+        status: AssetStatus;
+        notes: string;
+      };
+    }
+  | {
+      op: 'sop_create';
+      sop: SopDocument;
+    }
+  | {
+      op: 'sop_toggle_mandatory';
+      sopId: string;
+      nextMandatory: boolean;
+    }
+  | {
+      op: 'vault_create';
+      document: DocumentVaultItem;
+    }
+  | {
+      op: 'vault_delete';
+      documentId: string;
+    }
+  | {
+      op: 'meeting_create';
+      meeting: MeetingMinute;
+    }
+  | {
+      op: 'meeting_add_action';
+      meetingId: string;
+      actionItem: MeetingActionItem;
+    }
+  | {
+      op: 'meeting_convert_action';
+      meetingId: string;
+      actionItemId: string;
+    }
+  | {
+      op: 'meeting_complete_action';
+      meetingId: string;
+      actionItemId: string;
+    };
+
+export interface PendingEditorChange {
+  id: string;
+  module: PendingEditorChangeModule;
+  moduleLabel: string;
+  action: PendingEditorChangeAction;
+  targetId: string;
+  itemLabel: string;
+  summary: string;
+  diffs: PendingEditorChangeDiff[];
+  editorId: string;
+  editorName: string;
+  editorEmail: string;
+  editorDepartment: Department;
+  submittedAt: string;
+  status: PendingEditorChangeStatus;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  rejectionReason?: string;
+  payload: EditorChangePayload;
 }
 
 export interface ToastMessage {
@@ -644,5 +838,6 @@ export interface NexOpsState {
   subtasks: TaskSubtask[];
   taskComments: TaskComment[];
   vaultDocuments: DocumentVaultItem[];
+  pendingEditorChanges: PendingEditorChange[];
   permissionMatrix: PermissionMatrix;
 }

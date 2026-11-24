@@ -33,7 +33,7 @@ export function PendingApprovalScreen({
   };
 
   return (
-    <div className="flex min-h-screen flex-col justify-center bg-slate-50 px-4 py-10 sm:px-6 lg:px-8">
+    <div className="flex min-h-screen flex-col justify-center bg-slate-50 px-4 py-10 sm:px-6 lg:px-8 dark:bg-slate-950">
       <div className="mx-auto w-full max-w-lg">
         <NexOpsLogo
           size={54}
@@ -43,13 +43,13 @@ export function PendingApprovalScreen({
           tagline={branding.tagline}
         />
 
-        <div className="mt-7 rounded-2xl border border-slate-200 bg-white p-6 shadow-xs sm:p-8">
+        <div className="mt-7 rounded-2xl border border-slate-200 bg-white p-6 shadow-xs sm:p-8 dark:border-slate-800 dark:bg-slate-900">
           <div className="flex flex-col items-center text-center">
             <div
               className={`flex h-12 w-12 items-center justify-center rounded-xl border ${
                 isBlockedState
-                  ? 'border-rose-200 bg-rose-50 text-rose-600'
-                  : 'border-amber-200 bg-amber-50 text-amber-600'
+                  ? 'border-rose-200 bg-rose-50 text-rose-600 dark:border-rose-900/60 dark:bg-rose-950/50 dark:text-rose-400'
+                  : 'border-amber-200 bg-amber-50 text-amber-600 dark:border-amber-900/60 dark:bg-amber-950/50 dark:text-amber-400'
               }`}
             >
               {isBlockedState ? (
@@ -62,8 +62,8 @@ export function PendingApprovalScreen({
             <span
               className={`mt-4 inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-semibold ${
                 isBlockedState
-                  ? 'border-rose-200 bg-rose-50 text-rose-700'
-                  : 'border-amber-200 bg-amber-50 text-amber-800'
+                  ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/50 dark:text-rose-300'
+                  : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/50 dark:text-amber-300'
               }`}
             >
               <ShieldAlert className="h-3.5 w-3.5" />
@@ -76,7 +76,7 @@ export function PendingApprovalScreen({
               </span>
             </span>
 
-            <h2 className="mt-4 font-display text-lg font-bold text-slate-900">
+            <h2 className="mt-4 font-display text-lg font-bold text-slate-900 dark:text-slate-100">
               {isRejected
                 ? 'Account Access Not Approved — Please contact your administrator'
                 : isDeactivated
@@ -84,7 +84,7 @@ export function PendingApprovalScreen({
                   : 'Account Pending Admin Approval — Please contact your administrator'}
             </h2>
 
-            <p className="mt-2 text-sm leading-relaxed text-slate-600">
+            <p className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-400">
               {isRejected
                 ? 'Your access request has been declined by a System Administrator. Company records remain restricted.'
                 : isDeactivated
@@ -93,25 +93,25 @@ export function PendingApprovalScreen({
             </p>
           </div>
 
-          <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50/80 p-4 text-xs">
+          <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50/80 p-4 text-xs dark:border-slate-800 dark:bg-slate-950/60">
             <dl className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
               <div>
-                <dt className="font-semibold text-slate-500">Registered Name</dt>
-                <dd className="mt-0.5 font-semibold text-slate-900">{user.name}</dd>
+                <dt className="font-semibold text-slate-500 dark:text-slate-400">Registered Name</dt>
+                <dd className="mt-0.5 font-semibold text-slate-900 dark:text-slate-100">{user.name}</dd>
               </div>
               <div>
-                <dt className="font-semibold text-slate-500">Employee ID</dt>
-                <dd className="mt-0.5 font-mono font-semibold text-slate-900">
+                <dt className="font-semibold text-slate-500 dark:text-slate-400">Employee ID</dt>
+                <dd className="mt-0.5 font-mono font-semibold text-slate-900 dark:text-slate-100">
                   {user.employeeId}
                 </dd>
               </div>
               <div>
-                <dt className="font-semibold text-slate-500">Corporate Email</dt>
-                <dd className="mt-0.5 truncate font-semibold text-slate-900">{user.email}</dd>
+                <dt className="font-semibold text-slate-500 dark:text-slate-400">Corporate Email</dt>
+                <dd className="mt-0.5 truncate font-semibold text-slate-900 dark:text-slate-100">{user.email}</dd>
               </div>
               <div>
-                <dt className="font-semibold text-slate-500">Department</dt>
-                <dd className="mt-0.5 font-semibold text-slate-900">{user.department}</dd>
+                <dt className="font-semibold text-slate-500 dark:text-slate-400">Department</dt>
+                <dd className="mt-0.5 font-semibold text-slate-900 dark:text-slate-100">{user.department}</dd>
               </div>
             </dl>
           </div>
@@ -129,7 +129,7 @@ export function PendingApprovalScreen({
             <button
               type="button"
               onClick={() => void onSignOut()}
-              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
             >
               <LogOut className="h-4 w-4" />
               <span>Sign Out</span>

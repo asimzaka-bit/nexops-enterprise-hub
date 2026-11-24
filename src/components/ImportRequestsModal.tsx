@@ -1,13 +1,14 @@
 import {
   AlertCircle,
   CheckCircle2,
+  Clock,
   Download,
   FileSpreadsheet,
   Upload,
   X,
 } from 'lucide-react';
 import { ChangeEvent, DragEvent, useMemo, useRef, useState } from 'react';
-import { Department, Priority, RequestStatus } from '../types/nexops';
+import { Department, Priority, RequestStatus, Role } from '../types/nexops';
 import {
   downloadSampleRequestsCsvTemplate,
   getTodayDateString,
@@ -31,6 +32,7 @@ export interface ImportedRequestRow {
 interface ImportRequestsModalProps {
   nextRequestId: string;
   departments: string[];
+  activeRole?: Role;
   onClose: () => void;
   onImport: (rows: ImportedRequestRow[]) => void;
 }
@@ -68,6 +70,7 @@ function defaultDueDate(): string {
 export function ImportRequestsModal({
   nextRequestId,
   departments,
+  activeRole = 'Admin',
   onClose,
   onImport,
 }: ImportRequestsModalProps) {
@@ -212,26 +215,26 @@ export function ImportRequestsModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs sm:p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs sm:p-4 dark:bg-slate-950/75"
       role="dialog"
       aria-modal="true"
       aria-labelledby="import-csv-modal-title"
     >
-      <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+      <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900">
         {/* Header */}
-        <div className="flex items-center justify-between gap-2 border-b border-slate-200 bg-slate-50/70 px-4 py-3.5 sm:px-6 sm:py-4">
+        <div className="flex items-center justify-between gap-2 border-b border-slate-200 bg-slate-50/70 px-4 py-3.5 sm:px-6 sm:py-4 dark:border-slate-800 dark:bg-slate-950/50">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400">
               <FileSpreadsheet className="h-4 w-4" />
             </div>
             <div className="min-w-0">
               <h2
                 id="import-csv-modal-title"
-                className="font-display text-base font-bold text-slate-900"
+                className="font-display text-base font-bold text-slate-900 dark:text-slate-100"
               >
                 Import Operational Requests (CSV)
               </h2>
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-slate-500 dark:text-slate-400">
                 Bulk upload existing requests into the QA queue with sequential ID assignment
               </p>
             </div>
@@ -240,7 +243,7 @@ export function ImportRequestsModal({
             type="button"
             onClick={onClose}
             aria-label="Close CSV import modal"
-            className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+            className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:text-slate-500 dark:hover:bg-slate-800 dark:hover:text-slate-200"
           >
             <X className="h-5 w-5" />
           </button>
@@ -248,20 +251,31 @@ export function ImportRequestsModal({
 
         {/* Body */}
         <div className="flex-1 space-y-5 overflow-y-auto p-4 sm:p-6">
+          {activeRole === 'Editor' && (
+            <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-xs text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/40 dark:text-amber-200">
+              <Clock className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+              <span>
+                <strong>Maker-Checker Governance:</strong> Bulk CSV imports submitted by an{' '}
+                <strong>Editor</strong> are queued for <strong>Super Admin approval</strong> before
+                creating live requests.
+              </span>
+            </div>
+          )}
+
           {/* Template Download Banner */}
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-indigo-200 bg-indigo-50/60 px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-indigo-200 bg-indigo-50/60 px-4 py-3 dark:border-indigo-900/60 dark:bg-indigo-950/30">
             <div>
-              <p className="text-xs font-bold text-indigo-950">
+              <p className="text-xs font-bold text-indigo-950 dark:text-indigo-200">
                 Need a standardized schema?
               </p>
-              <p className="mt-0.5 text-[11px] text-indigo-700">
+              <p className="mt-0.5 text-[11px] text-indigo-700 dark:text-indigo-300">
                 Download the NexOps CSV template with valid headers, departments, and semicolon-delimited QA gates.
               </p>
             </div>
             <button
               type="button"
               onClick={downloadSampleRequestsCsvTemplate}
-              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-indigo-300 bg-white px-3 text-xs font-semibold text-indigo-700 transition-colors hover:bg-indigo-50 whitespace-nowrap shrink-0"
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-indigo-300 bg-white px-3 text-xs font-semibold text-indigo-700 transition-colors hover:bg-indigo-50 whitespace-nowrap shrink-0 dark:border-indigo-800 dark:bg-slate-900 dark:text-indigo-300 dark:hover:bg-indigo-950/60"
             >
               <Download className="h-3.5 w-3.5" />
               <span>Download Sample Template</span>
@@ -278,8 +292,8 @@ export function ImportRequestsModal({
             onDrop={handleDrop}
             className={`rounded-xl border-2 border-dashed p-6 text-center transition-colors ${
               isDragging
-                ? 'border-indigo-500 bg-indigo-50/40'
-                : 'border-slate-300 bg-slate-50/50 hover:border-slate-400'
+                ? 'border-indigo-500 bg-indigo-50/40 dark:border-indigo-400 dark:bg-indigo-950/30'
+                : 'border-slate-300 bg-slate-50/50 hover:border-slate-400 dark:border-slate-700 dark:bg-slate-950/50 dark:hover:border-slate-600'
             }`}
           >
             <input
@@ -289,20 +303,20 @@ export function ImportRequestsModal({
               onChange={handleFileChange}
               className="hidden"
             />
-            <Upload className="mx-auto h-7 w-7 text-slate-400" aria-hidden="true" />
-            <p className="mt-2 text-xs font-semibold text-slate-900">
+            <Upload className="mx-auto h-7 w-7 text-slate-400 dark:text-slate-500" aria-hidden="true" />
+            <p className="mt-2 text-xs font-semibold text-slate-900 dark:text-slate-100">
               {fileName
                 ? `Loaded file: ${fileName}`
                 : 'Drag and drop a .csv file here, or browse from disk'}
             </p>
-            <p className="mt-1 text-[11px] text-slate-500">
+            <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
               Supported columns: title (required), category, department, priority, status, dueDate, submittedBy, assignedReviewer, deliverableUrl, description, checklist
             </p>
             <div className="mt-3 flex items-center justify-center gap-2">
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-50"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
               >
                 <Upload className="h-3.5 w-3.5" />
                 <span>Choose CSV File</span>
@@ -314,7 +328,7 @@ export function ImportRequestsModal({
                     setCsvText('');
                     setFileName(null);
                   }}
-                  className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100"
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
                 >
                   Clear
                 </button>
@@ -326,7 +340,7 @@ export function ImportRequestsModal({
           <div>
             <label
               htmlFor="csv-paste-input"
-              className="block text-xs font-semibold text-slate-700"
+              className="block text-xs font-semibold text-slate-700 dark:text-slate-300"
             >
               Or Paste Raw CSV Content
             </label>
@@ -336,7 +350,7 @@ export function ImportRequestsModal({
               value={csvText}
               onChange={(e) => setCsvText(e.target.value)}
               placeholder={`title,category,department,priority,status,dueDate\nZero-Trust Firewall Audit,Security Compliance,Engineering,High,Submitted,2026-12-08`}
-              className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 font-mono text-xs text-slate-800 placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none"
+              className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 font-mono text-xs text-slate-800 placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:placeholder:text-slate-500"
             />
           </div>
 
@@ -344,15 +358,15 @@ export function ImportRequestsModal({
           {parsedResult.error && (
             <div
               role="alert"
-              className="flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs font-medium text-rose-800"
+              className="flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs font-medium text-rose-800 dark:border-rose-900/60 dark:bg-rose-950/50 dark:text-rose-300"
             >
-              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-rose-600" />
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-rose-600 dark:text-rose-400" />
               <span>{parsedResult.error}</span>
             </div>
           )}
 
           {parsedResult.warnings.length > 0 && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs text-amber-900">
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/50 dark:text-amber-300">
               {parsedResult.warnings.map((w, idx) => (
                 <p key={idx}>{w}</p>
               ))}
@@ -363,22 +377,22 @@ export function ImportRequestsModal({
           {parsedResult.rows.length > 0 && (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <p className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700">
+                <p className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700 dark:text-emerald-400">
                   <CheckCircle2 className="h-4 w-4 shrink-0" />
                   <span>
                     {parsedResult.rows.length} request
                     {parsedResult.rows.length > 1 ? 's' : ''} validated and ready to import
                   </span>
                 </p>
-                <span className="font-mono text-[11px] text-slate-500 tabular-nums">
+                <span className="font-mono text-[11px] text-slate-500 tabular-nums dark:text-slate-400">
                   Starting at {nextRequestId}
                 </span>
               </div>
 
-              <div className="max-h-52 overflow-auto rounded-xl border border-slate-200">
+              <div className="max-h-52 overflow-auto rounded-xl border border-slate-200 dark:border-slate-800">
                 <table className="w-full border-collapse text-left text-xs">
-                  <thead className="sticky top-0 bg-slate-50 text-[11px] font-semibold text-slate-500">
-                    <tr className="border-b border-slate-200">
+                  <thead className="sticky top-0 bg-slate-50 text-[11px] font-semibold text-slate-500 dark:bg-slate-950 dark:text-slate-400">
+                    <tr className="border-b border-slate-200 dark:border-slate-800">
                       <th className="px-3 py-2">Assigned ID</th>
                       <th className="px-3 py-2">Title</th>
                       <th className="px-3 py-2">Dept</th>
@@ -388,28 +402,28 @@ export function ImportRequestsModal({
                       <th className="px-3 py-2 text-right">QA Gates</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100 bg-white">
+                  <tbody className="divide-y divide-slate-100 bg-white dark:divide-slate-800 dark:bg-slate-900">
                     {parsedResult.rows.map((row, idx) => (
                       <tr key={idx}>
-                        <td className="px-3 py-2 font-mono font-semibold text-indigo-700 tabular-nums whitespace-nowrap">
+                        <td className="px-3 py-2 font-mono font-semibold text-indigo-700 tabular-nums whitespace-nowrap dark:text-indigo-400">
                           {getSequentialIdPreview(nextRequestId, idx)}
                         </td>
-                        <td className="max-w-[200px] truncate px-3 py-2 font-medium text-slate-900">
+                        <td className="max-w-[200px] truncate px-3 py-2 font-medium text-slate-900 dark:text-slate-100">
                           {row.title}
                         </td>
-                        <td className="px-3 py-2 text-slate-600 whitespace-nowrap">
+                        <td className="px-3 py-2 text-slate-600 whitespace-nowrap dark:text-slate-300">
                           {row.department}
                         </td>
-                        <td className="px-3 py-2 text-slate-700 whitespace-nowrap">
+                        <td className="px-3 py-2 text-slate-700 whitespace-nowrap dark:text-slate-300">
                           {row.priority}
                         </td>
-                        <td className="px-3 py-2 text-slate-700 whitespace-nowrap">
+                        <td className="px-3 py-2 text-slate-700 whitespace-nowrap dark:text-slate-300">
                           {row.status}
                         </td>
-                        <td className="px-3 py-2 font-mono text-slate-600 tabular-nums whitespace-nowrap">
+                        <td className="px-3 py-2 font-mono text-slate-600 tabular-nums whitespace-nowrap dark:text-slate-400">
                           {row.dueDate}
                         </td>
-                        <td className="px-3 py-2 text-right font-mono text-slate-600 tabular-nums">
+                        <td className="px-3 py-2 text-right font-mono text-slate-600 tabular-nums dark:text-slate-400">
                           {row.checklist.length}
                         </td>
                       </tr>
@@ -422,11 +436,11 @@ export function ImportRequestsModal({
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-end gap-2.5 border-t border-slate-200 bg-slate-50 px-6 py-3.5">
+        <div className="flex items-center justify-end gap-2.5 border-t border-slate-200 bg-slate-50 px-6 py-3.5 dark:border-slate-800 dark:bg-slate-950/60">
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+            className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
           >
             Cancel
           </button>

@@ -7,6 +7,7 @@ import {
   Check,
   CheckCircle2,
   Copy,
+  Edit3,
   ExternalLink,
   FileOutput,
   GitBranch,
@@ -29,6 +30,7 @@ import { FormEvent, Fragment, useEffect, useMemo, useRef, useState } from 'react
 import {
   DEFAULT_SLA_POLICY,
   OperationalRequest,
+  PendingEditorChange,
   RequestStatus,
   Role,
   SlaPolicyConfig,
@@ -55,6 +57,7 @@ import {
   BudgetHealthBar,
   DelegatedBadge,
   OverdueBadge,
+  PendingApprovalBadge,
   PriorityBadge,
   ProjectLinkBadge,
   RoleBadge,
@@ -68,10 +71,12 @@ interface RequestDetailDrawerProps {
   activeRole: Role;
   approvalBudgetThresholdUsd?: number;
   slaPolicy?: SlaPolicyConfig;
+  pendingEditorChanges?: PendingEditorChange[];
   subtasks: TaskSubtask[];
   taskComments: TaskComment[];
   teamMembers: TeamMember[];
   onClose: () => void;
+  onEditRequest?: (request: OperationalRequest) => void;
   onToggleChecklistItem: (requestId: string, itemId: string) => void;
   onTransitionStatus: (
     requestId: string,
@@ -96,10 +101,12 @@ export function RequestDetailDrawer({
   activeRole,
   approvalBudgetThresholdUsd = 5000,
   slaPolicy = DEFAULT_SLA_POLICY,
+  pendingEditorChanges = [],
   subtasks,
   taskComments,
   teamMembers,
   onClose,
+  onEditRequest,
   onToggleChecklistItem,
   onTransitionStatus,
   onStage1Approve,
@@ -185,10 +192,20 @@ export function RequestDetailDrawer({
   const stage2Done = Boolean(request.stage2Approval) || request.status === 'Approved';
 
   const isAdmin = activeRole === 'Admin';
-  const isViewer = !isAdmin;
+  const isEditor = activeRole === 'Editor';
+  const isViewer = activeRole === 'Viewer';
+  const canEditContent = isAdmin || isEditor;
 
-  const canVerifyChecklist = isAdmin;
+  const canVerifyChecklist = isAdmin || isEditor;
   const isReviewer = isAdmin;
+
+  const requestPendingChanges = useMemo(
+    () =>
+      pendingEditorChanges.filter(
+        (c) => c.status === 'pending' && c.module === 'requests' && c.targetId === request.id,
+      ),
+    [pendingEditorChanges, request.id],
+  );
 
   const requestSubtasks = useMemo(
     () => subtasks.filter((st) => st.requestId === request.id),
@@ -277,7 +294,7 @@ export function RequestDetailDrawer({
         return (
           <span
             key={idx}
-            className="rounded bg-indigo-50 px-1 py-0.5 font-semibold text-indigo-700"
+            className="rounded bg-indigo-50 px-1 py-0.5 font-semibold text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300"
           >
             {part}
           </span>
@@ -422,7 +439,7 @@ export function RequestDetailDrawer({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex justify-end bg-slate-900/50 backdrop-blur-xs"
+      className="fixed inset-0 z-50 flex justify-end bg-slate-900/50 backdrop-blur-xs dark:bg-slate-950/75"
       role="dialog"
       aria-modal="true"
       aria-labelledby="drawer-request-title"
@@ -431,19 +448,22 @@ export function RequestDetailDrawer({
       <div className="flex-1" onClick={onClose} />
 
       {/* Split-View Drawer Panel */}
-      <div className="gpu-accelerated flex h-full w-full max-w-5xl flex-col overflow-hidden border-l border-slate-200 bg-white shadow-2xl">
+      <div className="gpu-accelerated flex h-full w-full max-w-5xl flex-col overflow-hidden border-l border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900">
         {/* Drawer Header */}
-        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 bg-slate-50/70 px-4 py-3.5 sm:gap-4 sm:px-6 sm:py-4">
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 bg-slate-50/70 px-4 py-3.5 dark:border-slate-800 dark:bg-slate-950/60 sm:gap-4 sm:px-6 sm:py-4">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="font-mono text-xs font-bold text-indigo-700 tabular-nums">
+              <span className="font-mono text-xs font-bold text-indigo-700 tabular-nums dark:text-indigo-400">
                 {request.id}
               </span>
-              <span className="text-slate-300" aria-hidden="true">
+              <span className="text-slate-300 dark:text-slate-600" aria-hidden="true">
                 ·
               </span>
               <PriorityBadge priority={request.priority} slaBreached={overdue} />
               <StatusBadge status={request.status} />
+              {requestPendingChanges.length > 0 && (
+                <PendingApprovalBadge label={`Pending Approval (${requestPendingChanges.length})`} />
+              )}
               <SlaCountdownPill
                 dueDate={request.dueDate}
                 status={request.status}
@@ -464,36 +484,46 @@ export function RequestDetailDrawer({
                 <AssetLinkBadge tag={request.assetTag} name={request.assetName} />
               )}
               {request.momCode && (
-                <span className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-100 px-2 py-0.5 font-mono text-[11px] font-semibold text-slate-700">
-                  <CalendarClock className="h-3 w-3 text-indigo-600" />
+                <span className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-100 px-2 py-0.5 font-mono text-[11px] font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                  <CalendarClock className="h-3 w-3 text-indigo-600 dark:text-indigo-400" />
                   <span>{request.momCode}</span>
                 </span>
               )}
             </div>
             <h2
               id="drawer-request-title"
-              className="mt-2 font-display text-lg font-bold text-slate-900 sm:text-xl"
+              className="mt-2 font-display text-lg font-bold text-slate-900 dark:text-slate-100 sm:text-xl"
             >
               {request.title}
             </h2>
           </div>
 
           <div className="flex shrink-0 flex-wrap items-center gap-2">
-            {canEscalate && !isViewer && (
+            {canEscalate && isAdmin && (
               <button
                 type="button"
                 onClick={() => onEscalateRequest(request.id)}
-                className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-rose-300 bg-rose-50 px-3 text-xs font-semibold text-rose-700 transition-colors hover:bg-rose-100 whitespace-nowrap"
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-rose-300 bg-rose-50 px-3 text-xs font-semibold text-rose-700 transition-colors hover:bg-rose-100 dark:border-rose-900/60 dark:bg-rose-950/50 dark:text-rose-300 dark:hover:bg-rose-950 whitespace-nowrap"
               >
                 <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
                 <span>Escalate to Admin</span>
+              </button>
+            )}
+            {canEditContent && onEditRequest && (
+              <button
+                type="button"
+                onClick={() => onEditRequest(request)}
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 text-xs font-semibold text-indigo-700 transition-colors hover:bg-indigo-100 dark:border-indigo-800/70 dark:bg-indigo-950/50 dark:text-indigo-300 dark:hover:bg-indigo-900/60 whitespace-nowrap"
+              >
+                <Edit3 className="h-3.5 w-3.5" />
+                <span>Edit Request</span>
               </button>
             )}
             {!isViewer && (
               <button
                 type="button"
                 onClick={() => onDuplicateRequest(request)}
-                className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-800 transition-colors hover:border-slate-400 hover:bg-slate-50 whitespace-nowrap"
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-800 transition-colors hover:border-slate-400 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-slate-600 dark:hover:bg-slate-700 whitespace-nowrap"
               >
                 <Copy className="h-3.5 w-3.5" />
                 <span className="hidden md:inline">Duplicate as Template</span>
@@ -503,7 +533,7 @@ export function RequestDetailDrawer({
             <button
               type="button"
               onClick={() => onExportReport(request.id)}
-              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-800 transition-colors hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 whitespace-nowrap"
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-800 transition-colors hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-indigo-700 dark:hover:bg-indigo-950/60 dark:hover:text-indigo-300 whitespace-nowrap"
             >
               <FileOutput className="h-3.5 w-3.5" />
               <span className="hidden sm:inline">Export Official Report</span>
@@ -511,8 +541,8 @@ export function RequestDetailDrawer({
             </button>
             {!isViewer &&
               (confirmDeleteOpen ? (
-                <div className="inline-flex items-center gap-1 rounded-lg border border-rose-300 bg-rose-50 px-2 py-1">
-                  <span className="text-[11px] font-semibold text-rose-800">Delete?</span>
+                <div className="inline-flex items-center gap-1 rounded-lg border border-rose-300 bg-rose-50 px-2 py-1 dark:border-rose-900/60 dark:bg-rose-950/50">
+                  <span className="text-[11px] font-semibold text-rose-800 dark:text-rose-300">Delete?</span>
                   <button
                     type="button"
                     onClick={() => onDeleteRequest(request.id)}
@@ -523,7 +553,7 @@ export function RequestDetailDrawer({
                   <button
                     type="button"
                     onClick={() => setConfirmDeleteOpen(false)}
-                    className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                    className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
                   >
                     Cancel
                   </button>
@@ -532,7 +562,7 @@ export function RequestDetailDrawer({
                 <button
                   type="button"
                   onClick={() => setConfirmDeleteOpen(true)}
-                  className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3 text-xs font-semibold text-rose-700 transition-colors hover:bg-rose-50 whitespace-nowrap"
+                  className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3 text-xs font-semibold text-rose-700 transition-colors hover:bg-rose-50 dark:border-rose-900/60 dark:bg-slate-800 dark:text-rose-300 dark:hover:bg-rose-950/50 whitespace-nowrap"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                   <span className="hidden sm:inline">Delete Task</span>
@@ -542,7 +572,7 @@ export function RequestDetailDrawer({
               type="button"
               onClick={onClose}
               aria-label="Close request details"
-              className="rounded-lg border border-slate-200 bg-white p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900"
+              className="rounded-lg border border-slate-200 bg-white p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-100"
             >
               <X className="h-4 w-4" />
             </button>
@@ -552,20 +582,20 @@ export function RequestDetailDrawer({
         {/* Split-View Body */}
         <div className="grid flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-12">
           {/* Left Pane: Details, Deliverable & QA Verification Checklist */}
-          <div className="space-y-6 border-b border-slate-200 p-4 sm:p-6 lg:col-span-7 lg:border-r lg:border-b-0">
+          <div className="space-y-6 border-b border-slate-200 p-4 sm:p-6 lg:col-span-7 lg:border-r lg:border-b-0 dark:border-slate-800">
             {/* Revision Alert if Revision Required */}
             {request.status === 'Revision Required' && request.revisionReason && (
               <div
                 role="alert"
-                className="rounded-xl border border-rose-200 bg-rose-50 p-4"
+                className="rounded-xl border border-rose-200 bg-rose-50 p-4 dark:border-rose-900/60 dark:bg-rose-950/50"
               >
                 <div className="flex items-start gap-2.5">
-                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-rose-600" />
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-rose-600 dark:text-rose-400" />
                   <div>
-                    <p className="text-xs font-bold text-rose-900">
+                    <p className="text-xs font-bold text-rose-900 dark:text-rose-200">
                       Revision Requested by QA Reviewer
                     </p>
-                    <p className="mt-1 text-xs leading-relaxed text-rose-800">
+                    <p className="mt-1 text-xs leading-relaxed text-rose-800 dark:text-rose-300">
                       {request.revisionReason}
                     </p>
                   </div>
@@ -574,23 +604,23 @@ export function RequestDetailDrawer({
             )}
 
             {/* Metadata Grid */}
-            <div className="grid grid-cols-2 gap-4 rounded-xl border border-slate-200 bg-slate-50/60 p-4 sm:grid-cols-3">
+            <div className="grid grid-cols-2 gap-4 rounded-xl border border-slate-200 bg-slate-50/60 p-4 sm:grid-cols-3 dark:border-slate-800 dark:bg-slate-950/50">
               <div>
-                <p className="text-[11px] font-medium text-slate-500">Department</p>
-                <p className="mt-0.5 text-xs font-semibold text-slate-900">
+                <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">Department</p>
+                <p className="mt-0.5 text-xs font-semibold text-slate-900 dark:text-slate-100">
                   {request.department}
                 </p>
               </div>
               <div>
-                <p className="text-[11px] font-medium text-slate-500">Category</p>
-                <p className="mt-0.5 text-xs font-semibold text-slate-900">{request.category}</p>
+                <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">Category</p>
+                <p className="mt-0.5 text-xs font-semibold text-slate-900 dark:text-slate-100">{request.category}</p>
               </div>
               <div>
-                <p className="text-[11px] font-medium text-slate-500">Target Due &amp; SLA</p>
+                <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">Target Due &amp; SLA</p>
                 <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
                   <span
                     className={`font-mono text-xs font-semibold tabular-nums ${
-                      overdue ? 'text-rose-700' : 'text-slate-900'
+                      overdue ? 'text-rose-700 dark:text-rose-400' : 'text-slate-900 dark:text-slate-100'
                     }`}
                   >
                     {formatShortDate(request.dueDate)}
@@ -606,24 +636,24 @@ export function RequestDetailDrawer({
                 </div>
               </div>
               <div>
-                <p className="text-[11px] font-medium text-slate-500">Submitted By</p>
-                <p className="mt-0.5 text-xs font-semibold text-slate-900">
+                <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">Submitted By</p>
+                <p className="mt-0.5 text-xs font-semibold text-slate-900 dark:text-slate-100">
                   {request.submittedBy}
                 </p>
               </div>
               <div>
-                <p className="text-[11px] font-medium text-slate-500">Assigned Reviewer</p>
-                <p className="mt-0.5 text-xs font-semibold text-slate-900">
+                <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">Assigned Reviewer</p>
+                <p className="mt-0.5 text-xs font-semibold text-slate-900 dark:text-slate-100">
                   {request.assignedReviewer}
                 </p>
                 {request.delegatedFromReviewer && (
-                  <p className="mt-0.5 text-[10px] font-medium text-emerald-700">
+                  <p className="mt-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-400">
                     Delegated from {request.delegatedFromReviewer} (OOO)
                   </p>
                 )}
               </div>
               <div>
-                <p className="text-[11px] font-medium text-slate-500">
+                <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
                   {request.assetTag
                     ? 'Linked Asset Tag'
                     : request.projectCode
@@ -640,7 +670,7 @@ export function RequestDetailDrawer({
                     )}
                   </div>
                 ) : (
-                  <p className="mt-0.5 font-mono text-[11px] text-slate-700 tabular-nums">
+                  <p className="mt-0.5 font-mono text-[11px] text-slate-700 tabular-nums dark:text-slate-300">
                     {formatDateTime(request.updatedAt)}
                   </p>
                 )}
@@ -649,15 +679,15 @@ export function RequestDetailDrawer({
 
             {/* Financial Cost-Center & Budget Variance Box */}
             {(typeof request.estimatedCost === 'number' || typeof request.actualSpend === 'number') && (
-              <div className="rounded-xl border border-slate-200 bg-white p-4">
+              <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
-                    <Wallet className="h-4 w-4 text-indigo-600" />
-                    <h3 className="font-display text-xs font-bold text-slate-900">
+                    <Wallet className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                    <h3 className="font-display text-xs font-bold text-slate-900 dark:text-slate-100">
                       Cost-Center Budget &amp; Spend Tracker ({request.currency || 'USD'})
                     </h3>
                   </div>
-                  <span className="font-mono text-xs font-semibold text-slate-700 tabular-nums">
+                  <span className="font-mono text-xs font-semibold text-slate-700 tabular-nums dark:text-slate-300">
                     {formatCurrency(request.actualSpend ?? 0, request.currency || 'USD')} /{' '}
                     {formatCurrency(request.estimatedCost ?? 0, request.currency || 'USD')}
                   </span>
@@ -672,11 +702,11 @@ export function RequestDetailDrawer({
                   />
                 </div>
 
-                {isReviewer && onUpdateRequestFinancials && (
-                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3">
+                {canEditContent && onUpdateRequestFinancials && (
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
                     <label
                       htmlFor="drawer-actual-spend"
-                      className="text-[11px] font-semibold text-slate-600"
+                      className="text-[11px] font-semibold text-slate-600 dark:text-slate-400"
                     >
                       Record Actual Spend ({request.currency || 'USD'}):
                     </label>
@@ -688,7 +718,7 @@ export function RequestDetailDrawer({
                         step="1"
                         value={actualSpendInput}
                         onChange={(e) => setActualSpendInput(e.target.value)}
-                        className="h-8 w-32 rounded-lg border border-slate-200 px-2.5 font-mono text-xs text-slate-900 focus:border-indigo-500 focus:outline-none"
+                        className="h-8 w-32 rounded-lg border border-slate-200 bg-white px-2.5 font-mono text-xs text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                       />
                       <button
                         type="button"
@@ -698,9 +728,9 @@ export function RequestDetailDrawer({
                             onUpdateRequestFinancials(request.id, Math.round(parsed));
                           }
                         }}
-                        className="h-8 rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs font-semibold text-slate-800 hover:bg-slate-100"
+                        className="h-8 rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs font-semibold text-slate-800 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                       >
-                        Update Spend
+                        {isEditor ? 'Propose Spend Update' : 'Update Spend'}
                       </button>
                     </div>
                   </div>
@@ -710,10 +740,10 @@ export function RequestDetailDrawer({
 
             {/* Operational Scope & Deliverable Link */}
             <div>
-              <h3 className="text-xs font-bold tracking-wide text-slate-900">
+              <h3 className="text-xs font-bold tracking-wide text-slate-900 dark:text-slate-100">
                 Operational Scope &amp; Deliverable
               </h3>
-              <p className="mt-2 text-sm leading-relaxed text-slate-700">
+              <p className="mt-2 text-sm leading-relaxed text-slate-700 dark:text-slate-300">
                 {request.description}
               </p>
 
@@ -723,7 +753,7 @@ export function RequestDetailDrawer({
                     href={request.deliverableUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex max-w-full items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-xs text-indigo-700 transition-colors hover:border-indigo-300 hover:bg-indigo-50"
+                    className="inline-flex max-w-full items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-xs text-indigo-700 transition-colors hover:border-indigo-300 hover:bg-indigo-50 dark:border-slate-700 dark:bg-slate-800/80 dark:text-indigo-400 dark:hover:border-indigo-700 dark:hover:bg-indigo-950/60"
                   >
                     <ExternalLink className="h-3.5 w-3.5 shrink-0" />
                     <span className="truncate">{request.deliverableUrl}</span>
@@ -733,33 +763,32 @@ export function RequestDetailDrawer({
             </div>
 
             {/* Interactive QA Verification Checklist */}
-            <div className="rounded-xl border border-slate-200 bg-white p-5">
+            <div className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
-                  <ShieldCheck className="h-4 w-4 text-indigo-600" />
-                  <h3 className="font-display text-sm font-bold text-slate-900">
+                  <ShieldCheck className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                  <h3 className="font-display text-sm font-bold text-slate-900 dark:text-slate-100">
                     QA Verification Checklist
                   </h3>
                 </div>
-                <span className="font-mono text-xs font-semibold text-slate-700 tabular-nums">
+                <span className="font-mono text-xs font-semibold text-slate-700 tabular-nums dark:text-slate-300">
                   {completedItems}/{totalItems} Verified ({completionPct}%)
                 </span>
               </div>
 
               {/* Completion Progress Bar */}
-              <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+              <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
                 <div
                   className={`h-full transition-all duration-300 ${
-                    completionPct === 100 ? 'bg-emerald-600' : 'bg-indigo-600'
+                    completionPct === 100 ? 'bg-emerald-600 dark:bg-emerald-500' : 'bg-indigo-600 dark:bg-indigo-500'
                   }`}
                   style={{ width: `${completionPct}%` }}
                 />
               </div>
 
               {!canVerifyChecklist && (
-                <p className="mt-2.5 text-[11px] text-slate-500">
-                  Read-only access. Only verified Admins can verify checklist gates or update
-                  records.
+                <p className="mt-2.5 text-[11px] text-slate-500 dark:text-slate-400">
+                  Read-only access. Viewers cannot verify checklist gates or update records.
                 </p>
               )}
 
@@ -769,9 +798,9 @@ export function RequestDetailDrawer({
                     key={item.id}
                     className={`flex items-start gap-3 rounded-lg border p-3 transition-colors ${
                       item.checked
-                        ? 'border-emerald-200 bg-emerald-50/40'
-                        : 'border-slate-200 bg-white'
-                    } ${canVerifyChecklist ? 'cursor-pointer hover:border-slate-300' : 'cursor-default'}`}
+                        ? 'border-emerald-200 bg-emerald-50/40 dark:border-emerald-900/60 dark:bg-emerald-950/30'
+                        : 'border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950/50'
+                    } ${canVerifyChecklist ? 'cursor-pointer hover:border-slate-300 dark:hover:border-slate-700' : 'cursor-default'}`}
                   >
                     <input
                       type="checkbox"
@@ -781,27 +810,27 @@ export function RequestDetailDrawer({
                         setValidationError(null);
                         onToggleChecklistItem(request.id, item.id);
                       }}
-                      className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-60"
+                      className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-900"
                     />
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <span
                           className={`text-xs font-medium ${
-                            item.checked ? 'text-slate-900' : 'text-slate-800'
+                            item.checked ? 'text-slate-900 dark:text-slate-100' : 'text-slate-800 dark:text-slate-200'
                           }`}
                         >
                           {item.label}
                         </span>
                         <span
                           className={`text-[11px] font-semibold ${
-                            item.mandatory ? 'text-amber-700' : 'text-slate-400'
+                            item.mandatory ? 'text-amber-700 dark:text-amber-400' : 'text-slate-400 dark:text-slate-500'
                           }`}
                         >
                           {item.mandatory ? 'Mandatory' : 'Optional'}
                         </span>
                       </div>
                       {item.checked && item.verifiedBy && (
-                        <p className="mt-1 font-mono text-[11px] text-emerald-700 tabular-nums">
+                        <p className="mt-1 font-mono text-[11px] text-emerald-700 tabular-nums dark:text-emerald-400">
                           Verified by {item.verifiedBy} ·{' '}
                           {item.verifiedAt ? formatDateTime(item.verifiedAt) : ''}
                         </p>
@@ -813,23 +842,23 @@ export function RequestDetailDrawer({
             </div>
 
             {/* Sub-Tasks Checklist */}
-            <div className="rounded-xl border border-slate-200 bg-white p-5">
+            <div className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
-                  <ListChecks className="h-4 w-4 text-indigo-600" />
-                  <h3 className="font-display text-sm font-bold text-slate-900">
+                  <ListChecks className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                  <h3 className="font-display text-sm font-bold text-slate-900 dark:text-slate-100">
                     Sub-Tasks Checklist
                   </h3>
                 </div>
-                <span className="font-mono text-xs font-semibold text-slate-700 tabular-nums">
+                <span className="font-mono text-xs font-semibold text-slate-700 tabular-nums dark:text-slate-300">
                   {subtasksCompleted}/{subtasksTotal} Done ({subtasksPct}%)
                 </span>
               </div>
 
-              <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+              <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
                 <div
                   className={`h-full transition-all duration-300 ${
-                    subtasksPct === 100 && subtasksTotal > 0 ? 'bg-emerald-600' : 'bg-indigo-600'
+                    subtasksPct === 100 && subtasksTotal > 0 ? 'bg-emerald-600 dark:bg-emerald-500' : 'bg-indigo-600 dark:bg-indigo-500'
                   }`}
                   style={{ width: `${subtasksPct}%` }}
                 />
@@ -842,7 +871,7 @@ export function RequestDetailDrawer({
                     value={newSubtaskTitle}
                     onChange={(e) => setNewSubtaskTitle(e.target.value)}
                     placeholder="Add actionable sub-task step..."
-                    className="h-9 flex-1 rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:bg-white focus:outline-none"
+                    className="h-9 flex-1 rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:bg-white focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:bg-slate-950"
                   />
                   <button
                     type="submit"
@@ -856,7 +885,7 @@ export function RequestDetailDrawer({
               )}
 
               {requestSubtasks.length === 0 ? (
-                <p className="mt-3 rounded-lg border border-dashed border-slate-200 bg-slate-50/70 px-3 py-4 text-center text-xs text-slate-500">
+                <p className="mt-3 rounded-lg border border-dashed border-slate-200 bg-slate-50/70 px-3 py-4 text-center text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-950/50 dark:text-slate-400">
                   No sub-tasks added yet.
                 </p>
               ) : (
@@ -866,8 +895,8 @@ export function RequestDetailDrawer({
                       key={st.id}
                       className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 ${
                         st.completed
-                          ? 'border-emerald-200 bg-emerald-50/40'
-                          : 'border-slate-200 bg-white'
+                          ? 'border-emerald-200 bg-emerald-50/40 dark:border-emerald-900/60 dark:bg-emerald-950/30'
+                          : 'border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950/50'
                       }`}
                     >
                       <label
@@ -880,18 +909,18 @@ export function RequestDetailDrawer({
                           checked={st.completed}
                           disabled={isViewer}
                           onChange={() => onToggleSubtask(st.id)}
-                          className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-60"
+                          className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-900"
                         />
                         <div className="min-w-0 flex-1">
                           <p
                             className={`text-xs font-medium ${
-                              st.completed ? 'text-slate-500 line-through' : 'text-slate-800'
+                              st.completed ? 'text-slate-500 line-through dark:text-slate-400' : 'text-slate-800 dark:text-slate-200'
                             }`}
                           >
                             {st.title}
                           </p>
                           {st.completed && st.completedBy && (
-                            <p className="font-mono text-[10px] text-emerald-700">
+                            <p className="font-mono text-[10px] text-emerald-700 dark:text-emerald-400">
                               Completed by {st.completedBy}
                               {st.completedAt ? ` · ${formatDateTime(st.completedAt)}` : ''}
                             </p>
@@ -903,7 +932,7 @@ export function RequestDetailDrawer({
                           type="button"
                           onClick={() => onDeleteSubtask(st.id)}
                           aria-label={`Delete sub-task ${st.title}`}
-                          className="rounded p-1 text-slate-400 transition-colors hover:bg-rose-50 hover:text-rose-600"
+                          className="rounded p-1 text-slate-400 transition-colors hover:bg-rose-50 hover:text-rose-600 dark:text-slate-500 dark:hover:bg-rose-950/50 dark:hover:text-rose-400"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
@@ -916,13 +945,13 @@ export function RequestDetailDrawer({
           </div>
 
           {/* Right Pane: AI Review Brief, Role-Aware Workflow Actions & Immutable Audit Trail */}
-          <div className="flex flex-col gap-5 bg-slate-50/50 p-6 lg:col-span-5">
+          <div className="flex flex-col gap-5 bg-slate-50/50 p-6 lg:col-span-5 dark:bg-slate-950/40">
             {/* AI Executive Summary & Risk Check Panel */}
-            <div className="rounded-xl border border-slate-200 bg-white p-5">
+            <div className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
-                  <Bot className="h-4 w-4 text-indigo-600 shrink-0" />
-                  <h3 className="font-display text-sm font-bold text-slate-900">
+                  <Bot className="h-4 w-4 shrink-0 text-indigo-600 dark:text-indigo-400" />
+                  <h3 className="font-display text-sm font-bold text-slate-900 dark:text-slate-100">
                     AI Executive Summary &amp; Risk Check
                   </h3>
                 </div>
@@ -930,10 +959,10 @@ export function RequestDetailDrawer({
                   <span
                     className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-semibold ${
                       brief.riskLevel === 'Critical SLA Risk'
-                        ? 'border-rose-200 bg-rose-50 text-rose-700'
+                        ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/50 dark:text-rose-300'
                         : brief.riskLevel === 'Elevated Risk'
-                          ? 'border-amber-200 bg-amber-50 text-amber-800'
-                          : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                          ? 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/50 dark:text-amber-300'
+                          : 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/50 dark:text-emerald-300'
                     }`}
                   >
                     <ShieldAlert className="h-3 w-3" />
@@ -942,7 +971,7 @@ export function RequestDetailDrawer({
                 )}
               </div>
 
-              <p className="mt-1.5 text-xs text-slate-500">
+              <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
                 Synthesizes scope, priority, checklist completion, SLA timing, and audit history.
               </p>
 
@@ -950,7 +979,7 @@ export function RequestDetailDrawer({
                 <button
                   type="button"
                   onClick={handleGenerateRuleBrief}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-slate-900 px-3 text-xs font-semibold text-white transition-colors hover:bg-slate-800 whitespace-nowrap"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-slate-900 px-3 text-xs font-semibold text-white transition-colors hover:bg-slate-800 whitespace-nowrap dark:bg-indigo-600 dark:hover:bg-indigo-500"
                 >
                   <Bot className="h-3.5 w-3.5" />
                   <span>{brief ? 'Refresh AI Review Brief' : 'Generate AI Review Brief'}</span>
@@ -961,7 +990,7 @@ export function RequestDetailDrawer({
                     type="button"
                     disabled={geminiLoading}
                     onClick={handleGenerateGeminiBrief}
-                    className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 text-xs font-semibold text-indigo-700 transition-colors hover:bg-indigo-100 disabled:opacity-60 whitespace-nowrap"
+                    className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 text-xs font-semibold text-indigo-700 transition-colors hover:bg-indigo-100 disabled:opacity-60 whitespace-nowrap dark:border-indigo-900/60 dark:bg-indigo-950/50 dark:text-indigo-300 dark:hover:bg-indigo-900/60"
                   >
                     {geminiLoading ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -976,35 +1005,35 @@ export function RequestDetailDrawer({
               {geminiError && (
                 <div
                   role="alert"
-                  className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-medium text-amber-900"
+                  className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-medium text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/50 dark:text-amber-300"
                 >
                   {geminiError}
                 </div>
               )}
 
               {brief && (
-                <div className="mt-4 space-y-2.5 border-t border-slate-100 pt-3.5">
-                  <ul className="space-y-2.5 text-xs leading-relaxed text-slate-700">
-                    <li className="rounded-lg border border-slate-100 bg-slate-50/70 p-2.5">
-                      <span className="block font-semibold text-slate-900">1. Summary</span>
+                <div className="mt-4 space-y-2.5 border-t border-slate-100 pt-3.5 dark:border-slate-800">
+                  <ul className="space-y-2.5 text-xs leading-relaxed text-slate-700 dark:text-slate-300">
+                    <li className="rounded-lg border border-slate-100 bg-slate-50/70 p-2.5 dark:border-slate-800 dark:bg-slate-950/50">
+                      <span className="block font-semibold text-slate-900 dark:text-slate-100">1. Summary</span>
                       <span className="mt-0.5 block">{brief.summary}</span>
                     </li>
-                    <li className="rounded-lg border border-slate-100 bg-slate-50/70 p-2.5">
-                      <span className="block font-semibold text-slate-900">
+                    <li className="rounded-lg border border-slate-100 bg-slate-50/70 p-2.5 dark:border-slate-800 dark:bg-slate-950/50">
+                      <span className="block font-semibold text-slate-900 dark:text-slate-100">
                         2. Completeness Status
                       </span>
                       <span className="mt-0.5 block">{brief.completenessStatus}</span>
                     </li>
-                    <li className="rounded-lg border border-indigo-100 bg-indigo-50/40 p-2.5">
-                      <span className="block font-semibold text-indigo-950">
+                    <li className="rounded-lg border border-indigo-100 bg-indigo-50/40 p-2.5 dark:border-indigo-900/50 dark:bg-indigo-950/30">
+                      <span className="block font-semibold text-indigo-950 dark:text-indigo-200">
                         3. Recommended Action
                       </span>
-                      <span className="mt-0.5 block text-indigo-900">
+                      <span className="mt-0.5 block text-indigo-900 dark:text-indigo-300">
                         {brief.recommendedAction}
                       </span>
                     </li>
                   </ul>
-                  <div className="flex items-center justify-between text-[11px] text-slate-400">
+                  <div className="flex items-center justify-between text-[11px] text-slate-400 dark:text-slate-500">
                     <span>
                       Engine:{' '}
                       {brief.source === 'gemini-4-hydrogen'
@@ -1020,9 +1049,9 @@ export function RequestDetailDrawer({
             </div>
 
             {/* Workflow Action Panel */}
-            <div className="rounded-xl border border-slate-200 bg-white p-5">
+            <div className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
               <div className="flex items-center justify-between gap-2">
-                <h3 className="font-display text-sm font-bold text-slate-900">
+                <h3 className="font-display text-sm font-bold text-slate-900 dark:text-slate-100">
                   Workflow Action Panel
                 </h3>
                 <RoleBadge role={activeRole} />
@@ -1030,13 +1059,13 @@ export function RequestDetailDrawer({
 
               {/* Two-Tier Escalated Approval Chain Stepper */}
               {isTwoTier && (
-                <div className="mt-3 rounded-xl border border-indigo-200 bg-indigo-50/50 p-3.5">
+                <div className="mt-3 rounded-xl border border-indigo-200 bg-indigo-50/50 p-3.5 dark:border-indigo-900/60 dark:bg-indigo-950/30">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-950">
-                      <GitBranch className="h-3.5 w-3.5 text-indigo-600" />
+                    <span className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-950 dark:text-indigo-200">
+                      <GitBranch className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
                       <span>Two-Tier Escalated Approval Chain</span>
                     </span>
-                    <span className="font-mono text-[10px] font-semibold text-indigo-700">
+                    <span className="font-mono text-[10px] font-semibold text-indigo-700 dark:text-indigo-300">
                       {stage2Done
                         ? '2/2 Complete'
                         : stage1Done
@@ -1049,18 +1078,18 @@ export function RequestDetailDrawer({
                     <div
                       className={`rounded-lg border p-2.5 text-[11px] ${
                         stage1Done
-                          ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
-                          : 'border-amber-200 bg-white text-slate-800'
+                          ? 'border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-200'
+                          : 'border-amber-200 bg-white text-slate-800 dark:border-amber-900/60 dark:bg-slate-900 dark:text-slate-200'
                       }`}
                     >
                       <p className="font-bold">1. Editor / QA Review</p>
                       {request.stage1Approval ? (
-                        <p className="mt-0.5 text-[10px] text-emerald-700">
+                        <p className="mt-0.5 text-[10px] text-emerald-700 dark:text-emerald-400">
                           Signed by {request.stage1Approval.actorName} ·{' '}
                           {formatDateTime(request.stage1Approval.timestamp)}
                         </p>
                       ) : (
-                        <p className="mt-0.5 text-[10px] text-slate-500">
+                        <p className="mt-0.5 text-[10px] text-slate-500 dark:text-slate-400">
                           Awaiting Stage 1 QA sign-off
                         </p>
                       )}
@@ -1069,24 +1098,24 @@ export function RequestDetailDrawer({
                     <div
                       className={`rounded-lg border p-2.5 text-[11px] ${
                         stage2Done
-                          ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+                          ? 'border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-200'
                           : stage1Done
-                            ? 'border-indigo-300 bg-white text-indigo-950'
-                            : 'border-slate-200 bg-slate-50 text-slate-500'
+                            ? 'border-indigo-300 bg-white text-indigo-950 dark:border-indigo-700 dark:bg-slate-900 dark:text-indigo-200'
+                            : 'border-slate-200 bg-slate-50 text-slate-500 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-400'
                       }`}
                     >
                       <p className="font-bold">2. Executive / Admin Sign-Off</p>
                       {request.stage2Approval ? (
-                        <p className="mt-0.5 text-[10px] text-emerald-700">
+                        <p className="mt-0.5 text-[10px] text-emerald-700 dark:text-emerald-400">
                           Signed by {request.stage2Approval.actorName} ·{' '}
                           {formatDateTime(request.stage2Approval.timestamp)}
                         </p>
                       ) : stage1Done ? (
-                        <p className="mt-0.5 text-[10px] font-semibold text-indigo-700">
+                        <p className="mt-0.5 text-[10px] font-semibold text-indigo-700 dark:text-indigo-300">
                           Ready for Admin final approval
                         </p>
                       ) : (
-                        <p className="mt-0.5 text-[10px] text-slate-400">
+                        <p className="mt-0.5 text-[10px] text-slate-400 dark:text-slate-500">
                           Locked until Stage 1 complete
                         </p>
                       )}
@@ -1098,27 +1127,38 @@ export function RequestDetailDrawer({
               {validationError && (
                 <div
                   role="alert"
-                  className="mt-3 flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs font-medium text-rose-800"
+                  className="mt-3 flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs font-medium text-rose-800 dark:border-rose-900/60 dark:bg-rose-950/50 dark:text-rose-300"
                 >
-                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-rose-600" />
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-rose-600 dark:text-rose-400" />
                   <span>{validationError}</span>
                 </div>
               )}
 
               {isViewer ? (
-                <div className="mt-3 flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs font-medium text-slate-600">
-                  <Lock className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                <div className="mt-3 flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs font-medium text-slate-600 dark:border-slate-800 dark:bg-slate-950/50 dark:text-slate-400">
+                  <Lock className="h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-slate-500" />
                   <span>
                     Read-only access. You can inspect records and export reports, while edits and
-                    approvals require Admin privileges.
+                    approvals require Editor or Admin privileges.
                   </span>
                 </div>
               ) : (
                 <>
+                  {isEditor && (
+                    <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50/75 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/40 dark:text-amber-200">
+                      <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+                      <span>
+                        <strong>Editor (Maker-Checker):</strong> Final status approvals and
+                        rejections are restricted to Super Admin. You can edit request fields,
+                        verify checklist gates, update spend, manage subtasks, and submit comments
+                        for approval.
+                      </span>
+                    </div>
+                  )}
                   <div className="mt-3">
                     <label
                       htmlFor="workflow-remark"
-                      className="block text-xs font-semibold text-slate-700"
+                      className="block text-xs font-semibold text-slate-700 dark:text-slate-300"
                     >
                       Review Remarks / Audit Note
                     </label>
@@ -1131,169 +1171,169 @@ export function RequestDetailDrawer({
                         if (validationError) setValidationError(null);
                       }}
                       placeholder="Enter QA findings, mandatory revision instructions, or response notes..."
-                      className="mt-1.5 w-full rounded-lg border border-slate-200 p-2.5 text-xs text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none"
+                      className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white p-2.5 text-xs text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
                     />
                   </div>
 
                   <div className="mt-3 flex flex-wrap gap-2">
-                {/* Staff Submit / Resubmit */}
-                {canStaffSubmit && (
-                  <button
-                    type="button"
-                    onClick={handleStaffSubmit}
-                    className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-indigo-700 whitespace-nowrap"
-                  >
-                    <Send className="h-3.5 w-3.5" />
-                    <span>
-                      {request.status === 'Revision Required'
-                        ? 'Resubmit for QA Review'
-                        : 'Submit for QA Review'}
-                    </span>
-                  </button>
-                )}
-
-                {/* Reviewer / Admin Actions */}
-                {canReviewActions && (
-                  <>
-                    {request.status === 'Submitted' && (
+                    {/* Staff Submit / Resubmit */}
+                    {canStaffSubmit && (
                       <button
                         type="button"
-                        onClick={() =>
-                          onTransitionStatus(
-                            request.id,
-                            'Under QA Review',
-                            remark.trim() || undefined,
+                        onClick={handleStaffSubmit}
+                        className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-indigo-700 whitespace-nowrap"
+                      >
+                        <Send className="h-3.5 w-3.5" />
+                        <span>
+                          {request.status === 'Revision Required'
+                            ? 'Resubmit for QA Review'
+                            : 'Submit for QA Review'}
+                        </span>
+                      </button>
+                    )}
+
+                    {/* Reviewer / Admin Actions */}
+                    {canReviewActions && (
+                      <>
+                        {request.status === 'Submitted' && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onTransitionStatus(
+                                request.id,
+                                'Under QA Review',
+                                remark.trim() || undefined,
+                              )
+                            }
+                            className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3.5 py-2 text-xs font-semibold text-amber-800 transition-colors hover:bg-amber-100 whitespace-nowrap dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-300 dark:hover:bg-amber-900/50"
+                          >
+                            <ShieldCheck className="h-3.5 w-3.5" />
+                            <span>Claim &amp; Move to Under QA Review</span>
+                          </button>
+                        )}
+
+                        {isTwoTier ? (
+                          !stage1Done ? (
+                            <button
+                              type="button"
+                              onClick={handleStage1SignOff}
+                              className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-indigo-700 whitespace-nowrap"
+                            >
+                              <ShieldCheck className="h-3.5 w-3.5" />
+                              <span>Stage 1: Editor / QA Sign-Off</span>
+                            </button>
+                          ) : isAdmin ? (
+                            <button
+                              type="button"
+                              onClick={handleApprove}
+                              className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-emerald-700 whitespace-nowrap"
+                            >
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                              <span>Stage 2: Executive Final Sign-Off &amp; Approve</span>
+                            </button>
+                          ) : (
+                            <div className="flex w-full items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-800 dark:border-indigo-900/60 dark:bg-indigo-950/50 dark:text-indigo-300">
+                              <Lock className="h-3.5 w-3.5 shrink-0 text-indigo-600 dark:text-indigo-400" />
+                              <span>
+                                Stage 1 Complete — Awaiting Executive / Admin Final Sign-Off
+                              </span>
+                            </div>
                           )
-                        }
-                        className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3.5 py-2 text-xs font-semibold text-amber-800 transition-colors hover:bg-amber-100 whitespace-nowrap"
-                      >
-                        <ShieldCheck className="h-3.5 w-3.5" />
-                        <span>Claim &amp; Move to Under QA Review</span>
-                      </button>
-                    )}
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={handleApprove}
+                            className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-emerald-700 whitespace-nowrap"
+                          >
+                            <CheckCircle2 className="h-3.5 w-3.5" />
+                            <span>Approve Request</span>
+                          </button>
+                        )}
 
-                    {isTwoTier ? (
-                      !stage1Done ? (
                         <button
                           type="button"
-                          onClick={handleStage1SignOff}
-                          className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-indigo-700 whitespace-nowrap"
+                          onClick={handleRequestRevision}
+                          className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3.5 py-2 text-xs font-semibold text-amber-900 transition-colors hover:bg-amber-100 whitespace-nowrap dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-300 dark:hover:bg-amber-900/50"
                         >
-                          <ShieldCheck className="h-3.5 w-3.5" />
-                          <span>Stage 1: Editor / QA Sign-Off</span>
+                          <AlertCircle className="h-3.5 w-3.5" />
+                          <span>Request Revision</span>
                         </button>
-                      ) : isAdmin ? (
+
                         <button
                           type="button"
-                          onClick={handleApprove}
-                          className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-emerald-700 whitespace-nowrap"
+                          onClick={handleReject}
+                          className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 transition-colors hover:bg-rose-100 whitespace-nowrap dark:border-rose-900/60 dark:bg-rose-950/50 dark:text-rose-300 dark:hover:bg-rose-900/50"
                         >
-                          <CheckCircle2 className="h-3.5 w-3.5" />
-                          <span>Stage 2: Executive Final Sign-Off &amp; Approve</span>
+                          <XCircle className="h-3.5 w-3.5" />
+                          <span>Reject</span>
                         </button>
-                      ) : (
-                        <div className="flex w-full items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-800">
-                          <Lock className="h-3.5 w-3.5 shrink-0 text-indigo-600" />
-                          <span>
-                            Stage 1 Complete — Awaiting Executive / Admin Final Sign-Off
-                          </span>
-                        </div>
-                      )
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={handleApprove}
-                        className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-emerald-700 whitespace-nowrap"
-                      >
-                        <CheckCircle2 className="h-3.5 w-3.5" />
-                        <span>Approve Request</span>
-                      </button>
+                      </>
                     )}
 
+                    {/* Allow Editor / Admin to post an audit comment */}
                     <button
                       type="button"
-                      onClick={handleRequestRevision}
-                      className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3.5 py-2 text-xs font-semibold text-amber-900 transition-colors hover:bg-amber-100 whitespace-nowrap"
+                      onClick={handlePostComment}
+                      className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 whitespace-nowrap dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                     >
-                      <AlertCircle className="h-3.5 w-3.5" />
-                      <span>Request Revision</span>
+                      <MessageSquarePlus className="h-3.5 w-3.5" />
+                      <span>Add Comment</span>
                     </button>
-
-                    <button
-                      type="button"
-                      onClick={handleReject}
-                      className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 transition-colors hover:bg-rose-100 whitespace-nowrap"
-                    >
-                      <XCircle className="h-3.5 w-3.5" />
-                      <span>Reject</span>
-                    </button>
-                  </>
-                )}
-
-                {/* Allow Editor / Admin to post an audit comment */}
-                <button
-                  type="button"
-                  onClick={handlePostComment}
-                  className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 whitespace-nowrap"
-                >
-                  <MessageSquarePlus className="h-3.5 w-3.5" />
-                  <span>Add Comment</span>
-                </button>
-              </div>
+                  </div>
                 </>
               )}
 
               {request.status === 'Approved' && (
-                <div className="mt-3 flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800">
-                  <Check className="h-4 w-4 shrink-0 text-emerald-600" />
+                <div className="mt-3 flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/50 dark:text-emerald-300">
+                  <Check className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
                   <span>This request has completed QA and received final approval.</span>
                 </div>
               )}
 
               {request.status === 'Rejected' && (
-                <div className="mt-3 flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-800">
-                  <XCircle className="h-4 w-4 shrink-0 text-rose-600" />
+                <div className="mt-3 flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-800 dark:border-rose-900/60 dark:bg-rose-950/50 dark:text-rose-300">
+                  <XCircle className="h-4 w-4 shrink-0 text-rose-600 dark:text-rose-400" />
                   <span>This request was formally rejected during governance review.</span>
                 </div>
               )}
             </div>
 
             {/* Threaded Team Comments with @mentions */}
-            <div className="rounded-xl border border-slate-200 bg-white p-5">
+            <div className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
-                  <MessageSquare className="h-4 w-4 text-indigo-600" />
-                  <h3 className="font-display text-sm font-bold text-slate-900">
+                  <MessageSquare className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                  <h3 className="font-display text-sm font-bold text-slate-900 dark:text-slate-100">
                     Team Discussion &amp; @Mentions
                   </h3>
                 </div>
-                <span className="font-mono text-xs text-slate-500 tabular-nums">
+                <span className="font-mono text-xs text-slate-500 tabular-nums dark:text-slate-400">
                   {requestComments.length} comment{requestComments.length === 1 ? '' : 's'}
                 </span>
               </div>
 
               <div className="mt-3 space-y-2.5">
                 {requestComments.length === 0 ? (
-                  <p className="rounded-lg border border-dashed border-slate-200 bg-slate-50/70 px-3 py-4 text-center text-xs text-slate-500">
+                  <p className="rounded-lg border border-dashed border-slate-200 bg-slate-50/70 px-3 py-4 text-center text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-950/50 dark:text-slate-400">
                     No team discussion comments yet. Use @Name to mention a teammate.
                   </p>
                 ) : (
                   requestComments.map((cmt) => (
                     <div
                       key={cmt.id}
-                      className="rounded-lg border border-slate-200 bg-slate-50/60 p-3"
+                      className="rounded-lg border border-slate-200 bg-slate-50/60 p-3 dark:border-slate-800 dark:bg-slate-950/50"
                     >
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="flex items-center gap-1.5">
-                          <span className="text-xs font-bold text-slate-900">{cmt.authorName}</span>
+                          <span className="text-xs font-bold text-slate-900 dark:text-slate-100">{cmt.authorName}</span>
                           <RoleBadge role={cmt.authorRole} />
                         </div>
-                        <span className="font-mono text-[10px] text-slate-400 tabular-nums">
+                        <span className="font-mono text-[10px] text-slate-400 tabular-nums dark:text-slate-500">
                           {formatDateTime(cmt.createdAt)}
                         </span>
                       </div>
-                      <p className="font-mono text-[10px] text-slate-500">{cmt.authorEmail}</p>
-                      <p className="mt-1.5 whitespace-pre-wrap text-xs leading-relaxed text-slate-700">
+                      <p className="font-mono text-[10px] text-slate-500 dark:text-slate-400">{cmt.authorEmail}</p>
+                      <p className="mt-1.5 whitespace-pre-wrap text-xs leading-relaxed text-slate-700 dark:text-slate-300">
                         {renderCommentWithMentions(cmt.body)}
                       </p>
                     </div>
@@ -1313,30 +1353,30 @@ export function RequestDetailDrawer({
                     value={commentBody}
                     onChange={(e) => handleCommentInputChange(e.target.value)}
                     placeholder="Write a comment... type @ to mention a team member"
-                    className="w-full rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-xs text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:bg-white focus:outline-none"
+                    className="w-full rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-xs text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:bg-white focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:bg-slate-950"
                   />
 
                   {mentionQuery !== null && mentionCandidates.length > 0 && (
-                    <div className="mt-1 overflow-hidden rounded-lg border border-indigo-200 bg-white shadow-lg">
-                      <div className="flex items-center gap-1.5 border-b border-slate-100 bg-indigo-50/60 px-2.5 py-1 text-[10px] font-bold text-indigo-800">
+                    <div className="mt-1 overflow-hidden rounded-lg border border-indigo-200 bg-white shadow-lg dark:border-indigo-900/60 dark:bg-slate-900">
+                      <div className="flex items-center gap-1.5 border-b border-slate-100 bg-indigo-50/60 px-2.5 py-1 text-[10px] font-bold text-indigo-800 dark:border-slate-800 dark:bg-indigo-950/60 dark:text-indigo-300">
                         <AtSign className="h-3 w-3" />
                         <span>Mention Team Member</span>
                       </div>
-                      <ul className="max-h-40 divide-y divide-slate-100 overflow-y-auto">
+                      <ul className="max-h-40 divide-y divide-slate-100 overflow-y-auto dark:divide-slate-800">
                         {mentionCandidates.map((member) => (
                           <li key={member.id}>
                             <button
                               type="button"
                               onClick={() => handleInsertMention(member)}
-                              className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-xs hover:bg-indigo-50"
+                              className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-xs hover:bg-indigo-50 dark:hover:bg-indigo-950/50"
                             >
                               <div className="min-w-0">
-                                <span className="font-semibold text-slate-900">{member.name}</span>
-                                <span className="ml-1.5 font-mono text-[10px] text-slate-500">
+                                <span className="font-semibold text-slate-900 dark:text-slate-100">{member.name}</span>
+                                <span className="ml-1.5 font-mono text-[10px] text-slate-500 dark:text-slate-400">
                                   {member.email}
                                 </span>
                               </div>
-                              <span className="shrink-0 text-[10px] font-medium text-indigo-700">
+                              <span className="shrink-0 text-[10px] font-medium text-indigo-700 dark:text-indigo-400">
                                 {member.department}
                               </span>
                             </button>
@@ -1347,8 +1387,8 @@ export function RequestDetailDrawer({
                   )}
 
                   <div className="mt-2 flex items-center justify-between gap-2">
-                    <span className="text-[11px] text-slate-400">
-                      Type <span className="font-mono font-semibold text-indigo-600">@</span> to notify teammates
+                    <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                      Type <span className="font-mono font-semibold text-indigo-600 dark:text-indigo-400">@</span> to notify teammates
                     </span>
                     <button
                       type="submit"
@@ -1367,12 +1407,12 @@ export function RequestDetailDrawer({
             <div className="mt-2 flex-1">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
-                  <History className="h-4 w-4 text-slate-500" />
-                  <h3 className="font-display text-sm font-bold text-slate-900">
+                  <History className="h-4 w-4 text-slate-500 dark:text-slate-400" />
+                  <h3 className="font-display text-sm font-bold text-slate-900 dark:text-slate-100">
                     Immutable Audit Trail
                   </h3>
                 </div>
-                <span className="font-mono text-xs text-slate-500 tabular-nums">
+                <span className="font-mono text-xs text-slate-500 tabular-nums dark:text-slate-400">
                   {request.auditTrail.length} events
                 </span>
               </div>
@@ -1386,20 +1426,20 @@ export function RequestDetailDrawer({
                   .map((event) => (
                     <li
                       key={event.id}
-                      className="rounded-xl border border-slate-200 bg-white p-3.5"
+                      className="rounded-xl border border-slate-200 bg-white p-3.5 dark:border-slate-800 dark:bg-slate-900"
                     >
                       <div className="flex flex-wrap items-center justify-between gap-2">
-                        <span className="text-xs font-bold text-slate-900">
+                        <span className="text-xs font-bold text-slate-900 dark:text-slate-100">
                           {event.actionType}
                         </span>
-                        <span className="font-mono text-[11px] text-slate-400 tabular-nums">
+                        <span className="font-mono text-[11px] text-slate-400 tabular-nums dark:text-slate-500">
                           {formatDateTime(event.timestamp)}
                         </span>
                       </div>
-                      <p className="mt-1.5 text-xs leading-relaxed text-slate-700">
+                      <p className="mt-1.5 text-xs leading-relaxed text-slate-700 dark:text-slate-300">
                         {event.details}
                       </p>
-                      <p className="mt-2 text-[11px] font-medium text-slate-500">
+                      <p className="mt-2 text-[11px] font-medium text-slate-500 dark:text-slate-400">
                         {event.actorName} ·{' '}
                         {event.actorSignOffTitle
                           ? `${event.actorSignOffTitle} (${event.actorRole})`

@@ -18,6 +18,7 @@ import {
   AssetStatus,
   CompanyAsset,
   Department,
+  PendingEditorChange,
   Role,
   TeamMember,
 } from '../types/nexops';
@@ -26,10 +27,13 @@ import {
   formatDateTime,
   isAssetAlert,
 } from '../utils/storage';
+import { PendingApprovalBadge } from './StatusIndicator';
 
 interface AssetsInventoryViewProps {
   assets: CompanyAsset[];
   activeRole: Role;
+  currentUserEmail?: string;
+  pendingEditorChanges?: PendingEditorChange[];
   departments: string[];
   teamMembers: TeamMember[];
   onRegisterAsset: (
@@ -82,6 +86,8 @@ function generateNextAssetTag(assets: CompanyAsset[]): string {
 export function AssetsInventoryView({
   assets,
   activeRole,
+  currentUserEmail,
+  pendingEditorChanges = [],
   departments,
   teamMembers,
   onRegisterAsset,
@@ -90,7 +96,29 @@ export function AssetsInventoryView({
   onExportSuccess,
   onInspectRequest,
 }: AssetsInventoryViewProps) {
-  const canManageAssets = activeRole === 'Admin';
+  const canManageAssets = activeRole === 'Admin' || activeRole === 'Editor';
+
+  const pendingAssetEditIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const chg of pendingEditorChanges) {
+      if (chg.status === 'pending' && chg.module === 'assets' && chg.action !== 'create') {
+        set.add(chg.targetId);
+      }
+    }
+    return set;
+  }, [pendingEditorChanges]);
+
+  const pendingCreatedAssets = useMemo(() => {
+    if (!canManageAssets) return [];
+    const emailLower = (currentUserEmail ?? '').toLowerCase();
+    return pendingEditorChanges.filter(
+      (chg) =>
+        chg.status === 'pending' &&
+        chg.module === 'assets' &&
+        chg.action === 'create' &&
+        (activeRole === 'Admin' || chg.editorEmail.toLowerCase() === emailLower),
+    );
+  }, [pendingEditorChanges, activeRole, currentUserEmail, canManageAssets]);
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<AssetCategory | 'All'>('All');
   const [statusFilter, setStatusFilter] = useState<AssetStatus | 'All'>('All');
@@ -287,20 +315,20 @@ export function AssetsInventoryView({
   const renderConditionLabel = (condition: AssetCondition) => {
     if (condition === 'New') {
       return (
-        <span className="inline-flex items-center rounded-md border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-xs font-semibold text-indigo-700 whitespace-nowrap">
+        <span className="inline-flex items-center rounded-md border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-xs font-semibold text-indigo-700 whitespace-nowrap dark:border-indigo-900/60 dark:bg-indigo-950/50 dark:text-indigo-300">
           New
         </span>
       );
     }
     if (condition === 'Good') {
       return (
-        <span className="inline-flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700 whitespace-nowrap">
+        <span className="inline-flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700 whitespace-nowrap dark:border-emerald-900/60 dark:bg-emerald-950/50 dark:text-emerald-300">
           Good
         </span>
       );
     }
     return (
-      <span className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-rose-50 px-2 py-0.5 text-xs font-semibold text-rose-700 whitespace-nowrap">
+      <span className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-rose-50 px-2 py-0.5 text-xs font-semibold text-rose-700 whitespace-nowrap dark:border-rose-900/60 dark:bg-rose-950/50 dark:text-rose-300">
         <AlertTriangle className="h-3 w-3 shrink-0" />
         <span>Needs Repair</span>
       </span>
@@ -310,21 +338,21 @@ export function AssetsInventoryView({
   const renderStatusLabel = (status: AssetStatus) => {
     if (status === 'Assigned') {
       return (
-        <span className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-800 whitespace-nowrap">
+        <span className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-800 whitespace-nowrap dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
           Assigned
         </span>
       );
     }
     if (status === 'In Stock') {
       return (
-        <span className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700 whitespace-nowrap">
+        <span className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700 whitespace-nowrap dark:border-emerald-900/60 dark:bg-emerald-950/50 dark:text-emerald-300">
           <CheckCircle2 className="h-3 w-3 shrink-0" />
           <span>In Stock</span>
         </span>
       );
     }
     return (
-      <span className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800 whitespace-nowrap">
+      <span className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800 whitespace-nowrap dark:border-amber-900/60 dark:bg-amber-950/50 dark:text-amber-300">
         <Wrench className="h-3 w-3 shrink-0" />
         <span>Under Maintenance</span>
       </span>
@@ -342,37 +370,37 @@ export function AssetsInventoryView({
         aria-label="Asset Inventory Metrics"
         className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4"
       >
-        <div className="rounded-xl border border-slate-200 bg-white p-5">
+        <div className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-500">Total Company Assets</span>
-            <Boxes className="h-4 w-4 text-indigo-600" />
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Total Company Assets</span>
+            <Boxes className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
           </div>
-          <p className="mt-2 font-display text-2xl font-bold text-slate-900 tabular-nums">
+          <p className="mt-2 font-display text-2xl font-bold text-slate-900 tabular-nums dark:text-slate-100">
             {totalAssets}
           </p>
-          <p className="mt-1 text-xs text-slate-500">Tracked hardware, licenses &amp; gear</p>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Tracked hardware, licenses &amp; gear</p>
         </div>
 
-        <div className="rounded-xl border border-slate-200 bg-white p-5">
+        <div className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-500">Assigned Assets</span>
-            <ArrowLeftRight className="h-4 w-4 text-slate-600" />
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Assigned Assets</span>
+            <ArrowLeftRight className="h-4 w-4 text-slate-600 dark:text-slate-400" />
           </div>
-          <p className="mt-2 font-display text-2xl font-bold text-slate-900 tabular-nums">
+          <p className="mt-2 font-display text-2xl font-bold text-slate-900 tabular-nums dark:text-slate-100">
             {assignedCount}
           </p>
-          <p className="mt-1 text-xs text-slate-500">Issued to employees &amp; pods</p>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Issued to employees &amp; pods</p>
         </div>
 
-        <div className="rounded-xl border border-slate-200 bg-white p-5">
+        <div className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-500">Available in Stock</span>
-            <PackageCheck className="h-4 w-4 text-emerald-600" />
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Available in Stock</span>
+            <PackageCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
           </div>
-          <p className="mt-2 font-display text-2xl font-bold text-emerald-700 tabular-nums">
+          <p className="mt-2 font-display text-2xl font-bold text-emerald-700 tabular-nums dark:text-emerald-400">
             {inStockCount}
           </p>
-          <p className="mt-1 text-xs text-slate-500">Ready for provisioning &amp; fulfillment</p>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Ready for provisioning &amp; fulfillment</p>
         </div>
 
         <button
@@ -380,37 +408,37 @@ export function AssetsInventoryView({
           onClick={() => setAlertsOnly((prev) => !prev)}
           className={`rounded-xl border p-5 text-left transition-colors ${
             alertsOnly
-              ? 'border-rose-300 bg-rose-50/50'
-              : 'border-slate-200 bg-white hover:border-slate-300'
+              ? 'border-rose-300 bg-rose-50/50 dark:border-rose-800 dark:bg-rose-950/35'
+              : 'border-slate-200 bg-white hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700'
           }`}
         >
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-500">
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
               Low Stock / Maintenance Alerts
             </span>
             <AlertTriangle
-              className={`h-4 w-4 ${alertCount > 0 ? 'text-rose-600' : 'text-slate-400'}`}
+              className={`h-4 w-4 ${alertCount > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-400 dark:text-slate-500'}`}
             />
           </div>
           <p
             className={`mt-2 font-display text-2xl font-bold tabular-nums ${
-              alertCount > 0 ? 'text-rose-700' : 'text-slate-900'
+              alertCount > 0 ? 'text-rose-700 dark:text-rose-400' : 'text-slate-900 dark:text-slate-100'
             }`}
           >
             {alertCount}
           </p>
-          <p className="mt-1 text-xs text-slate-500">
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
             {alertsOnly ? 'Showing alert items only (click to clear)' : 'Click to filter flagged units'}
           </p>
         </button>
       </section>
 
       {/* Search, Filters & Actions Bar */}
-      <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 xl:flex-row xl:items-center xl:justify-between">
+      <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 xl:flex-row xl:items-center xl:justify-between dark:border-slate-800 dark:bg-slate-900">
         <div className="flex flex-1 flex-wrap items-center gap-2.5">
           <div className="relative min-w-[230px] flex-1">
             <Search
-              className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400"
+              className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-slate-500"
               aria-hidden="true"
             />
             <input
@@ -418,7 +446,7 @@ export function AssetsInventoryView({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search Asset Tag (AST-2026-014), Item Name, Assignee, Serial..."
-              className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50 pr-3 pl-9 text-sm text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:bg-white focus:outline-none"
+              className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50 pr-3 pl-9 text-sm text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:bg-white focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:bg-slate-950"
             />
           </div>
 
@@ -426,7 +454,7 @@ export function AssetsInventoryView({
             aria-label="Filter by Asset Category"
             value={categoryFilter}
             onChange={(e) => setCategoryFilter(e.target.value as AssetCategory | 'All')}
-            className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 focus:border-indigo-500 focus:outline-none"
+            className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
           >
             <option value="All">All Categories</option>
             {ASSET_CATEGORIES.map((cat) => (
@@ -440,7 +468,7 @@ export function AssetsInventoryView({
             aria-label="Filter by Asset Status"
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value as AssetStatus | 'All')}
-            className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 focus:border-indigo-500 focus:outline-none"
+            className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
           >
             <option value="All">All Statuses</option>
             {ASSET_STATUSES.map((st) => (
@@ -455,9 +483,9 @@ export function AssetsInventoryView({
           <button
             type="button"
             onClick={handleExportCsv}
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 hover:text-slate-900 whitespace-nowrap"
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 hover:text-slate-900 whitespace-nowrap dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 dark:hover:text-white"
           >
-            <Download className="h-3.5 w-3.5 text-indigo-600" />
+            <Download className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
             <span>Export Asset Ledger CSV</span>
           </button>
 
@@ -474,14 +502,47 @@ export function AssetsInventoryView({
         </div>
       </div>
 
+      {/* Pending Maker-Checker Asset Proposals */}
+      {pendingCreatedAssets.length > 0 && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-4 dark:border-amber-800/70 dark:bg-amber-950/30">
+          <div className="flex flex-wrap items-center gap-2">
+            <PendingApprovalBadge label={`${pendingCreatedAssets.length} Pending Super Admin Approval`} />
+            <span className="text-xs font-semibold text-amber-950 dark:text-amber-200">
+              New Asset Registrations Awaiting Maker-Checker Review
+            </span>
+          </div>
+          <div className="mt-3 grid grid-cols-1 gap-2.5 md:grid-cols-2">
+            {pendingCreatedAssets.map((chg) => (
+              <div
+                key={chg.id}
+                className="flex items-start justify-between gap-3 rounded-lg border border-amber-200/90 bg-white px-3.5 py-2.5 dark:border-amber-900/60 dark:bg-slate-900"
+              >
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="font-mono text-[11px] font-bold text-indigo-700 dark:text-indigo-400">
+                      {chg.itemLabel}
+                    </span>
+                    <PendingApprovalBadge compact />
+                  </div>
+                  <p className="mt-0.5 text-[11px] text-slate-600 dark:text-slate-300">{chg.summary}</p>
+                  <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                    By {chg.editorName} ({chg.editorDepartment}) · {formatDateTime(chg.submittedAt)}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Asset & Stock Registry Table */}
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
         {filteredAssets.length === 0 ? (
           <div className="px-6 py-16 text-center">
-            <p className="font-display text-sm font-semibold text-slate-900">
+            <p className="font-display text-sm font-semibold text-slate-900 dark:text-slate-100">
               No assets match your current filters
             </p>
-            <p className="mt-1 text-xs text-slate-500">
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
               Clear active filters{canManageAssets ? ' or register a new hardware unit, license pool, or field kit' : ''}.
             </p>
             {canManageAssets && (
@@ -499,7 +560,7 @@ export function AssetsInventoryView({
           <div className="overflow-x-auto">
             <table className="w-full min-w-[1040px] border-collapse text-left text-sm">
               <thead>
-                <tr className="border-b border-slate-200 bg-slate-50/80 text-xs font-semibold text-slate-500">
+                <tr className="border-b border-slate-200 bg-slate-50/80 text-xs font-semibold text-slate-500 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-400">
                   <th className="py-3 pr-3 pl-5">Asset Tag</th>
                   <th className="px-3 py-3">Item Name</th>
                   <th className="px-3 py-3">Category</th>
@@ -509,7 +570,7 @@ export function AssetsInventoryView({
                   <th className="py-3 pr-5 pl-3 text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {filteredAssets.map((asset) => {
                   const lowStock =
                     typeof asset.stockQuantity === 'number' &&
@@ -522,16 +583,19 @@ export function AssetsInventoryView({
                       key={asset.id}
                       className={`transition-colors ${
                         isAssetAlert(asset)
-                          ? 'bg-rose-50/20 hover:bg-rose-50/40'
-                          : 'hover:bg-slate-50/80'
+                          ? 'bg-rose-50/20 hover:bg-rose-50/40 dark:bg-rose-950/20 dark:hover:bg-rose-950/35'
+                          : 'hover:bg-slate-50/80 dark:hover:bg-slate-800/50'
                       }`}
                     >
-                      <td className="py-3.5 pr-3 pl-5 font-mono text-xs font-bold text-indigo-700 tabular-nums whitespace-nowrap">
+                      <td className="py-3.5 pr-3 pl-5 font-mono text-xs font-bold text-indigo-700 tabular-nums whitespace-nowrap dark:text-indigo-400">
                         {asset.tag}
                       </td>
                       <td className="px-3 py-3.5">
-                        <p className="font-semibold text-slate-900">{asset.name}</p>
-                        <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <p className="font-semibold text-slate-900 dark:text-slate-100">{asset.name}</p>
+                          {pendingAssetEditIds.has(asset.id) && <PendingApprovalBadge compact />}
+                        </div>
+                        <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
                           {asset.serialNumber && (
                             <span className="font-mono tabular-nums">{asset.serialNumber}</span>
                           )}
@@ -540,19 +604,19 @@ export function AssetsInventoryView({
                           {lowStock && (
                             <>
                               <span aria-hidden="true">·</span>
-                              <span className="font-semibold text-rose-700 tabular-nums">
+                              <span className="font-semibold text-rose-700 tabular-nums dark:text-rose-400">
                                 Low Stock ({asset.stockQuantity} left / min {asset.minStockThreshold})
                               </span>
                             </>
                           )}
                         </div>
                       </td>
-                      <td className="px-3 py-3.5 text-xs font-medium text-slate-700 whitespace-nowrap">
+                      <td className="px-3 py-3.5 text-xs font-medium text-slate-700 whitespace-nowrap dark:text-slate-300">
                         {asset.category}
                       </td>
                       <td className="px-3 py-3.5 whitespace-nowrap">
-                        <p className="text-xs font-semibold text-slate-900">{asset.assignedTo}</p>
-                        <p className="text-[11px] text-slate-500">{asset.department}</p>
+                        <p className="text-xs font-semibold text-slate-900 dark:text-slate-100">{asset.assignedTo}</p>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">{asset.department}</p>
                       </td>
                       <td className="px-3 py-3.5">{renderConditionLabel(asset.condition)}</td>
                       <td className="px-3 py-3.5">{renderStatusLabel(asset.status)}</td>
@@ -563,7 +627,7 @@ export function AssetsInventoryView({
                               <button
                                 type="button"
                                 onClick={() => openTransferModal(asset)}
-                                className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700"
+                                className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-indigo-700 dark:hover:bg-indigo-950/60 dark:hover:text-indigo-300"
                               >
                                 <ArrowLeftRight className="h-3.5 w-3.5" />
                                 <span>Assign/Transfer</span>
@@ -571,7 +635,7 @@ export function AssetsInventoryView({
                               <button
                                 type="button"
                                 onClick={() => openMaintenanceModal(asset)}
-                                className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:border-amber-300 hover:bg-amber-50 hover:text-amber-800"
+                                className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:border-amber-300 hover:bg-amber-50 hover:text-amber-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-amber-700 dark:hover:bg-amber-950/60 dark:hover:text-amber-300"
                               >
                                 <Wrench className="h-3.5 w-3.5" />
                                 <span>Log Maintenance</span>
@@ -583,7 +647,7 @@ export function AssetsInventoryView({
                             onClick={() => setHistoryTarget(asset)}
                             title={`View custody & approval history for ${asset.tag}`}
                             aria-label={`View history for ${asset.tag}`}
-                            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 dark:hover:text-white"
                           >
                             <History className="h-3.5 w-3.5" />
                             <span className="font-mono text-[11px] tabular-nums">
@@ -604,21 +668,21 @@ export function AssetsInventoryView({
       {/* Register New Asset Modal */}
       {registerOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs sm:p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs sm:p-4 dark:bg-slate-950/75"
           role="dialog"
           aria-modal="true"
           aria-labelledby="register-asset-title"
         >
-          <div className="flex max-h-[90vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
-            <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3.5 sm:px-6 sm:py-4">
+          <div className="flex max-h-[90vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3.5 sm:px-6 sm:py-4 dark:border-slate-800">
               <div className="min-w-0">
                 <h2
                   id="register-asset-title"
-                  className="font-display text-base font-bold text-slate-900"
+                  className="font-display text-base font-bold text-slate-900 dark:text-slate-100"
                 >
                   Register New Company Asset
                 </h2>
-                <p className="mt-0.5 text-xs text-slate-500">
+                <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                   Add IT hardware, software license pools, office equipment, or field gear
                 </p>
               </div>
@@ -626,7 +690,7 @@ export function AssetsInventoryView({
                 type="button"
                 onClick={() => setRegisterOpen(false)}
                 aria-label="Close modal"
-                className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:text-slate-500 dark:hover:bg-slate-800 dark:hover:text-slate-200"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -636,7 +700,7 @@ export function AssetsInventoryView({
               {regError && (
                 <div
                   role="alert"
-                  className="rounded-lg border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs font-medium text-rose-800"
+                  className="rounded-lg border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs font-medium text-rose-800 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300"
                 >
                   {regError}
                 </div>
@@ -644,8 +708,8 @@ export function AssetsInventoryView({
 
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <div>
-                  <label htmlFor="ast-tag" className="block text-xs font-semibold text-slate-700">
-                    Asset Tag <span className="text-rose-600">*</span>
+                  <label htmlFor="ast-tag" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Asset Tag <span className="text-rose-600 dark:text-rose-400">*</span>
                   </label>
                   <input
                     id="ast-tag"
@@ -655,12 +719,12 @@ export function AssetsInventoryView({
                       setRegTag(e.target.value);
                       setRegError(null);
                     }}
-                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 font-mono text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 font-mono text-sm text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
                   />
                 </div>
                 <div className="sm:col-span-2">
-                  <label htmlFor="ast-name" className="block text-xs font-semibold text-slate-700">
-                    Item Name <span className="text-rose-600">*</span>
+                  <label htmlFor="ast-name" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Item Name <span className="text-rose-600 dark:text-rose-400">*</span>
                   </label>
                   <input
                     id="ast-name"
@@ -671,21 +735,21 @@ export function AssetsInventoryView({
                       setRegError(null);
                     }}
                     placeholder="e.g. ThinkPad X1 Carbon Gen 12"
-                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <div>
-                  <label htmlFor="ast-cat" className="block text-xs font-semibold text-slate-700">
+                  <label htmlFor="ast-cat" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
                     Category
                   </label>
                   <select
                     id="ast-cat"
                     value={regCategory}
                     onChange={(e) => setRegCategory(e.target.value as AssetCategory)}
-                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                   >
                     {ASSET_CATEGORIES.map((c) => (
                       <option key={c} value={c}>
@@ -696,14 +760,14 @@ export function AssetsInventoryView({
                 </div>
 
                 <div>
-                  <label htmlFor="ast-cond" className="block text-xs font-semibold text-slate-700">
+                  <label htmlFor="ast-cond" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
                     Condition
                   </label>
                   <select
                     id="ast-cond"
                     value={regCondition}
                     onChange={(e) => setRegCondition(e.target.value as AssetCondition)}
-                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                   >
                     {ASSET_CONDITIONS.map((c) => (
                       <option key={c} value={c}>
@@ -714,14 +778,14 @@ export function AssetsInventoryView({
                 </div>
 
                 <div>
-                  <label htmlFor="ast-status" className="block text-xs font-semibold text-slate-700">
+                  <label htmlFor="ast-status" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
                     Status
                   </label>
                   <select
                     id="ast-status"
                     value={regStatus}
                     onChange={(e) => setRegStatus(e.target.value as AssetStatus)}
-                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                   >
                     {ASSET_STATUSES.map((s) => (
                       <option key={s} value={s}>
@@ -734,7 +798,7 @@ export function AssetsInventoryView({
 
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
-                  <label htmlFor="ast-assignee" className="block text-xs font-semibold text-slate-700">
+                  <label htmlFor="ast-assignee" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
                     Assigned To (Employee / Custodian)
                   </label>
                   <input
@@ -743,7 +807,7 @@ export function AssetsInventoryView({
                     list="nexops-asset-assignees"
                     value={regAssignedTo}
                     onChange={(e) => setRegAssignedTo(e.target.value)}
-                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                   />
                   <datalist id="nexops-asset-assignees">
                     {availableEmployees.map((emp) => (
@@ -753,14 +817,14 @@ export function AssetsInventoryView({
                 </div>
 
                 <div>
-                  <label htmlFor="ast-dept" className="block text-xs font-semibold text-slate-700">
+                  <label htmlFor="ast-dept" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
                     Department
                   </label>
                   <select
                     id="ast-dept"
                     value={regDepartment}
                     onChange={(e) => setRegDepartment(e.target.value as Department)}
-                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                   >
                     {availableDepartments.map((d) => (
                       <option key={d} value={d}>
@@ -771,7 +835,7 @@ export function AssetsInventoryView({
                 </div>
 
                 <div>
-                  <label htmlFor="ast-serial" className="block text-xs font-semibold text-slate-700">
+                  <label htmlFor="ast-serial" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
                     Serial / License Reference
                   </label>
                   <input
@@ -780,12 +844,12 @@ export function AssetsInventoryView({
                     value={regSerial}
                     onChange={(e) => setRegSerial(e.target.value)}
                     placeholder="SN-..."
-                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 font-mono text-xs text-slate-900 focus:border-indigo-500 focus:outline-none"
+                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 font-mono text-xs text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
                   />
                 </div>
 
                 <div>
-                  <label htmlFor="ast-loc" className="block text-xs font-semibold text-slate-700">
+                  <label htmlFor="ast-loc" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
                     Location / Vault
                   </label>
                   <input
@@ -794,12 +858,12 @@ export function AssetsInventoryView({
                     value={regLocation}
                     onChange={(e) => setRegLocation(e.target.value)}
                     placeholder="HQ Floor 4"
-                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
                   />
                 </div>
 
                 <div>
-                  <label htmlFor="ast-qty" className="block text-xs font-semibold text-slate-700">
+                  <label htmlFor="ast-qty" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
                     Stock Quantity
                   </label>
                   <input
@@ -808,12 +872,12 @@ export function AssetsInventoryView({
                     min={0}
                     value={regStockQty}
                     onChange={(e) => setRegStockQty(e.target.value)}
-                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 font-mono text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 font-mono text-sm text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                   />
                 </div>
 
                 <div>
-                  <label htmlFor="ast-min" className="block text-xs font-semibold text-slate-700">
+                  <label htmlFor="ast-min" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
                     Low-Stock Alert Threshold (0 = none)
                   </label>
                   <input
@@ -822,16 +886,16 @@ export function AssetsInventoryView({
                     min={0}
                     value={regMinStock}
                     onChange={(e) => setRegMinStock(e.target.value)}
-                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 font-mono text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 font-mono text-sm text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                   />
                 </div>
               </div>
 
-              <div className="flex items-center justify-end gap-2.5 border-t border-slate-200 pt-4">
+              <div className="flex items-center justify-end gap-2.5 border-t border-slate-200 pt-4 dark:border-slate-800">
                 <button
                   type="button"
                   onClick={() => setRegisterOpen(false)}
-                  className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                  className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                 >
                   Cancel
                 </button>
@@ -850,21 +914,21 @@ export function AssetsInventoryView({
       {/* Assign / Transfer Asset Modal */}
       {transferTarget && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs sm:p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs sm:p-4 dark:bg-slate-950/75"
           role="dialog"
           aria-modal="true"
           aria-labelledby="transfer-asset-title"
         >
-          <div className="flex max-h-[90vh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
-            <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3.5 sm:px-6 sm:py-4">
+          <div className="flex max-h-[90vh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3.5 sm:px-6 sm:py-4 dark:border-slate-800">
               <div className="min-w-0">
                 <h2
                   id="transfer-asset-title"
-                  className="font-display text-base font-bold text-slate-900"
+                  className="font-display text-base font-bold text-slate-900 dark:text-slate-100"
                 >
                   Assign / Transfer Asset
                 </h2>
-                <p className="mt-0.5 truncate font-mono text-xs text-indigo-700">
+                <p className="mt-0.5 truncate font-mono text-xs text-indigo-700 dark:text-indigo-400">
                   {transferTarget.tag} · {transferTarget.name}
                 </p>
               </div>
@@ -872,7 +936,7 @@ export function AssetsInventoryView({
                 type="button"
                 onClick={() => setTransferTarget(null)}
                 aria-label="Close modal"
-                className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:text-slate-500 dark:hover:bg-slate-800 dark:hover:text-slate-200"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -882,21 +946,21 @@ export function AssetsInventoryView({
               {txError && (
                 <div
                   role="alert"
-                  className="rounded-lg border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs font-medium text-rose-800"
+                  className="rounded-lg border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs font-medium text-rose-800 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300"
                 >
                   {txError}
                 </div>
               )}
 
               <div>
-                <label htmlFor="tx-status" className="block text-xs font-semibold text-slate-700">
+                <label htmlFor="tx-status" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
                   Allocation Status
                 </label>
                 <select
                   id="tx-status"
                   value={txStatus}
                   onChange={(e) => setTxStatus(e.target.value as AssetStatus)}
-                  className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                  className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                 >
                   <option value="Assigned">Assigned to Employee</option>
                   <option value="In Stock">Return to Stockroom (In Stock)</option>
@@ -906,8 +970,8 @@ export function AssetsInventoryView({
 
               {txStatus !== 'In Stock' && (
                 <div>
-                  <label htmlFor="tx-assignee" className="block text-xs font-semibold text-slate-700">
-                    New Custodian / Employee <span className="text-rose-600">*</span>
+                  <label htmlFor="tx-assignee" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    New Custodian / Employee <span className="text-rose-600 dark:text-rose-400">*</span>
                   </label>
                   <input
                     id="tx-assignee"
@@ -919,7 +983,7 @@ export function AssetsInventoryView({
                       setTxError(null);
                     }}
                     placeholder="Select or enter employee name"
-                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
                   />
                   <datalist id="nexops-tx-employees">
                     {teamMembers
@@ -933,14 +997,14 @@ export function AssetsInventoryView({
 
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
-                  <label htmlFor="tx-dept" className="block text-xs font-semibold text-slate-700">
+                  <label htmlFor="tx-dept" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
                     Department
                   </label>
                   <select
                     id="tx-dept"
                     value={txDepartment}
                     onChange={(e) => setTxDepartment(e.target.value as Department)}
-                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                   >
                     {availableDepartments.map((d) => (
                       <option key={d} value={d}>
@@ -951,14 +1015,14 @@ export function AssetsInventoryView({
                 </div>
 
                 <div>
-                  <label htmlFor="tx-cond" className="block text-xs font-semibold text-slate-700">
+                  <label htmlFor="tx-cond" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
                     Condition
                   </label>
                   <select
                     id="tx-cond"
                     value={txCondition}
                     onChange={(e) => setTxCondition(e.target.value as AssetCondition)}
-                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                   >
                     {ASSET_CONDITIONS.map((c) => (
                       <option key={c} value={c}>
@@ -970,7 +1034,7 @@ export function AssetsInventoryView({
               </div>
 
               <div>
-                <label htmlFor="tx-notes" className="block text-xs font-semibold text-slate-700">
+                <label htmlFor="tx-notes" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
                   Transfer / Handover Note
                 </label>
                 <input
@@ -979,15 +1043,15 @@ export function AssetsInventoryView({
                   value={txNotes}
                   onChange={(e) => setTxNotes(e.target.value)}
                   placeholder="Optional ticket or custody handover reason"
-                  className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                  className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
                 />
               </div>
 
-              <div className="flex items-center justify-end gap-2.5 border-t border-slate-200 pt-4">
+              <div className="flex items-center justify-end gap-2.5 border-t border-slate-200 pt-4 dark:border-slate-800">
                 <button
                   type="button"
                   onClick={() => setTransferTarget(null)}
-                  className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                  className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                 >
                   Cancel
                 </button>
@@ -1006,21 +1070,21 @@ export function AssetsInventoryView({
       {/* Log Maintenance Modal */}
       {maintenanceTarget && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs sm:p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs sm:p-4 dark:bg-slate-950/75"
           role="dialog"
           aria-modal="true"
           aria-labelledby="maintenance-asset-title"
         >
-          <div className="flex max-h-[90vh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
-            <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3.5 sm:px-6 sm:py-4">
+          <div className="flex max-h-[90vh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3.5 sm:px-6 sm:py-4 dark:border-slate-800">
               <div className="min-w-0">
                 <h2
                   id="maintenance-asset-title"
-                  className="font-display text-base font-bold text-slate-900"
+                  className="font-display text-base font-bold text-slate-900 dark:text-slate-100"
                 >
                   Log Asset Maintenance
                 </h2>
-                <p className="mt-0.5 truncate font-mono text-xs text-indigo-700">
+                <p className="mt-0.5 truncate font-mono text-xs text-indigo-700 dark:text-indigo-400">
                   {maintenanceTarget.tag} · {maintenanceTarget.name}
                 </p>
               </div>
@@ -1028,7 +1092,7 @@ export function AssetsInventoryView({
                 type="button"
                 onClick={() => setMaintenanceTarget(null)}
                 aria-label="Close modal"
-                className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -1038,7 +1102,7 @@ export function AssetsInventoryView({
               {mntError && (
                 <div
                   role="alert"
-                  className="rounded-lg border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs font-medium text-rose-800"
+                  className="rounded-lg border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs font-medium text-rose-800 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300"
                 >
                   {mntError}
                 </div>
@@ -1046,14 +1110,14 @@ export function AssetsInventoryView({
 
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
-                  <label htmlFor="mnt-cond" className="block text-xs font-semibold text-slate-700">
+                  <label htmlFor="mnt-cond" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
                     Updated Condition
                   </label>
                   <select
                     id="mnt-cond"
                     value={mntCondition}
                     onChange={(e) => setMntCondition(e.target.value as AssetCondition)}
-                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                   >
                     {ASSET_CONDITIONS.map((c) => (
                       <option key={c} value={c}>
@@ -1064,14 +1128,14 @@ export function AssetsInventoryView({
                 </div>
 
                 <div>
-                  <label htmlFor="mnt-status" className="block text-xs font-semibold text-slate-700">
+                  <label htmlFor="mnt-status" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
                     Updated Status
                   </label>
                   <select
                     id="mnt-status"
                     value={mntStatus}
                     onChange={(e) => setMntStatus(e.target.value as AssetStatus)}
-                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                   >
                     {ASSET_STATUSES.map((s) => (
                       <option key={s} value={s}>
@@ -1083,8 +1147,8 @@ export function AssetsInventoryView({
               </div>
 
               <div>
-                <label htmlFor="mnt-notes" className="block text-xs font-semibold text-slate-700">
-                  Service / Diagnostic Log <span className="text-rose-600">*</span>
+                <label htmlFor="mnt-notes" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Service / Diagnostic Log <span className="text-rose-600 dark:text-rose-400">*</span>
                 </label>
                 <textarea
                   id="mnt-notes"
@@ -1095,21 +1159,21 @@ export function AssetsInventoryView({
                     setMntError(null);
                   }}
                   placeholder="Describe hardware diagnostics, RMA vendor ticket, or repair sign-off..."
-                  className="mt-1.5 w-full rounded-lg border border-slate-200 p-3 text-xs text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none"
+                  className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
                 />
               </div>
 
-              <div className="flex items-center justify-end gap-2.5 border-t border-slate-200 pt-4">
+              <div className="flex items-center justify-end gap-2.5 border-t border-slate-200 pt-4 dark:border-slate-800">
                 <button
                   type="button"
                   onClick={() => setMaintenanceTarget(null)}
-                  className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                  className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="rounded-lg bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800"
+                  className="rounded-lg bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 dark:bg-indigo-600 dark:hover:bg-indigo-700"
                 >
                   Save Maintenance Log
                 </button>
@@ -1122,22 +1186,22 @@ export function AssetsInventoryView({
       {/* Asset Custody & Approval History Modal */}
       {activeHistoryAsset && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs sm:p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs sm:p-4 dark:bg-slate-950/75"
           role="dialog"
           aria-modal="true"
           aria-labelledby="history-asset-title"
         >
-          <div className="flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
-            <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3.5 sm:px-6 sm:py-4">
+          <div className="flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3.5 sm:px-6 sm:py-4 dark:border-slate-800">
               <div className="min-w-0">
                 <h2
                   id="history-asset-title"
-                  className="font-display text-base font-bold text-slate-900"
+                  className="font-display text-base font-bold text-slate-900 dark:text-slate-100"
                 >
                   Asset Audit &amp; Custody History
                 </h2>
-                <p className="mt-0.5 truncate text-xs text-slate-500">
-                  <span className="font-mono font-semibold text-indigo-700">
+                <p className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">
+                  <span className="font-mono font-semibold text-indigo-700 dark:text-indigo-400">
                     {activeHistoryAsset.tag}
                   </span>{' '}
                   · {activeHistoryAsset.name}
@@ -1147,7 +1211,7 @@ export function AssetsInventoryView({
                 type="button"
                 onClick={() => setHistoryTarget(null)}
                 aria-label="Close modal"
-                className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -1155,7 +1219,7 @@ export function AssetsInventoryView({
 
             <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
               {activeHistoryAsset.history.length === 0 ? (
-                <p className="py-8 text-center text-xs text-slate-500">
+                <p className="py-8 text-center text-xs text-slate-500 dark:text-slate-400">
                   No custody or maintenance history recorded yet.
                 </p>
               ) : (
@@ -1167,20 +1231,20 @@ export function AssetsInventoryView({
                   .map((entry) => (
                     <div
                       key={entry.id}
-                      className="rounded-xl border border-slate-200 bg-slate-50/60 p-3.5"
+                      className="rounded-xl border border-slate-200 bg-slate-50/60 p-3.5 dark:border-slate-800 dark:bg-slate-950/60"
                     >
                       <div className="flex flex-wrap items-center justify-between gap-2">
-                        <span className="text-xs font-bold text-slate-900">
+                        <span className="text-xs font-bold text-slate-900 dark:text-slate-100">
                           {entry.eventType}
                         </span>
-                        <span className="font-mono text-[11px] text-slate-400 tabular-nums">
+                        <span className="font-mono text-[11px] text-slate-400 tabular-nums dark:text-slate-500">
                           {formatDateTime(entry.timestamp)}
                         </span>
                       </div>
-                      <p className="mt-1.5 text-xs leading-relaxed text-slate-700">
+                      <p className="mt-1.5 text-xs leading-relaxed text-slate-700 dark:text-slate-300">
                         {entry.details}
                       </p>
-                      <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500">
+                      <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
                         <span>Actor: {entry.actorName}</span>
                         {entry.requestId && onInspectRequest && (
                           <button
@@ -1189,7 +1253,7 @@ export function AssetsInventoryView({
                               setHistoryTarget(null);
                               onInspectRequest(entry.requestId!);
                             }}
-                            className="font-mono font-semibold text-indigo-600 hover:text-indigo-700"
+                            className="font-mono font-semibold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300"
                           >
                             Open {entry.requestId} →
                           </button>
@@ -1198,7 +1262,7 @@ export function AssetsInventoryView({
                     </div>
                   ))
               )}
-              <p className="pt-1 text-[11px] text-slate-400">
+              <p className="pt-1 text-[11px] text-slate-400 dark:text-slate-500">
                 Acting as {activeRole}. All custody transfers, maintenance logs, and approved
                 procurement requests are automatically recorded here.
               </p>

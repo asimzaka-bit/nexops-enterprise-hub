@@ -118,7 +118,7 @@ export function NexOpsLogo({
           className={
             wordmarkClassName ||
             `mt-4 font-sans text-2xl font-semibold tracking-tight ${
-              isDark ? 'text-white' : 'text-slate-900'
+              isDark ? 'text-white' : 'text-slate-900 dark:text-white'
             }`
           }
         >
@@ -129,7 +129,7 @@ export function NexOpsLogo({
             className={
               taglineClassName ||
               `mt-1 font-sans text-sm font-normal ${
-                isDark ? 'text-slate-400' : 'text-slate-500'
+                isDark ? 'text-slate-400' : 'text-slate-500 dark:text-slate-400'
               }`
             }
           >
@@ -148,7 +148,7 @@ export function NexOpsLogo({
           className={
             wordmarkClassName ||
             `block truncate font-sans text-sm font-semibold tracking-tight ${
-              isDark ? 'text-white' : 'text-slate-900'
+              isDark ? 'text-white' : 'text-slate-900 dark:text-white'
             }`
           }
         >
@@ -159,7 +159,7 @@ export function NexOpsLogo({
             className={
               taglineClassName ||
               `mt-0.5 block truncate font-sans text-[11px] font-normal ${
-                isDark ? 'text-slate-400' : 'text-slate-500'
+                isDark ? 'text-slate-400' : 'text-slate-500 dark:text-slate-400'
               }`
             }
           >

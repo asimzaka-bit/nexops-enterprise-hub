@@ -7,6 +7,7 @@ import {
   CurrencyCode,
   DEFAULT_SLA_POLICY,
   DbAccessRole,
+  DocumentVaultItem,
   NexOpsState,
   OperationalRequest,
   PermissionKey,
@@ -1076,10 +1077,13 @@ export function normalizePermissionMatrix(raw: unknown): PermissionMatrix {
     }
   }
 
-  // Enforce strict boundaries: Admin holds full operational controls; non-admin roles are strictly read-only.
+  // Enforce strict boundaries: Admin holds full operational controls; Editor has Maker-Checker content access; Viewer is read-only.
   base.Admin.manage_admin_settings = true;
+  base.Editor.approve_requests = false;
+  base.Editor.approve_leaves = false;
+  base.Editor.publish_announcements = false;
+  base.Editor.manage_admin_settings = false;
   for (const key of PERMISSION_KEYS) {
-    base.Editor[key] = false;
     base.Viewer[key] = false;
   }
 
@@ -1176,6 +1180,9 @@ export function parseSystemBackupJson(rawText: string): NexOpsState {
     subtasks: Array.isArray(rawState.subtasks) ? rawState.subtasks : [],
     taskComments: Array.isArray(rawState.taskComments) ? rawState.taskComments : [],
     vaultDocuments: Array.isArray(rawState.vaultDocuments) ? rawState.vaultDocuments : [],
+    pendingEditorChanges: Array.isArray(rawState.pendingEditorChanges)
+      ? rawState.pendingEditorChanges
+      : [],
     permissionMatrix: normalizePermissionMatrix(rawState.permissionMatrix),
   };
 }
@@ -1317,4 +1324,56 @@ export function exportAttendanceLogsCsv(logs: AttendanceLog[]): void {
   URL.revokeObjectURL(url);
 }
 
+export const TEN_GB_BYTES = 10 * 1024 * 1024 * 1024;
 
+export function formatStorageSize(bytes?: number | null): string {
+  if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes <= 0) return '0 B';
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${kb.toFixed(1)} KB`;
+  const mb = kb / 1024;
+  if (mb < 1024) return `${mb.toFixed(1)} MB`;
+  const gb = mb / 1024;
+  return `${gb.toFixed(2)} GB`;
+}
+
+export interface VaultStorageStats {
+  usedBytes: number;
+  quotaBytes: number;
+  remainingBytes: number;
+  usedPercent: number;
+  fileCount: number;
+  linkCount: number;
+}
+
+export function calculateVaultStorageStats(documents: DocumentVaultItem[]): VaultStorageStats {
+  let usedBytes = 0;
+  let fileCount = 0;
+  let linkCount = 0;
+
+  for (const doc of documents) {
+    if (doc.sourceType === 'uploaded_file') {
+      fileCount += 1;
+      if (typeof doc.fileSize === 'number' && Number.isFinite(doc.fileSize) && doc.fileSize > 0) {
+        usedBytes += doc.fileSize;
+      }
+    } else {
+      linkCount += 1;
+      if (typeof doc.fileSize === 'number' && Number.isFinite(doc.fileSize) && doc.fileSize > 0) {
+        usedBytes += doc.fileSize;
+      }
+    }
+  }
+
+  const remainingBytes = Math.max(0, TEN_GB_BYTES - usedBytes);
+  const usedPercent = Math.min(100, (usedBytes / TEN_GB_BYTES) * 100);
+
+  return {
+    usedBytes,
+    quotaBytes: TEN_GB_BYTES,
+    remainingBytes,
+    usedPercent,
+    fileCount,
+    linkCount,
+  };
+}

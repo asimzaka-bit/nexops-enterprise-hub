@@ -188,7 +188,7 @@ const DOC_TOOL_META: Record<
     plural: 'Google Docs',
     placeholderUrl: 'https://docs.google.com/document/d/.../edit',
     primaryBtnClass: 'bg-[#1A73E8] hover:bg-[#1557B0] text-white',
-    badgeClass: 'bg-blue-50 text-blue-700 border-blue-200',
+    badgeClass: 'bg-blue-50 text-blue-700 border-blue-200 dark:border-blue-900/60 dark:bg-blue-950/60 dark:text-blue-300',
     subtitle: 'Create, edit, and collaborate on live Google Documents inside NexOps',
     renderIcon: (cls) => <GoogleDocsColorIcon className={cls} />,
   },
@@ -197,7 +197,7 @@ const DOC_TOOL_META: Record<
     plural: 'Google Sheets',
     placeholderUrl: 'https://docs.google.com/spreadsheets/d/.../edit',
     primaryBtnClass: 'bg-[#0F9D58] hover:bg-[#0B8043] text-white',
-    badgeClass: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    badgeClass: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:border-emerald-900/60 dark:bg-emerald-950/60 dark:text-emerald-300',
     subtitle: 'Live financial spreadsheets, operational ledgers, and departmental matrices',
     renderIcon: (cls) => <GoogleSheetsColorIcon className={cls} />,
   },
@@ -206,7 +206,7 @@ const DOC_TOOL_META: Record<
     plural: 'Google Forms',
     placeholderUrl: 'https://docs.google.com/forms/d/.../edit',
     primaryBtnClass: 'bg-[#7248B9] hover:bg-[#5E35B1] text-white',
-    badgeClass: 'bg-violet-50 text-violet-700 border-violet-200',
+    badgeClass: 'bg-violet-50 text-violet-700 border-violet-200 dark:border-violet-900/60 dark:bg-violet-950/60 dark:text-violet-300',
     subtitle: 'Build and fill out live Google Forms, surveys, and QA intake sheets',
     renderIcon: (cls) => <GoogleFormsColorIcon className={cls} />,
   },
@@ -228,12 +228,12 @@ function GoogleSignInButton({
       type="button"
       onClick={onClick}
       disabled={loading}
-      className={`inline-flex items-center gap-2.5 rounded-full border border-[#747775]/40 bg-white font-medium text-[#1F1F1F] shadow-xs transition-all hover:bg-[#F8FAFD] hover:shadow-sm focus-visible:outline-2 focus-visible:outline-[#0B57D0] disabled:cursor-not-allowed disabled:opacity-60 whitespace-nowrap ${
+      className={`inline-flex items-center gap-2.5 rounded-full border border-[#747775]/40 bg-white font-medium text-[#1F1F1F] shadow-xs transition-all hover:bg-[#F8FAFD] hover:shadow-sm focus-visible:outline-2 focus-visible:outline-[#0B57D0] disabled:cursor-not-allowed disabled:opacity-60 whitespace-nowrap dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700 ${
         compact ? 'h-9 px-3.5 text-xs' : 'h-10 px-4 text-xs'
       }`}
     >
       {loading ? (
-        <Loader2 className="h-4 w-4 animate-spin text-[#0B57D0] shrink-0" />
+        <Loader2 className="h-4 w-4 animate-spin text-[#0B57D0] shrink-0 dark:text-indigo-400" />
       ) : (
         <GoogleGColorIcon className="h-4 w-4 shrink-0" />
       )}
@@ -1187,7 +1187,7 @@ export function WorkspaceToolsView({
   return (
     <div className="space-y-4">
       {/* Top Google Workspace Switcher + Unified Verified Google Account Banner */}
-      <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-2xs">
+      <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-2xs dark:border-slate-800 dark:bg-slate-900">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-1.5">
             {TOOL_TABS.map((tab) => {
@@ -1203,8 +1203,8 @@ export function WorkspaceToolsView({
                   onClick={() => onSelectTool(tab.id)}
                   className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold transition-all ${
                     isSelected
-                      ? 'border-[#C2E7FF] bg-[#EDF2FA] text-[#001D35] shadow-2xs'
-                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                      ? 'border-[#C2E7FF] bg-[#EDF2FA] text-[#001D35] shadow-2xs dark:border-indigo-700/70 dark:bg-indigo-950/60 dark:text-indigo-100'
+                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
                   }`}
                 >
                   {tab.renderIcon('h-4 w-4 shrink-0')}
@@ -1213,8 +1213,8 @@ export function WorkspaceToolsView({
                     <span
                       className={`rounded-full px-1.5 py-0.5 font-mono text-[10px] font-bold tabular-nums ${
                         isSelected
-                          ? 'bg-white text-[#0B57D0]'
-                          : 'bg-slate-100 text-slate-600'
+                          ? 'bg-white text-[#0B57D0] dark:bg-indigo-900/70 dark:text-indigo-200'
+                          : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300'
                       }`}
                     >
                       {count}
@@ -1230,7 +1230,7 @@ export function WorkspaceToolsView({
               <>
                 <div
                   title="Verified Google session shared across Gmail, Docs, Sheets, and Forms"
-                  className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50/80 py-1 pr-3 pl-1.5 text-xs font-medium text-emerald-900"
+                  className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50/80 py-1 pr-3 pl-1.5 text-xs font-medium text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-950/50 dark:text-emerald-200"
                 >
                   {googlePhotoUrl ? (
                     <img
@@ -1251,7 +1251,7 @@ export function WorkspaceToolsView({
                 <button
                   type="button"
                   onClick={() => void handleDisconnectClick()}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 dark:hover:text-slate-100"
                 >
                   <LogOut className="h-3.5 w-3.5" />
                   <span>Disconnect</span>
@@ -1273,12 +1273,12 @@ export function WorkspaceToolsView({
       {/* 1. AUTHENTIC GOOGLE GMAIL INTERFACE (100% IN-APP)                   */}
       {/* =================================================================== */}
       {activeTool === 'gmail' && (
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-[#F6F8FC] shadow-xs">
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-[#F6F8FC] shadow-xs dark:border-slate-800 dark:bg-slate-950">
           {/* Authentic Gmail Top Header Bar */}
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/80 bg-[#F6F8FC] px-4 py-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/80 bg-[#F6F8FC] px-4 py-2.5 dark:border-slate-800 dark:bg-slate-950">
             <div className="flex items-center gap-2.5 min-w-[120px]">
               <GmailColorIcon className="h-7 w-7 shrink-0" />
-              <span className="font-display text-lg font-medium tracking-tight text-[#444746]">
+              <span className="font-display text-lg font-medium tracking-tight text-[#444746] dark:text-slate-200">
                 Gmail
               </span>
             </div>
@@ -1286,12 +1286,12 @@ export function WorkspaceToolsView({
             {/* Gmail Pill Search Bar */}
             <form
               onSubmit={handleGmailSearchSubmit}
-              className="flex h-11 min-w-[240px] flex-1 max-w-2xl items-center gap-2 rounded-full bg-[#EAF1FB] px-4 transition-all focus-within:bg-white focus-within:shadow-md"
+              className="flex h-11 min-w-[240px] flex-1 max-w-2xl items-center gap-2 rounded-full bg-[#EAF1FB] px-4 transition-all focus-within:bg-white focus-within:shadow-md dark:border dark:border-slate-800 dark:bg-slate-900 dark:focus-within:border-indigo-500 dark:focus-within:bg-slate-900"
             >
               <button
                 type="submit"
                 aria-label="Search mail"
-                className="rounded-full p-1 text-[#444746] hover:bg-slate-200/60"
+                className="rounded-full p-1 text-[#444746] hover:bg-slate-200/60 dark:text-slate-400 dark:hover:bg-slate-800"
               >
                 <Search className="h-4 w-4" />
               </button>
@@ -1303,7 +1303,7 @@ export function WorkspaceToolsView({
                   if (!e.target.value.trim()) setGmailSearchSubmitted('');
                 }}
                 placeholder="Search mail"
-                className="w-full bg-transparent text-sm text-[#1F1F1F] placeholder-[#444746] focus:outline-none"
+                className="w-full bg-transparent text-sm text-[#1F1F1F] placeholder-[#444746] focus:outline-none dark:text-slate-100 dark:placeholder:text-slate-400"
               />
               {gmailSearchInput && (
                 <button
@@ -1313,7 +1313,7 @@ export function WorkspaceToolsView({
                     setGmailSearchSubmitted('');
                   }}
                   aria-label="Clear mail search"
-                  className="rounded-full p-1 text-[#444746] hover:bg-slate-200/60"
+                  className="rounded-full p-1 text-[#444746] hover:bg-slate-200/60 dark:text-slate-400 dark:hover:bg-slate-800"
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -1330,7 +1330,7 @@ export function WorkspaceToolsView({
                   }
                   disabled={loadingMailbox}
                   title="Refresh Gmail messages"
-                  className="inline-flex h-9 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 text-xs font-semibold text-[#444746] hover:bg-slate-50"
+                  className="inline-flex h-9 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 text-xs font-semibold text-[#444746] hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                 >
                   <RefreshCw className={`h-3.5 w-3.5 ${loadingMailbox ? 'animate-spin' : ''}`} />
                   <span>Refresh</span>
@@ -1342,18 +1342,18 @@ export function WorkspaceToolsView({
           {/* Gmail Main Body: Left Sub-Nav + Main Mail List / Reader */}
           <div className="flex flex-col md:flex-row min-h-[610px]">
             {/* Left Gmail Sub-Navigation Panel */}
-            <aside className="w-full shrink-0 border-b border-slate-200/80 bg-[#F6F8FC] p-3 md:w-56 md:border-r md:border-b-0">
+            <aside className="w-full shrink-0 border-b border-slate-200/80 bg-[#F6F8FC] p-3 md:w-56 md:border-r md:border-b-0 dark:border-slate-800 dark:bg-slate-950">
               {!isViewer ? (
                 <button
                   type="button"
                   onClick={() => handleOpenCompose()}
-                  className="mb-3 inline-flex h-12 items-center gap-3 rounded-2xl bg-[#C2E7FF] px-5 text-sm font-semibold text-[#001D35] shadow-xs transition-all hover:shadow-md"
+                  className="mb-3 inline-flex h-12 items-center gap-3 rounded-2xl bg-[#C2E7FF] px-5 text-sm font-semibold text-[#001D35] shadow-xs transition-all hover:shadow-md dark:bg-indigo-600 dark:text-white dark:hover:bg-indigo-500"
                 >
                   <Pencil className="h-4 w-4" />
                   <span>Compose</span>
                 </button>
               ) : (
-                <div className="mb-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] font-semibold text-slate-600">
+                <div className="mb-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] font-semibold text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
                   Read-Only Mail Access
                 </div>
               )}
@@ -1398,8 +1398,8 @@ export function WorkspaceToolsView({
                       onClick={() => handleSelectFolder(folder.id)}
                       className={`flex w-full items-center justify-between rounded-full px-4 py-2 text-xs transition-colors ${
                         active
-                          ? 'bg-[#D3E3FD] font-bold text-[#001D35]'
-                          : 'font-medium text-[#444746] hover:bg-[#EAEFF8]'
+                          ? 'bg-[#D3E3FD] font-bold text-[#001D35] dark:bg-indigo-950/70 dark:text-indigo-200'
+                          : 'font-medium text-[#444746] hover:bg-[#EAEFF8] dark:text-slate-300 dark:hover:bg-slate-900'
                       }`}
                     >
                       <span className="flex items-center gap-3">
@@ -1417,8 +1417,8 @@ export function WorkspaceToolsView({
               </div>
 
               {/* Gmail Labels Section */}
-              <div className="mt-4 border-t border-slate-200/80 pt-3">
-                <p className="px-4 pb-1.5 text-[11px] font-semibold tracking-wide text-[#444746]">
+              <div className="mt-4 border-t border-slate-200/80 pt-3 dark:border-slate-800">
+                <p className="px-4 pb-1.5 text-[11px] font-semibold tracking-wide text-[#444746] dark:text-slate-400">
                   Labels
                 </p>
                 {gmailLabels.length === 0 ? (
@@ -1436,8 +1436,8 @@ export function WorkspaceToolsView({
                           onClick={() => handleSelectFolder('label', sysLbl.id)}
                           className={`flex w-full items-center gap-3 rounded-full px-4 py-1.5 text-xs transition-colors ${
                             active
-                              ? 'bg-[#D3E3FD] font-bold text-[#001D35]'
-                              : 'font-medium text-[#444746] hover:bg-[#EAEFF8]'
+                              ? 'bg-[#D3E3FD] font-bold text-[#001D35] dark:bg-indigo-950/70 dark:text-indigo-200'
+                              : 'font-medium text-[#444746] hover:bg-[#EAEFF8] dark:text-slate-300 dark:hover:bg-slate-900'
                           }`}
                         >
                           <Tag className="h-3.5 w-3.5 shrink-0" />
@@ -1457,8 +1457,8 @@ export function WorkspaceToolsView({
                           onClick={() => handleSelectFolder('label', lbl.id)}
                           className={`flex w-full items-center gap-3 rounded-full px-4 py-1.5 text-xs transition-colors ${
                             active
-                              ? 'bg-[#D3E3FD] font-bold text-[#001D35]'
-                              : 'font-medium text-[#444746] hover:bg-[#EAEFF8]'
+                              ? 'bg-[#D3E3FD] font-bold text-[#001D35] dark:bg-indigo-950/70 dark:text-indigo-200'
+                              : 'font-medium text-[#444746] hover:bg-[#EAEFF8] dark:text-slate-300 dark:hover:bg-slate-900'
                           }`}
                         >
                           <Tag className="h-3.5 w-3.5 shrink-0" />
@@ -1472,17 +1472,17 @@ export function WorkspaceToolsView({
             </aside>
 
             {/* Right Main Email Pane (White Rounded Material Canvas) */}
-            <div className="flex-1 bg-white md:m-2 md:ml-0 md:rounded-2xl md:border md:border-slate-200/70 flex flex-col overflow-hidden">
+            <div className="flex flex-1 flex-col overflow-hidden bg-white md:m-2 md:ml-0 md:rounded-2xl md:border md:border-slate-200/70 dark:bg-slate-900 dark:md:border-slate-800">
               {/* Verification Banner when Google Account is not yet connected */}
               {!googleToken && (
-                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-blue-100 bg-[#EDF2FA] px-5 py-3">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-blue-100 bg-[#EDF2FA] px-5 py-3 dark:border-indigo-900/50 dark:bg-indigo-950/40">
                   <div className="flex items-center gap-3 min-w-0">
                     <GmailColorIcon className="h-5 w-5 shrink-0" />
                     <div className="min-w-0">
-                      <p className="text-xs font-bold text-[#001D35]">
+                      <p className="text-xs font-bold text-[#001D35] dark:text-indigo-100">
                         Verify Your Google Account to Load Live Gmail Inbox &amp; Send Mail
                       </p>
-                      <p className="text-[11px] text-[#444746]">
+                      <p className="text-[11px] text-[#444746] dark:text-slate-300">
                         Authorizes Gmail, Google Docs, Google Sheets, and Google Forms inside NexOps.
                       </p>
                     </div>
@@ -1500,13 +1500,13 @@ export function WorkspaceToolsView({
                 /* ================= FULL EMAIL READER VIEW ================= */
                 <div className="flex flex-1 flex-col">
                   {/* Reader Action Toolbar */}
-                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-2.5 dark:border-slate-800">
                     <div className="flex items-center gap-1.5">
                       <button
                         type="button"
                         onClick={() => setOpenedMessage(null)}
                         title="Back to message list"
-                        className="inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-semibold text-[#444746] hover:bg-slate-100"
+                        className="inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-semibold text-[#444746] hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
                       >
                         <ArrowLeft className="h-4 w-4" />
                         <span>Back</span>
@@ -1519,13 +1519,13 @@ export function WorkspaceToolsView({
                               handleToggleStar(openedMessage.id, openedMessage.isStarred)
                             }
                             title="Toggle Star"
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-full hover:bg-slate-100"
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-full hover:bg-slate-100 dark:hover:bg-slate-800"
                           >
                             <Star
                               className={`h-4 w-4 ${
                                 openedMessage.isStarred
                                   ? 'fill-[#F4B400] text-[#F4B400]'
-                                  : 'text-[#444746]'
+                                  : 'text-[#444746] dark:text-slate-400'
                               }`}
                             />
                           </button>
@@ -1533,11 +1533,11 @@ export function WorkspaceToolsView({
                             type="button"
                             onClick={() => handleToggleSnooze(openedMessage)}
                             title="Snooze for Follow-up"
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[#444746] hover:bg-slate-100"
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[#444746] hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
                           >
                             <Clock
                               className={`h-4 w-4 ${
-                                snoozedMap[openedMessage.id] ? 'text-[#0B57D0]' : ''
+                                snoozedMap[openedMessage.id] ? 'text-[#0B57D0] dark:text-indigo-400' : ''
                               }`}
                             />
                           </button>
@@ -1558,7 +1558,7 @@ export function WorkspaceToolsView({
                               body: `\n\n--- Original Message ---\nFrom: ${openedMessage.senderDisplay}\nDate: ${openedMessage.dateRaw}\n\n${openedMessage.bodyText || openedMessage.snippet}`,
                             })
                           }
-                          className="inline-flex h-8 items-center gap-1.5 rounded-full border border-slate-200 px-3 text-xs font-semibold text-[#444746] hover:bg-slate-50"
+                          className="inline-flex h-8 items-center gap-1.5 rounded-full border border-slate-200 px-3 text-xs font-semibold text-[#444746] hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                         >
                           <Reply className="h-3.5 w-3.5" />
                           <span>Reply</span>
@@ -1574,7 +1574,7 @@ export function WorkspaceToolsView({
                               body: `\n\n--- Forwarded Message ---\nFrom: ${openedMessage.senderDisplay}\nSubject: ${openedMessage.subject}\n\n${openedMessage.bodyText || openedMessage.snippet}`,
                             })
                           }
-                          className="inline-flex h-8 items-center gap-1.5 rounded-full border border-slate-200 px-3 text-xs font-semibold text-[#444746] hover:bg-slate-50"
+                          className="inline-flex h-8 items-center gap-1.5 rounded-full border border-slate-200 px-3 text-xs font-semibold text-[#444746] hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                         >
                           <Forward className="h-3.5 w-3.5" />
                           <span>Forward</span>
@@ -1586,42 +1586,42 @@ export function WorkspaceToolsView({
                   {/* Full Email Subject + Sender Metadata + Body */}
                   <div className="flex-1 overflow-y-auto p-6 space-y-5">
                     <div className="flex flex-wrap items-center gap-2">
-                      <h2 className="font-display text-xl font-normal text-[#1F1F1F]">
+                      <h2 className="font-display text-xl font-normal text-[#1F1F1F] dark:text-slate-100">
                         {openedMessage.subject}
                       </h2>
                       {openedMessage.labels.slice(0, 3).map((lbl) => (
                         <span
                           key={lbl}
-                          className="rounded bg-[#E8EAED] px-2 py-0.5 text-[10px] font-semibold text-[#444746]"
+                          className="rounded bg-[#E8EAED] px-2 py-0.5 text-[10px] font-semibold text-[#444746] dark:bg-slate-800 dark:text-slate-300"
                         >
                           {lbl}
                         </span>
                       ))}
                     </div>
 
-                    <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-4 dark:border-slate-800">
                       <div className="flex items-center gap-3">
                         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#0B57D0] text-sm font-bold text-white">
                           {openedMessage.senderDisplay.charAt(0).toUpperCase() || 'M'}
                         </div>
                         <div className="text-xs">
                           <div className="flex flex-wrap items-center gap-1.5">
-                            <span className="font-bold text-[#1F1F1F]">
+                            <span className="font-bold text-[#1F1F1F] dark:text-slate-100">
                               {openedMessage.senderDisplay}
                             </span>
                             {openedMessage.senderEmail && (
-                              <span className="text-[#444746]">
+                              <span className="text-[#444746] dark:text-slate-400">
                                 &lt;{openedMessage.senderEmail}&gt;
                               </span>
                             )}
                           </div>
-                          <p className="mt-0.5 text-[11px] text-[#444746]">
+                          <p className="mt-0.5 text-[11px] text-[#444746] dark:text-slate-400">
                             to {openedMessage.to || 'me'}
                             {openedMessage.cc ? ` · cc: ${openedMessage.cc}` : ''}
                           </p>
                         </div>
                       </div>
-                      <span className="font-mono text-[11px] text-[#444746]">
+                      <span className="font-mono text-[11px] text-[#444746] dark:text-slate-400">
                         {openedMessage.source === 'nexops_log'
                           ? formatDateTime(openedMessage.dateRaw)
                           : openedMessage.dateRaw}
@@ -1629,21 +1629,21 @@ export function WorkspaceToolsView({
                     </div>
 
                     {loadingMessageBody ? (
-                      <div className="flex items-center gap-2 py-8 text-xs text-slate-500">
-                        <Loader2 className="h-4 w-4 animate-spin text-[#0B57D0]" />
+                      <div className="flex items-center gap-2 py-8 text-xs text-slate-500 dark:text-slate-400">
+                        <Loader2 className="h-4 w-4 animate-spin text-[#0B57D0] dark:text-indigo-400" />
                         <span>Loading full email body from Gmail...</span>
                       </div>
                     ) : (
                       <div className="space-y-4">
-                        <div className="whitespace-pre-wrap text-sm leading-relaxed text-[#1F1F1F]">
+                        <div className="whitespace-pre-wrap text-sm leading-relaxed text-[#1F1F1F] dark:text-slate-200">
                           {renderLinkedEmailBody(
                             openedMessage.bodyText || openedMessage.snippet || '(No message content)',
                           )}
                         </div>
 
                         {openedMessage.attachments && openedMessage.attachments.length > 0 && (
-                          <div className="border-t border-slate-100 pt-3">
-                            <p className="mb-2 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                          <div className="border-t border-slate-100 pt-3 dark:border-slate-800">
+                            <p className="mb-2 text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                               Attachments ({openedMessage.attachments.length})
                             </p>
                             <div className="flex flex-wrap gap-2">
@@ -1652,12 +1652,12 @@ export function WorkspaceToolsView({
                                 return (
                                   <span
                                     key={`${fileName}-${idx}`}
-                                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-medium text-slate-700"
+                                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
                                   >
-                                    <Paperclip className="h-3.5 w-3.5 text-[#0B57D0]" />
+                                    <Paperclip className="h-3.5 w-3.5 text-[#0B57D0] dark:text-indigo-400" />
                                     <span>{fileName}</span>
                                     {att.size > 0 && (
-                                      <span className="font-mono text-[10px] text-slate-500">
+                                      <span className="font-mono text-[10px] text-slate-500 dark:text-slate-400">
                                         ({formatFileSize(att.size)})
                                       </span>
                                     )}
@@ -1675,9 +1675,9 @@ export function WorkspaceToolsView({
                 /* ================= EMAIL LIST VIEW ================= */
                 <>
                   {/* List Sub-Toolbar */}
-                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-2.5 dark:border-slate-800">
                     <div className="flex items-center gap-2.5">
-                      <h3 className="text-xs font-bold capitalize text-[#1F1F1F]">
+                      <h3 className="text-xs font-bold capitalize text-[#1F1F1F] dark:text-slate-100">
                         {gmailFolder === 'label'
                           ? gmailLabels.find((l) => l.id === selectedLabelId)?.name ||
                             selectedLabelId ||
@@ -1689,21 +1689,21 @@ export function WorkspaceToolsView({
                         onClick={() => setUnreadOnly((prev) => !prev)}
                         className={`rounded-full border px-2.5 py-0.5 text-[11px] font-semibold transition-colors ${
                           unreadOnly
-                            ? 'border-[#0B57D0] bg-[#D3E3FD] text-[#001D35]'
-                            : 'border-slate-200 bg-white text-[#444746] hover:bg-slate-50'
+                            ? 'border-[#0B57D0] bg-[#D3E3FD] text-[#001D35] dark:border-indigo-500 dark:bg-indigo-950/70 dark:text-indigo-200'
+                            : 'border-slate-200 bg-white text-[#444746] hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
                         }`}
                       >
                         Unread only
                       </button>
                     </div>
-                    <span className="text-[11px] text-[#444746] tabular-nums">
+                    <span className="text-[11px] text-[#444746] tabular-nums dark:text-slate-400">
                       {displayedMailRows.length} message
                       {displayedMailRows.length === 1 ? '' : 's'}
                     </span>
                   </div>
 
                   {mailboxError && (
-                    <div className="m-4 flex items-center justify-between gap-2 rounded-lg border border-rose-200 bg-rose-50 px-4 py-2.5 text-xs text-rose-800">
+                    <div className="m-4 flex items-center justify-between gap-2 rounded-lg border border-rose-200 bg-rose-50 px-4 py-2.5 text-xs text-rose-800 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300">
                       <span>{mailboxError}</span>
                       <button
                         type="button"
@@ -1718,19 +1718,19 @@ export function WorkspaceToolsView({
                   )}
 
                   {loadingMailbox ? (
-                    <div className="flex flex-1 flex-col items-center justify-center py-20 text-xs text-slate-500">
-                      <Loader2 className="h-6 w-6 animate-spin text-[#0B57D0]" />
+                    <div className="flex flex-1 flex-col items-center justify-center py-20 text-xs text-slate-500 dark:text-slate-400">
+                      <Loader2 className="h-6 w-6 animate-spin text-[#0B57D0] dark:text-indigo-400" />
                       <p className="mt-2 font-medium">Loading Gmail messages...</p>
                     </div>
                   ) : displayedMailRows.length === 0 ? (
                     <div className="flex flex-1 flex-col items-center justify-center px-6 py-20 text-center">
                       <GmailColorIcon className="h-10 w-10 opacity-85" />
-                      <p className="mt-3 text-sm font-semibold text-[#1F1F1F]">
+                      <p className="mt-3 text-sm font-semibold text-[#1F1F1F] dark:text-slate-100">
                         {!googleToken && gmailFolder !== 'sent'
                           ? 'Verify your Google account to view this folder'
                           : `No messages in ${gmailFolder}`}
                       </p>
-                      <p className="mt-1 max-w-md text-xs text-[#444746]">
+                      <p className="mt-1 max-w-md text-xs text-[#444746] dark:text-slate-400">
                         {!googleToken && gmailFolder !== 'sent'
                           ? 'Click "Sign in with Google / Verify Gmail Account" above to connect your real Gmail inbox, starred mail, drafts, and labels.'
                           : gmailSearchSubmitted
@@ -1741,12 +1741,14 @@ export function WorkspaceToolsView({
                       </p>
                     </div>
                   ) : (
-                    <div className="flex-1 divide-y divide-slate-100 overflow-y-auto max-h-[540px]">
+                    <div className="flex-1 divide-y divide-slate-100 overflow-y-auto max-h-[540px] dark:divide-slate-800">
                       {displayedMailRows.map((row) => (
                         <div
                           key={row.id}
-                          className={`group flex items-center gap-2 px-3 py-2.5 text-xs transition-all hover:bg-[#F2F6FC] hover:shadow-[inset_1px_0_0_#dadce0,inset_-1px_0_0_#dadce0] ${
-                            row.isUnread ? 'bg-white font-semibold' : 'bg-[#F8FAFD]/60'
+                          className={`group flex items-center gap-2 px-3 py-2.5 text-xs transition-all hover:bg-[#F2F6FC] hover:shadow-[inset_1px_0_0_#dadce0,inset_-1px_0_0_#dadce0] dark:hover:bg-slate-800/80 dark:hover:shadow-[inset_1px_0_0_#334155,inset_-1px_0_0_#334155] ${
+                            row.isUnread
+                              ? 'bg-white font-semibold dark:bg-slate-900'
+                              : 'bg-[#F8FAFD]/60 dark:bg-slate-950/60'
                           }`}
                         >
                           {/* Star Toggle */}
@@ -1755,13 +1757,13 @@ export function WorkspaceToolsView({
                               type="button"
                               onClick={() => handleToggleStar(row.id, row.isStarred)}
                               aria-label="Toggle star"
-                              className="shrink-0 rounded-full p-1 hover:bg-slate-200/70"
+                              className="shrink-0 rounded-full p-1 hover:bg-slate-200/70 dark:hover:bg-slate-700"
                             >
                               <Star
                                 className={`h-4 w-4 ${
                                   row.isStarred
                                     ? 'fill-[#F4B400] text-[#F4B400]'
-                                    : 'text-slate-400 group-hover:text-slate-600'
+                                    : 'text-slate-400 group-hover:text-slate-600 dark:text-slate-500 dark:group-hover:text-slate-300'
                                 }`}
                               />
                             </button>
@@ -1773,11 +1775,11 @@ export function WorkspaceToolsView({
                               type="button"
                               onClick={() => handleToggleSnooze(row)}
                               title={snoozedMap[row.id] ? 'Unsnooze' : 'Snooze for follow-up'}
-                              className="hidden shrink-0 rounded-full p-1 text-slate-400 hover:bg-slate-200/70 hover:text-[#0B57D0] sm:inline-flex"
+                              className="hidden shrink-0 rounded-full p-1 text-slate-400 hover:bg-slate-200/70 hover:text-[#0B57D0] sm:inline-flex dark:text-slate-500 dark:hover:bg-slate-700 dark:hover:text-indigo-400"
                             >
                               <Clock
                                 className={`h-3.5 w-3.5 ${
-                                  snoozedMap[row.id] ? 'text-[#0B57D0]' : ''
+                                  snoozedMap[row.id] ? 'text-[#0B57D0] dark:text-indigo-400' : ''
                                 }`}
                               />
                             </button>
@@ -1791,7 +1793,9 @@ export function WorkspaceToolsView({
                           >
                             <span
                               className={`w-36 shrink-0 truncate sm:w-44 ${
-                                row.isUnread ? 'font-bold text-[#1F1F1F]' : 'text-[#1F1F1F]'
+                                row.isUnread
+                                  ? 'font-bold text-[#1F1F1F] dark:text-slate-100'
+                                  : 'text-[#1F1F1F] dark:text-slate-300'
                               }`}
                             >
                               {row.senderDisplay}
@@ -1799,25 +1803,29 @@ export function WorkspaceToolsView({
 
                             <div className="flex min-w-0 flex-1 items-center gap-1.5 truncate">
                               {row.deliveryMethod && (
-                                <span className="shrink-0 rounded bg-[#E8F0FE] px-1.5 py-0.5 text-[10px] font-semibold text-[#1967D2]">
+                                <span className="shrink-0 rounded bg-[#E8F0FE] px-1.5 py-0.5 text-[10px] font-semibold text-[#1967D2] dark:bg-indigo-950/70 dark:text-indigo-300">
                                   {row.deliveryMethod}
                                 </span>
                               )}
                               <span
                                 className={`shrink-0 max-w-[45%] truncate ${
-                                  row.isUnread ? 'font-bold text-[#1F1F1F]' : 'font-medium text-[#1F1F1F]'
+                                  row.isUnread
+                                    ? 'font-bold text-[#1F1F1F] dark:text-slate-100'
+                                    : 'font-medium text-[#1F1F1F] dark:text-slate-200'
                                 }`}
                               >
                                 {row.subject}
                               </span>
-                              <span className="truncate font-normal text-[#5F6368]">
+                              <span className="truncate font-normal text-[#5F6368] dark:text-slate-400">
                                 — {row.snippet}
                               </span>
                             </div>
 
                             <span
                               className={`shrink-0 font-mono text-[11px] tabular-nums ${
-                                row.isUnread ? 'font-bold text-[#1F1F1F]' : 'text-[#5F6368]'
+                                row.isUnread
+                                  ? 'font-bold text-[#1F1F1F] dark:text-slate-100'
+                                  : 'text-[#5F6368] dark:text-slate-400'
                               }`}
                             >
                               {formatGmailShortDate(row.dateRaw)}
@@ -1839,7 +1847,7 @@ export function WorkspaceToolsView({
       {/* =================================================================== */}
       {composeOpen && (
         <div
-          className={`fixed bottom-0 right-3 z-40 sm:right-8 flex flex-col overflow-hidden rounded-t-2xl border border-slate-300 bg-white shadow-2xl transition-all ${
+          className={`fixed bottom-0 right-3 z-40 sm:right-8 flex flex-col overflow-hidden rounded-t-2xl border border-slate-300 bg-white shadow-2xl transition-all dark:border-slate-700 dark:bg-slate-900 ${
             composeMinimized
               ? 'w-72'
               : composeExpanded
@@ -1848,7 +1856,7 @@ export function WorkspaceToolsView({
           }`}
         >
           {/* Compose Header Bar */}
-          <div className="flex items-center justify-between bg-[#F2F6FC] px-4 py-2.5 text-[#1F1F1F]">
+          <div className="flex items-center justify-between bg-[#F2F6FC] px-4 py-2.5 text-[#1F1F1F] dark:border-b dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100">
             <button
               type="button"
               onClick={() => setComposeMinimized((prev) => !prev)}
@@ -1862,7 +1870,7 @@ export function WorkspaceToolsView({
                 type="button"
                 onClick={() => setComposeMinimized((prev) => !prev)}
                 title={composeMinimized ? 'Expand compose window' : 'Minimize'}
-                className="rounded p-1 text-[#444746] hover:bg-slate-200/70"
+                className="rounded p-1 text-[#444746] hover:bg-slate-200/70 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
               >
                 <Minimize2 className="h-3.5 w-3.5" />
               </button>
@@ -1871,7 +1879,7 @@ export function WorkspaceToolsView({
                   type="button"
                   onClick={() => setComposeExpanded((prev) => !prev)}
                   title="Toggle wide view"
-                  className="hidden rounded p-1 text-[#444746] hover:bg-slate-200/70 sm:inline-flex"
+                  className="hidden rounded p-1 text-[#444746] hover:bg-slate-200/70 sm:inline-flex dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
                 >
                   <Maximize2 className="h-3.5 w-3.5" />
                 </button>
@@ -1880,7 +1888,7 @@ export function WorkspaceToolsView({
                 type="button"
                 onClick={() => setComposeOpen(false)}
                 title="Close compose"
-                className="rounded p-1 text-[#444746] hover:bg-slate-200/70"
+                className="rounded p-1 text-[#444746] hover:bg-slate-200/70 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
               >
                 <X className="h-3.5 w-3.5" />
               </button>
@@ -1895,29 +1903,29 @@ export function WorkspaceToolsView({
               onDragLeave={handleComposeDragLeave}
               onDrop={handleComposeDrop}
               className={`relative flex flex-col ${
-                isDraggingFiles ? 'ring-2 ring-inset ring-[#0B57D0] bg-blue-50/30' : ''
+                isDraggingFiles ? 'ring-2 ring-inset ring-[#0B57D0] bg-blue-50/30 dark:bg-indigo-950/30' : ''
               }`}
             >
               {isDraggingFiles && (
-                <div className="pointer-events-none absolute inset-0 z-20 flex flex-col items-center justify-center bg-[#EDF2FA]/90 text-xs font-bold text-[#0B57D0]">
+                <div className="pointer-events-none absolute inset-0 z-20 flex flex-col items-center justify-center bg-[#EDF2FA]/90 text-xs font-bold text-[#0B57D0] dark:bg-slate-950/90 dark:text-indigo-300">
                   <Paperclip className="mb-1.5 h-6 w-6" />
                   <span>Drop files here to attach to email</span>
                 </div>
               )}
 
               {/* From Strip */}
-              <div className="flex items-center justify-between border-b border-slate-100 px-4 py-1.5 text-[11px] text-[#5F6368]">
+              <div className="flex items-center justify-between border-b border-slate-100 px-4 py-1.5 text-[11px] text-[#5F6368] dark:border-slate-800 dark:text-slate-400">
                 <span>
                   From:{' '}
-                  <strong className="text-[#1F1F1F]">
+                  <strong className="text-[#1F1F1F] dark:text-slate-100">
                     {googleEmail || currentUser.email}
                   </strong>
                 </span>
                 <span
                   className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
                     googleToken
-                      ? 'bg-emerald-50 text-emerald-700'
-                      : 'bg-amber-50 text-amber-700'
+                      ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                      : 'bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300'
                   }`}
                 >
                   {googleToken ? 'Gmail API Connected' : 'Mailto Fallback (Verify Google to Send)'}
@@ -1925,21 +1933,21 @@ export function WorkspaceToolsView({
               </div>
 
               {/* To Row */}
-              <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-2">
-                <span className="text-xs text-[#5F6368]">To</span>
+              <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-2 dark:border-slate-800">
+                <span className="text-xs text-[#5F6368] dark:text-slate-400">To</span>
                 <input
                   type="text"
                   required
                   value={mailTo}
                   onChange={(e) => setMailTo(e.target.value)}
                   placeholder="colleague@company.com"
-                  className="flex-1 text-xs text-[#1F1F1F] focus:outline-none"
+                  className="flex-1 bg-transparent text-xs text-[#1F1F1F] placeholder:text-slate-400 focus:outline-none dark:text-slate-100 dark:placeholder:text-slate-500"
                 />
                 {!showCcField && (
                   <button
                     type="button"
                     onClick={() => setShowCcField(true)}
-                    className="text-[11px] font-medium text-[#5F6368] hover:text-[#1F1F1F]"
+                    className="text-[11px] font-medium text-[#5F6368] hover:text-[#1F1F1F] dark:text-slate-400 dark:hover:text-slate-100"
                   >
                     Cc
                   </button>
@@ -1947,21 +1955,21 @@ export function WorkspaceToolsView({
               </div>
 
               {showCcField && (
-                <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-2">
-                  <span className="text-xs text-[#5F6368]">Cc</span>
+                <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-2 dark:border-slate-800">
+                  <span className="text-xs text-[#5F6368] dark:text-slate-400">Cc</span>
                   <input
                     type="text"
                     value={mailCc}
                     onChange={(e) => setMailCc(e.target.value)}
                     placeholder="manager@company.com"
-                    className="flex-1 text-xs text-[#1F1F1F] focus:outline-none"
+                    className="flex-1 bg-transparent text-xs text-[#1F1F1F] placeholder:text-slate-400 focus:outline-none dark:text-slate-100 dark:placeholder:text-slate-500"
                   />
                 </div>
               )}
 
               {/* Quick Team Directory Adder */}
               {teamMembers.length > 0 && (
-                <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50/70 px-4 py-1.5">
+                <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50/70 px-4 py-1.5 dark:border-slate-800 dark:bg-slate-950/60">
                   <select
                     aria-label="Quick add colleague email"
                     value=""
@@ -1976,7 +1984,7 @@ export function WorkspaceToolsView({
                           : picked,
                       );
                     }}
-                    className="w-full bg-transparent text-[11px] text-[#444746] focus:outline-none"
+                    className="w-full bg-transparent text-[11px] text-[#444746] focus:outline-none dark:bg-slate-950 dark:text-slate-300"
                   >
                     <option value="">+ Quick add recipient from NexOps Team Directory...</option>
                     {teamMembers
@@ -1991,14 +1999,14 @@ export function WorkspaceToolsView({
               )}
 
               {/* Subject Row */}
-              <div className="border-b border-slate-100 px-4 py-2">
+              <div className="border-b border-slate-100 px-4 py-2 dark:border-slate-800">
                 <input
                   type="text"
                   required
                   value={mailSubject}
                   onChange={(e) => setMailSubject(e.target.value)}
                   placeholder="Subject"
-                  className="w-full text-xs font-medium text-[#1F1F1F] placeholder-[#5F6368] focus:outline-none"
+                  className="w-full bg-transparent text-xs font-medium text-[#1F1F1F] placeholder-[#5F6368] focus:outline-none dark:text-slate-100 dark:placeholder:text-slate-500"
                 />
               </div>
 
@@ -2011,20 +2019,20 @@ export function WorkspaceToolsView({
                 onChange={(e) => setMailBody(e.target.value)}
                 onPaste={handleComposePaste}
                 placeholder="Write your corporate email... (Paste files/screenshots with Ctrl+V or drag & drop files here)"
-                className="w-full resize-none px-4 py-3 text-xs leading-relaxed text-[#1F1F1F] focus:outline-none"
+                className="w-full resize-none bg-transparent px-4 py-3 text-xs leading-relaxed text-[#1F1F1F] placeholder:text-slate-400 focus:outline-none dark:text-slate-100 dark:placeholder:text-slate-500"
               />
 
               {/* Attached Files Chips */}
               {mailAttachments.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 border-t border-slate-100 bg-slate-50/70 px-4 py-2 max-h-24 overflow-y-auto">
+                <div className="flex flex-wrap gap-1.5 border-t border-slate-100 bg-slate-50/70 px-4 py-2 max-h-24 overflow-y-auto dark:border-slate-800 dark:bg-slate-950/60">
                   {mailAttachments.map((file, idx) => (
                     <span
                       key={`${file.name}-${file.size}-${idx}`}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-800 shadow-2xs"
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-800 shadow-2xs dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
                     >
-                      <FileText className="h-3.5 w-3.5 text-[#0B57D0] shrink-0" />
+                      <FileText className="h-3.5 w-3.5 text-[#0B57D0] shrink-0 dark:text-indigo-400" />
                       <span className="max-w-[160px] truncate">{file.name}</span>
-                      <span className="font-mono text-[10px] text-slate-500">
+                      <span className="font-mono text-[10px] text-slate-500 dark:text-slate-400">
                         ({formatFileSize(file.size)})
                       </span>
                       <button
@@ -2033,7 +2041,7 @@ export function WorkspaceToolsView({
                           setMailAttachments((prev) => prev.filter((_, i) => i !== idx))
                         }
                         title="Remove attachment"
-                        className="ml-0.5 rounded-full p-0.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                        className="ml-0.5 rounded-full p-0.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/50 dark:hover:text-rose-400"
                       >
                         <X className="h-3 w-3" />
                       </button>
@@ -2044,15 +2052,15 @@ export function WorkspaceToolsView({
 
               {/* Inline Insert Link Popover */}
               {showInsertLinkPopover && (
-                <div className="border-t border-slate-200 bg-[#F8FAFD] px-4 py-2.5 space-y-2">
+                <div className="border-t border-slate-200 bg-[#F8FAFD] px-4 py-2.5 space-y-2 dark:border-slate-800 dark:bg-slate-950/80">
                   <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-bold text-slate-700">
+                    <span className="text-[11px] font-bold text-slate-700 dark:text-slate-200">
                       Insert Clickable Link into Email
                     </span>
                     <button
                       type="button"
                       onClick={() => setShowInsertLinkPopover(false)}
-                      className="text-slate-400 hover:text-slate-600"
+                      className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
                     >
                       <X className="h-3.5 w-3.5" />
                     </button>
@@ -2063,14 +2071,14 @@ export function WorkspaceToolsView({
                       value={composeLinkText}
                       onChange={(e) => setComposeLinkText(e.target.value)}
                       placeholder="Link label (optional)"
-                      className="h-8 rounded-lg border border-slate-200 bg-white px-2.5 text-xs focus:border-[#0B57D0] focus:outline-none sm:col-span-5"
+                      className="h-8 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-900 placeholder:text-slate-400 focus:border-[#0B57D0] focus:outline-none sm:col-span-5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500"
                     />
                     <input
                       type="text"
                       value={composeLinkUrl}
                       onChange={(e) => setComposeLinkUrl(e.target.value)}
                       placeholder="https://..."
-                      className="h-8 rounded-lg border border-slate-200 bg-white px-2.5 font-mono text-xs focus:border-[#0B57D0] focus:outline-none sm:col-span-5"
+                      className="h-8 rounded-lg border border-slate-200 bg-white px-2.5 font-mono text-xs text-slate-900 placeholder:text-slate-400 focus:border-[#0B57D0] focus:outline-none sm:col-span-5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500"
                     />
                     <button
                       type="button"
@@ -2084,26 +2092,26 @@ export function WorkspaceToolsView({
               )}
 
               {/* Templates Strip */}
-              <div className="flex flex-wrap items-center gap-1.5 border-t border-slate-100 px-4 py-2">
-                <span className="text-[10px] font-medium text-[#5F6368]">Templates:</span>
+              <div className="flex flex-wrap items-center gap-1.5 border-t border-slate-100 px-4 py-2 dark:border-slate-800">
+                <span className="text-[10px] font-medium text-[#5F6368] dark:text-slate-400">Templates:</span>
                 <button
                   type="button"
                   onClick={() => applyEmailTemplate('followup')}
-                  className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-[10px] font-semibold text-slate-700 hover:bg-slate-100"
+                  className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-[10px] font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                 >
                   QA Follow-Up
                 </button>
                 <button
                   type="button"
                   onClick={() => applyEmailTemplate('sla')}
-                  className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-[10px] font-semibold text-slate-700 hover:bg-slate-100"
+                  className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-[10px] font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                 >
                   SLA Notice
                 </button>
                 <button
                   type="button"
                   onClick={() => applyEmailTemplate('digest')}
-                  className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-[10px] font-semibold text-slate-700 hover:bg-slate-100"
+                  className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-[10px] font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                 >
                   Ops Digest
                 </button>
@@ -2124,7 +2132,7 @@ export function WorkspaceToolsView({
               />
 
               {/* Bottom Send + Attachment + Insert Link Bar */}
-              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 px-4 py-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 px-4 py-2.5 dark:border-slate-800">
                 <div className="flex items-center gap-1.5">
                   <button
                     type="submit"
@@ -2148,9 +2156,9 @@ export function WorkspaceToolsView({
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
                     title="Attach PDF, Word, Excel, Image, or any file (or paste with Ctrl+V)"
-                    className="inline-flex h-9 items-center gap-1.5 rounded-full border border-slate-200 px-3 text-xs font-semibold text-[#444746] hover:bg-slate-100"
+                    className="inline-flex h-9 items-center gap-1.5 rounded-full border border-slate-200 px-3 text-xs font-semibold text-[#444746] hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                   >
-                    <Paperclip className="h-3.5 w-3.5 text-[#0B57D0]" />
+                    <Paperclip className="h-3.5 w-3.5 text-[#0B57D0] dark:text-indigo-400" />
                     <span>Attach</span>
                   </button>
 
@@ -2160,8 +2168,8 @@ export function WorkspaceToolsView({
                     title="Insert clickable hyperlink"
                     className={`inline-flex h-9 w-9 items-center justify-center rounded-full border transition-colors ${
                       showInsertLinkPopover
-                        ? 'border-[#0B57D0] bg-[#E8F0FE] text-[#0B57D0]'
-                        : 'border-slate-200 text-[#444746] hover:bg-slate-100'
+                        ? 'border-[#0B57D0] bg-[#E8F0FE] text-[#0B57D0] dark:border-indigo-500 dark:bg-indigo-950/70 dark:text-indigo-300'
+                        : 'border-slate-200 text-[#444746] hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
                     }`}
                   >
                     <Link2 className="h-3.5 w-3.5" />
@@ -2170,7 +2178,7 @@ export function WorkspaceToolsView({
                   <button
                     type="button"
                     onClick={handleMailtoDispatchLog}
-                    className="inline-flex h-9 items-center rounded-full border border-slate-200 px-3 text-[11px] font-semibold text-[#444746] hover:bg-slate-50"
+                    className="inline-flex h-9 items-center rounded-full border border-slate-200 px-3 text-[11px] font-semibold text-[#444746] hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                   >
                     <span>Mail App</span>
                   </button>
@@ -2187,7 +2195,7 @@ export function WorkspaceToolsView({
                     setComposeOpen(false);
                   }}
                   title="Discard draft"
-                  className="rounded-full p-2 text-[#444746] hover:bg-slate-100"
+                  className="rounded-full p-2 text-[#444746] hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-rose-400"
                 >
                   <Trash2 className="h-4 w-4" />
                 </button>
@@ -2203,15 +2211,15 @@ export function WorkspaceToolsView({
       {activeTool !== 'gmail' && (
         <div className="space-y-4">
           {/* Authentic Google Tool Header with Official Colored Icon + In-App "+ Create New" */}
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-2xs">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-2xs dark:border-slate-800 dark:bg-slate-900">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div className="flex items-center gap-3 min-w-0">
-                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-slate-50">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800">
                   {docMeta.renderIcon('h-7 w-7')}
                 </div>
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <h2 className="font-display text-base font-bold text-slate-900">
+                    <h2 className="font-display text-base font-bold text-slate-900 dark:text-slate-100">
                       {docMeta.plural}
                     </h2>
                     <span
@@ -2220,7 +2228,9 @@ export function WorkspaceToolsView({
                       {filteredLinks.length} saved
                     </span>
                   </div>
-                  <p className="mt-0.5 truncate text-xs text-slate-500">{docMeta.subtitle}</p>
+                  <p className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">
+                    {docMeta.subtitle}
+                  </p>
                 </div>
               </div>
 
@@ -2247,8 +2257,8 @@ export function WorkspaceToolsView({
                     }
                     className={`inline-flex h-9 items-center gap-1.5 rounded-full border px-3.5 text-xs font-semibold transition-colors ${
                       activeDocPanel === 'add_link'
-                        ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
-                        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                        ? 'border-indigo-600 bg-indigo-50 text-indigo-700 dark:border-indigo-500 dark:bg-indigo-950/60 dark:text-indigo-200'
+                        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
                     }`}
                   >
                     <Link2 className="h-3.5 w-3.5" />
@@ -2256,7 +2266,7 @@ export function WorkspaceToolsView({
                   </button>
                 </div>
               ) : (
-                <span className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-600">
+                <span className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
                   Read-Only Viewer Mode
                 </span>
               )}
@@ -2264,10 +2274,10 @@ export function WorkspaceToolsView({
 
             {/* Expandable In-App Create Panel (when not verified yet or customizing details) */}
             {!isViewer && activeDocPanel === 'create_api' && (
-              <div className="mt-4 border-t border-slate-100 pt-4 space-y-3">
+              <div className="mt-4 space-y-3 border-t border-slate-100 pt-4 dark:border-slate-800">
                 {!googleToken && (
-                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-blue-100 bg-[#EDF2FA] px-4 py-3">
-                    <p className="text-xs font-medium text-[#001D35]">
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-blue-100 bg-[#EDF2FA] px-4 py-3 dark:border-indigo-900/50 dark:bg-indigo-950/40">
+                    <p className="text-xs font-medium text-[#001D35] dark:text-indigo-100">
                       Verify your Google account to automatically create a live{' '}
                       <strong>{docMeta.singular}</strong> and open it directly inside NexOps.
                     </p>
@@ -2291,7 +2301,7 @@ export function WorkspaceToolsView({
                       value={createTitle}
                       onChange={(e) => setCreateTitle(e.target.value)}
                       placeholder={`New ${docMeta.singular} Title...`}
-                      className="h-9 w-full rounded-lg border border-slate-200 px-3 text-xs text-slate-900 focus:border-[#0B57D0] focus:outline-none"
+                      className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-900 placeholder:text-slate-400 focus:border-[#0B57D0] focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
                     />
                   </div>
                   <div className="sm:col-span-2">
@@ -2299,7 +2309,7 @@ export function WorkspaceToolsView({
                       aria-label="Department"
                       value={createDept}
                       onChange={(e) => setCreateDept(e.target.value)}
-                      className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-800 focus:border-[#0B57D0] focus:outline-none"
+                      className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-800 focus:border-[#0B57D0] focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                     >
                       {departments.map((d) => (
                         <option key={d} value={d}>
@@ -2314,7 +2324,7 @@ export function WorkspaceToolsView({
                       value={createNotes}
                       onChange={(e) => setCreateNotes(e.target.value)}
                       placeholder="Purpose / collaboration note..."
-                      className="h-9 w-full rounded-lg border border-slate-200 px-3 text-xs text-slate-900 focus:border-[#0B57D0] focus:outline-none"
+                      className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-900 placeholder:text-slate-400 focus:border-[#0B57D0] focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
                     />
                   </div>
                   <div className="flex items-center justify-end gap-2 sm:col-span-2">
@@ -2339,7 +2349,7 @@ export function WorkspaceToolsView({
             {!isViewer && activeDocPanel === 'add_link' && (
               <form
                 onSubmit={handleSavePastedLink}
-                className="mt-4 grid grid-cols-1 gap-3 border-t border-slate-100 pt-4 sm:grid-cols-12"
+                className="mt-4 grid grid-cols-1 gap-3 border-t border-slate-100 pt-4 sm:grid-cols-12 dark:border-slate-800"
               >
                 <div className="sm:col-span-3">
                   <input
@@ -2348,7 +2358,7 @@ export function WorkspaceToolsView({
                     value={pasteTitle}
                     onChange={(e) => setPasteTitle(e.target.value)}
                     placeholder={`Title (e.g., Q4 ${docMeta.singular})`}
-                    className="h-9 w-full rounded-lg border border-slate-200 px-3 text-xs text-slate-900 focus:border-[#0B57D0] focus:outline-none"
+                    className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-900 placeholder:text-slate-400 focus:border-[#0B57D0] focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
                   />
                 </div>
                 <div className="sm:col-span-4">
@@ -2358,7 +2368,7 @@ export function WorkspaceToolsView({
                     value={pasteUrl}
                     onChange={(e) => setPasteUrl(e.target.value)}
                     placeholder={docMeta.placeholderUrl}
-                    className="h-9 w-full rounded-lg border border-slate-200 px-3 font-mono text-xs text-slate-900 focus:border-[#0B57D0] focus:outline-none"
+                    className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 font-mono text-xs text-slate-900 placeholder:text-slate-400 focus:border-[#0B57D0] focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
                   />
                 </div>
                 <div className="sm:col-span-2">
@@ -2366,7 +2376,7 @@ export function WorkspaceToolsView({
                     aria-label="Link Department"
                     value={pasteDept}
                     onChange={(e) => setPasteDept(e.target.value)}
-                    className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-800 focus:border-[#0B57D0] focus:outline-none"
+                    className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-800 focus:border-[#0B57D0] focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                   >
                     {departments.map((d) => (
                       <option key={d} value={d}>
@@ -2381,13 +2391,13 @@ export function WorkspaceToolsView({
                     value={pasteNotes}
                     onChange={(e) => setPasteNotes(e.target.value)}
                     placeholder="Notes (optional)"
-                    className="h-9 w-full rounded-lg border border-slate-200 px-3 text-xs text-slate-900 focus:border-[#0B57D0] focus:outline-none"
+                    className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-900 placeholder:text-slate-400 focus:border-[#0B57D0] focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
                   />
                 </div>
                 <div className="sm:col-span-1">
                   <button
                     type="submit"
-                    className="h-9 w-full rounded-lg bg-slate-900 px-3 text-xs font-semibold text-white hover:bg-slate-800"
+                    className="h-9 w-full rounded-lg bg-slate-900 px-3 text-xs font-semibold text-white hover:bg-slate-800 dark:bg-indigo-600 dark:hover:bg-indigo-500"
                   >
                     Save
                   </button>
@@ -2397,23 +2407,23 @@ export function WorkspaceToolsView({
           </div>
 
           {/* Saved Team Document Switcher Bar + Instant URL Loader */}
-          <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-2xs">
+          <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-2xs dark:border-slate-800 dark:bg-slate-900">
             <div className="flex flex-wrap items-center justify-between gap-3">
               {/* Saved Document Chips & Search Filter */}
               <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
                 <div className="relative w-44 shrink-0">
-                  <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+                  <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
                   <input
                     type="search"
                     value={docSearch}
                     onChange={(e) => setDocSearch(e.target.value)}
                     placeholder="Filter saved files..."
-                    className="h-8 w-full rounded-lg border border-slate-200 bg-slate-50 pr-2.5 pl-8 text-xs text-slate-800 focus:border-[#0B57D0] focus:bg-white focus:outline-none"
+                    className="h-8 w-full rounded-lg border border-slate-200 bg-slate-50 pr-2.5 pl-8 text-xs text-slate-800 placeholder:text-slate-400 focus:border-[#0B57D0] focus:bg-white focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:bg-slate-950"
                   />
                 </div>
 
                 {filteredLinks.length === 0 ? (
-                  <span className="text-xs text-slate-500">
+                  <span className="text-xs text-slate-500 dark:text-slate-400">
                     No saved team {docMeta.plural} yet — click + Create New or paste any Google URL.
                   </span>
                 ) : (
@@ -2430,13 +2440,13 @@ export function WorkspaceToolsView({
                           }}
                           className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
                             isActive
-                              ? 'border-[#0B57D0] bg-[#E8F0FE] font-semibold text-[#174EA6]'
-                              : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
+                              ? 'border-[#0B57D0] bg-[#E8F0FE] font-semibold text-[#174EA6] dark:border-indigo-500 dark:bg-indigo-950/70 dark:text-indigo-200'
+                              : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
                           }`}
                         >
                           {docMeta.renderIcon('h-3.5 w-3.5 shrink-0')}
                           <span className="max-w-[160px] truncate">{link.title}</span>
-                          <span className="rounded bg-white/80 px-1 text-[10px] text-slate-500">
+                          <span className="rounded bg-white/80 px-1 text-[10px] text-slate-500 dark:bg-slate-900/80 dark:text-slate-400">
                             {link.department}
                           </span>
                         </button>
@@ -2456,11 +2466,11 @@ export function WorkspaceToolsView({
                   value={adHocUrl}
                   onChange={(e) => setAdHocUrl(e.target.value)}
                   placeholder={`Open any ${docMeta.singular} URL inline...`}
-                  className="h-8 min-w-0 flex-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 font-mono text-[11px] text-slate-800 focus:border-[#0B57D0] focus:bg-white focus:outline-none sm:w-64 sm:flex-none"
+                  className="h-8 min-w-0 flex-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 font-mono text-[11px] text-slate-800 placeholder:text-slate-400 focus:border-[#0B57D0] focus:bg-white focus:outline-none sm:w-64 sm:flex-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:bg-slate-950"
                 />
                 <button
                   type="submit"
-                  className="h-8 shrink-0 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                  className="h-8 shrink-0 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                 >
                   Open
                 </button>
@@ -2472,17 +2482,17 @@ export function WorkspaceToolsView({
           <div
             className={
               viewerFullscreen
-                ? 'fixed inset-0 z-50 flex flex-col bg-white'
-                : 'flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs'
+                ? 'fixed inset-0 z-50 flex flex-col bg-white dark:bg-slate-900'
+                : 'flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-slate-900'
             }
           >
             {!activeDocumentUrl ? (
               <div className="flex min-h-[580px] flex-col items-center justify-center px-6 py-16 text-center">
                 {docMeta.renderIcon('h-12 w-12')}
-                <h3 className="mt-4 font-display text-base font-bold text-slate-900">
+                <h3 className="mt-4 font-display text-base font-bold text-slate-900 dark:text-slate-100">
                   Live Embedded {docMeta.singular} Workspace
                 </h3>
-                <p className="mt-1.5 max-w-md text-xs leading-relaxed text-slate-500">
+                <p className="mt-1.5 max-w-md text-xs leading-relaxed text-slate-500 dark:text-slate-400">
                   {isViewer
                     ? `Select a shared company ${docMeta.singular} from the switcher bar above, or paste a Google URL to preview it in read-only mode.`
                     : `Create a new ${docMeta.singular} directly inside NexOps, select a saved company document from the switcher bar above, or paste any Google ${docMeta.singular} URL to open its embedded editor here.`}
@@ -2501,7 +2511,7 @@ export function WorkspaceToolsView({
                     <button
                       type="button"
                       onClick={() => setActiveDocPanel('add_link')}
-                      className="inline-flex h-9 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-4 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                      className="inline-flex h-9 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-4 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                     >
                       <Link2 className="h-3.5 w-3.5" />
                       <span>Save Team {docMeta.singular} Link</span>
@@ -2512,20 +2522,20 @@ export function WorkspaceToolsView({
             ) : (
               <>
                 {/* Embedded Viewer Action Bar */}
-                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50/80 px-4 py-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50/80 px-4 py-2.5 dark:border-slate-800 dark:bg-slate-950/60">
                   <div className="flex items-center gap-2.5 min-w-0">
                     {docMeta.renderIcon('h-5 w-5 shrink-0')}
                     <div className="min-w-0">
-                      <h3 className="truncate font-display text-sm font-bold text-slate-900">
+                      <h3 className="truncate font-display text-sm font-bold text-slate-900 dark:text-slate-100">
                         {activeDocumentTitle}
                       </h3>
                       {selectedLink && !adHocActiveUrl ? (
-                        <p className="truncate font-mono text-[11px] text-slate-500">
+                        <p className="truncate font-mono text-[11px] text-slate-500 dark:text-slate-400">
                           {selectedLink.department} · Shared by {selectedLink.addedBy} ·{' '}
                           {formatDateTime(selectedLink.updatedAt)}
                         </p>
                       ) : (
-                        <p className="truncate font-mono text-[11px] text-slate-500">
+                        <p className="truncate font-mono text-[11px] text-slate-500 dark:text-slate-400">
                           {activeDocumentUrl}
                         </p>
                       )}
@@ -2535,14 +2545,14 @@ export function WorkspaceToolsView({
                   <div className="flex flex-wrap items-center gap-2">
                     {/* Interactive Toolbar / Full Google Editor / Preview Switcher */}
                     {isViewer ? (
-                      <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5">
+                      <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 dark:border-slate-700 dark:bg-slate-950">
                         <button
                           type="button"
                           onClick={() => setDocViewMode('studio')}
                           className={`rounded-md px-2.5 py-1 text-[11px] font-semibold ${
                             docViewMode === 'studio'
-                              ? 'bg-slate-800 text-white'
-                              : 'text-slate-600 hover:text-slate-900'
+                              ? 'bg-slate-800 text-white dark:bg-slate-700'
+                              : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-slate-100'
                           }`}
                         >
                           Read-Only Studio
@@ -2553,8 +2563,8 @@ export function WorkspaceToolsView({
                             onClick={() => setDocViewMode('preview')}
                             className={`rounded-md px-2.5 py-1 text-[11px] font-semibold ${
                               docViewMode === 'preview'
-                                ? 'bg-slate-800 text-white'
-                                : 'text-slate-600 hover:text-slate-900'
+                                ? 'bg-slate-800 text-white dark:bg-slate-700'
+                                : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-slate-100'
                             }`}
                           >
                             Google Preview
@@ -2562,14 +2572,14 @@ export function WorkspaceToolsView({
                         )}
                       </div>
                     ) : (
-                      <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5">
+                      <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 dark:border-slate-700 dark:bg-slate-950">
                         <button
                           type="button"
                           onClick={() => setDocViewMode('studio')}
                           className={`rounded-md px-2.5 py-1 text-[11px] font-semibold ${
                             docViewMode === 'studio'
-                              ? 'bg-[#0B57D0] text-white'
-                              : 'text-slate-600 hover:text-slate-900'
+                              ? 'bg-[#0B57D0] text-white dark:bg-indigo-600'
+                              : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-slate-100'
                           }`}
                         >
                           Interactive Toolbar
@@ -2581,8 +2591,8 @@ export function WorkspaceToolsView({
                               onClick={() => setDocViewMode('edit')}
                               className={`rounded-md px-2.5 py-1 text-[11px] font-semibold ${
                                 docViewMode === 'edit'
-                                  ? 'bg-[#0B57D0] text-white'
-                                  : 'text-slate-600 hover:text-slate-900'
+                                  ? 'bg-[#0B57D0] text-white dark:bg-indigo-600'
+                                  : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-slate-100'
                               }`}
                             >
                               Full Google Editor
@@ -2592,8 +2602,8 @@ export function WorkspaceToolsView({
                               onClick={() => setDocViewMode('preview')}
                               className={`rounded-md px-2.5 py-1 text-[11px] font-semibold ${
                                 docViewMode === 'preview'
-                                  ? 'bg-[#0B57D0] text-white'
-                                  : 'text-slate-600 hover:text-slate-900'
+                                  ? 'bg-[#0B57D0] text-white dark:bg-indigo-600'
+                                  : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-slate-100'
                               }`}
                             >
                               {docTool === 'forms' ? 'Fill Form' : 'Preview'}
@@ -2608,12 +2618,12 @@ export function WorkspaceToolsView({
                         type="button"
                         onClick={() => void handleInspectLiveMetadata()}
                         disabled={loadingMetadata}
-                        className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                        className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                       >
                         {loadingMetadata ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin text-[#0B57D0]" />
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-[#0B57D0] dark:text-indigo-400" />
                         ) : (
-                          <Info className="h-3.5 w-3.5 text-[#0B57D0]" />
+                          <Info className="h-3.5 w-3.5 text-[#0B57D0] dark:text-indigo-400" />
                         )}
                         <span>API Details</span>
                       </button>
@@ -2627,12 +2637,12 @@ export function WorkspaceToolsView({
                           selectedLink?.id || 'adhoc',
                         )
                       }
-                      className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                      className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                     >
                       {copiedId === (selectedLink?.id || 'adhoc') ? (
-                        <Check className="h-3.5 w-3.5 text-emerald-600" />
+                        <Check className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
                       ) : (
-                        <Copy className="h-3.5 w-3.5 text-slate-500" />
+                        <Copy className="h-3.5 w-3.5 text-slate-500 dark:text-slate-400" />
                       )}
                       <span>
                         {copiedId === (selectedLink?.id || 'adhoc') ? 'Copied' : 'Copy'}
@@ -2650,7 +2660,7 @@ export function WorkspaceToolsView({
                             setConfirmation({ kind: 'delete_link', link: selectedLink })
                           }
                           title="Remove from team switcher"
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400 dark:hover:border-rose-800 dark:hover:bg-rose-950/60 dark:hover:text-rose-400"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
@@ -2659,7 +2669,7 @@ export function WorkspaceToolsView({
                     <button
                       type="button"
                       onClick={() => setViewerFullscreen((prev) => !prev)}
-                      className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-slate-900 px-3 text-xs font-semibold text-white hover:bg-slate-800"
+                      className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-slate-900 px-3 text-xs font-semibold text-white hover:bg-slate-800 dark:bg-indigo-600 dark:hover:bg-indigo-500"
                     >
                       {viewerFullscreen ? (
                         <Minimize2 className="h-3.5 w-3.5" />
@@ -2673,23 +2683,23 @@ export function WorkspaceToolsView({
 
                 {/* Live API Metadata Banner */}
                 {(liveMetadata || metadataError) && (
-                  <div className="border-b border-slate-200 bg-[#E8F0FE]/60 px-5 py-2.5 text-xs">
+                  <div className="border-b border-slate-200 bg-[#E8F0FE]/60 px-5 py-2.5 text-xs dark:border-slate-800 dark:bg-indigo-950/40">
                     {metadataError ? (
-                      <p className="font-medium text-rose-700">{metadataError}</p>
+                      <p className="font-medium text-rose-700 dark:text-rose-400">{metadataError}</p>
                     ) : (
                       liveMetadata && (
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div>
-                            <span className="font-bold text-[#174EA6]">
+                            <span className="font-bold text-[#174EA6] dark:text-indigo-300">
                               {liveMetadata.title}
                             </span>
                             {liveMetadata.details.length > 0 && (
-                              <span className="ml-2 text-[11px] text-slate-600">
+                              <span className="ml-2 text-[11px] text-slate-600 dark:text-slate-300">
                                 {liveMetadata.details.join(' · ')}
                               </span>
                             )}
                           </div>
-                          <span className="rounded bg-white px-2 py-0.5 font-mono text-[11px] font-semibold text-[#174EA6]">
+                          <span className="rounded bg-white px-2 py-0.5 font-mono text-[11px] font-semibold text-[#174EA6] dark:bg-slate-900 dark:text-indigo-300">
                             {liveMetadata.summary}
                           </span>
                         </div>
@@ -2748,7 +2758,7 @@ export function WorkspaceToolsView({
                   </div>
                 ) : (
                   <>
-                    <div className="relative flex-1 bg-slate-100">
+                    <div className="relative flex-1 bg-slate-100 dark:bg-slate-950">
                       <iframe
                         key={`${activeDocumentUrl}-${docViewMode}`}
                         src={getGoogleEmbedUrl(
@@ -2766,10 +2776,10 @@ export function WorkspaceToolsView({
                       />
                     </div>
 
-                    <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-slate-50 px-4 py-2 text-[11px] text-slate-500">
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-slate-50 px-4 py-2 text-[11px] text-slate-500 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-400">
                       <span>
                         Embed URL:{' '}
-                        <code className="font-mono text-slate-700">
+                        <code className="font-mono text-slate-700 dark:text-slate-200">
                           {getGoogleEmbedUrl(
                             docTool,
                             activeDocumentUrl,
@@ -2795,27 +2805,27 @@ export function WorkspaceToolsView({
       {/* =================================================================== */}
       {confirmation && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs sm:p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs sm:p-4 dark:bg-slate-950/75"
           role="dialog"
           aria-modal="true"
           aria-labelledby="workspace-confirm-title"
         >
-          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl sm:p-6">
+          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl sm:p-6 dark:border-slate-800 dark:bg-slate-900">
             <div className="flex items-start gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-700">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300">
                 <AlertTriangle className="h-5 w-5" />
               </div>
               <div className="min-w-0 flex-1">
                 <h3
                   id="workspace-confirm-title"
-                  className="font-display text-base font-bold text-slate-900"
+                  className="font-display text-base font-bold text-slate-900 dark:text-slate-100"
                 >
                   {confirmation.kind === 'send_gmail' && 'Confirm Sending Email via Gmail'}
                   {confirmation.kind === 'create_google_doc' &&
                     `Create New ${DOC_TOOL_META[confirmation.toolType].singular} In-App`}
                   {confirmation.kind === 'delete_link' && 'Remove Shared Workspace Link?'}
                 </h3>
-                <p className="mt-1 text-xs leading-relaxed text-slate-600">
+                <p className="mt-1 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
                   {confirmation.kind === 'send_gmail' &&
                     `You are about to send an email from ${confirmation.fromEmail} using your verified Gmail account.`}
                   {confirmation.kind === 'create_google_doc' &&
@@ -2825,22 +2835,28 @@ export function WorkspaceToolsView({
                 </p>
 
                 {confirmation.kind === 'send_gmail' && (
-                  <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs space-y-1">
+                  <div className="mt-3 space-y-1 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-300">
                     <p>
-                      <span className="font-semibold text-slate-700">To:</span> {confirmation.to}
+                      <span className="font-semibold text-slate-700 dark:text-slate-200">To:</span>{' '}
+                      {confirmation.to}
                     </p>
                     {confirmation.cc && (
                       <p>
-                        <span className="font-semibold text-slate-700">CC:</span> {confirmation.cc}
+                        <span className="font-semibold text-slate-700 dark:text-slate-200">CC:</span>{' '}
+                        {confirmation.cc}
                       </p>
                     )}
                     <p>
-                      <span className="font-semibold text-slate-700">Subject:</span>{' '}
+                      <span className="font-semibold text-slate-700 dark:text-slate-200">
+                        Subject:
+                      </span>{' '}
                       {confirmation.subject}
                     </p>
                     {confirmation.attachments.length > 0 && (
                       <p>
-                        <span className="font-semibold text-slate-700">Attachments:</span>{' '}
+                        <span className="font-semibold text-slate-700 dark:text-slate-200">
+                          Attachments:
+                        </span>{' '}
                         {confirmation.attachments
                           .map((f) => `${f.name} (${formatFileSize(f.size)})`)
                           .join(', ')}
@@ -2852,7 +2868,7 @@ export function WorkspaceToolsView({
                 {confirmation.kind === 'create_google_doc' && (
                   <div className="mt-3 space-y-2.5">
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-700">
+                      <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300">
                         Document Title *
                       </label>
                       <input
@@ -2865,11 +2881,11 @@ export function WorkspaceToolsView({
                               : prev,
                           )
                         }
-                        className="mt-1 h-9 w-full rounded-lg border border-slate-200 px-3 text-xs text-slate-900 focus:border-[#0B57D0] focus:outline-none"
+                        className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-900 focus:border-[#0B57D0] focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-700">
+                      <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300">
                         Department
                       </label>
                       <select
@@ -2881,7 +2897,7 @@ export function WorkspaceToolsView({
                               : prev,
                           )
                         }
-                        className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-800 focus:border-[#0B57D0] focus:outline-none"
+                        className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-800 focus:border-[#0B57D0] focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                       >
                         {departments.map((d) => (
                           <option key={d} value={d}>
@@ -2900,7 +2916,7 @@ export function WorkspaceToolsView({
                 type="button"
                 disabled={executingConfirm}
                 onClick={() => setConfirmation(null)}
-                className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
               >
                 Cancel
               </button>
@@ -2911,7 +2927,7 @@ export function WorkspaceToolsView({
                 className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-xs font-semibold text-white disabled:opacity-60 ${
                   confirmation.kind === 'delete_link'
                     ? 'bg-rose-600 hover:bg-rose-700'
-                    : 'bg-[#0B57D0] hover:bg-[#0842A0]'
+                    : 'bg-[#0B57D0] hover:bg-[#0842A0] dark:bg-indigo-600 dark:hover:bg-indigo-500'
                 }`}
               >
                 {executingConfirm && <Loader2 className="h-3.5 w-3.5 animate-spin" />}

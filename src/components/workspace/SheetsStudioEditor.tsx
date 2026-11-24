@@ -707,9 +707,9 @@ export function SheetsStudioEditor({
   const activeColIdx = (parseCellKey(selectedCell) ?? { col: 0 }).col;
 
   return (
-    <div className="flex flex-col bg-white">
+    <div className="flex flex-col bg-white dark:bg-slate-900">
       {/* Spreadsheet Toolbar */}
-      <div className="flex flex-wrap items-center gap-1 border-b border-slate-200 bg-[#EDF2FA] px-3 py-2">
+      <div className="flex flex-wrap items-center gap-1 border-b border-slate-200 bg-[#EDF2FA] px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
         {!readOnly ? (
           <>
             <button
@@ -717,7 +717,7 @@ export function SheetsStudioEditor({
               onClick={handleUndo}
               disabled={undoStack.length === 0}
               title="Undo"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#444746] hover:bg-white disabled:opacity-40"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#444746] hover:bg-white disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
             >
               <Undo2 className="h-4 w-4" />
             </button>
@@ -726,13 +726,13 @@ export function SheetsStudioEditor({
               onClick={handleRedo}
               disabled={redoStack.length === 0}
               title="Redo"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#444746] hover:bg-white disabled:opacity-40"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#444746] hover:bg-white disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
             >
               <Redo2 className="h-4 w-4" />
             </button>
           </>
         ) : (
-          <span className="mr-2 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600">
+          <span className="mr-2 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
             Read-Only View
           </span>
         )}
@@ -741,7 +741,7 @@ export function SheetsStudioEditor({
           type="button"
           onClick={handlePrint}
           title="Print Spreadsheet"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#444746] hover:bg-white"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#444746] hover:bg-white dark:text-slate-300 dark:hover:bg-slate-800"
         >
           <Printer className="h-4 w-4" />
         </button>
@@ -750,7 +750,7 @@ export function SheetsStudioEditor({
           type="button"
           onClick={handleExportCsv}
           title="Export CSV"
-          className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+          className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
         >
           <Download className="h-3.5 w-3.5" />
           <span>CSV</span>
@@ -758,7 +758,7 @@ export function SheetsStudioEditor({
 
         {!readOnly && (
           <>
-            <div className="mx-1 h-5 w-px bg-slate-300" />
+            <div className="mx-1 h-5 w-px bg-slate-300 dark:bg-slate-700" />
 
             {/* Number Formatting */}
             <select
@@ -767,7 +767,7 @@ export function SheetsStudioEditor({
               onChange={(e) =>
                 toggleCellStyle({ numberFormat: e.target.value as SheetNumberFormat })
               }
-              className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs font-medium text-[#1F1F1F]"
+              className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs font-medium text-[#1F1F1F] focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
             >
               <option value="auto">Auto</option>
               <option value="number">Number</option>
@@ -776,7 +776,7 @@ export function SheetsStudioEditor({
               <option value="date">Date</option>
             </select>
 
-            <div className="mx-1 h-5 w-px bg-slate-300" />
+            <div className="mx-1 h-5 w-px bg-slate-300 dark:bg-slate-700" />
 
             <button
               type="button"
@@ -784,8 +784,8 @@ export function SheetsStudioEditor({
               title="Bold"
               className={`inline-flex h-8 w-8 items-center justify-center rounded-md ${
                 selectedCellData?.style?.bold
-                  ? 'bg-[#D3E3FD] text-[#0B57D0]'
-                  : 'text-[#1F1F1F] hover:bg-white'
+                  ? 'bg-[#D3E3FD] text-[#0B57D0] dark:bg-indigo-950/70 dark:text-indigo-300'
+                  : 'text-[#1F1F1F] hover:bg-white dark:text-slate-200 dark:hover:bg-slate-800'
               }`}
             >
               <Bold className="h-4 w-4" />
@@ -796,8 +796,8 @@ export function SheetsStudioEditor({
               title="Italic"
               className={`inline-flex h-8 w-8 items-center justify-center rounded-md ${
                 selectedCellData?.style?.italic
-                  ? 'bg-[#D3E3FD] text-[#0B57D0]'
-                  : 'text-[#1F1F1F] hover:bg-white'
+                  ? 'bg-[#D3E3FD] text-[#0B57D0] dark:bg-indigo-950/70 dark:text-indigo-300'
+                  : 'text-[#1F1F1F] hover:bg-white dark:text-slate-200 dark:hover:bg-slate-800'
               }`}
             >
               <Italic className="h-4 w-4" />
@@ -808,36 +808,36 @@ export function SheetsStudioEditor({
               title="Toggle Cell Border"
               className={`inline-flex h-8 w-8 items-center justify-center rounded-md ${
                 selectedCellData?.style?.border
-                  ? 'bg-[#D3E3FD] text-[#0B57D0]'
-                  : 'text-[#1F1F1F] hover:bg-white'
+                  ? 'bg-[#D3E3FD] text-[#0B57D0] dark:bg-indigo-950/70 dark:text-indigo-300'
+                  : 'text-[#1F1F1F] hover:bg-white dark:text-slate-200 dark:hover:bg-slate-800'
               }`}
             >
               <Grid2x2 className="h-4 w-4" />
             </button>
 
             {/* Text Color Swatches */}
-            <div className="flex items-center gap-0.5 rounded-md border border-slate-200 bg-white px-1.5 py-1">
+            <div className="flex items-center gap-0.5 rounded-md border border-slate-200 bg-white px-1.5 py-1 dark:border-slate-700 dark:bg-slate-950">
               {TEXT_SWATCHES.map((clr) => (
                 <button
                   key={clr}
                   type="button"
                   onClick={() => toggleCellStyle({ textColor: clr })}
                   title={`Text ${clr}`}
-                  className="h-3.5 w-3.5 rounded-full border border-slate-200"
+                  className="h-3.5 w-3.5 rounded-full border border-slate-200 dark:border-slate-700"
                   style={{ backgroundColor: clr }}
                 />
               ))}
             </div>
 
             {/* Fill Color Swatches */}
-            <div className="flex items-center gap-0.5 rounded-md border border-slate-200 bg-white px-1.5 py-1">
+            <div className="flex items-center gap-0.5 rounded-md border border-slate-200 bg-white px-1.5 py-1 dark:border-slate-700 dark:bg-slate-950">
               {FILL_SWATCHES.map((clr, idx) => (
                 <button
                   key={clr || `none-${idx}`}
                   type="button"
                   onClick={() => toggleCellStyle({ bgColor: clr })}
                   title={clr ? `Fill ${clr}` : 'Clear Fill'}
-                  className="h-3.5 w-3.5 rounded border border-slate-300"
+                  className="h-3.5 w-3.5 rounded border border-slate-300 dark:border-slate-600"
                   style={{ backgroundColor: clr || '#ffffff' }}
                 />
               ))}
@@ -848,7 +848,7 @@ export function SheetsStudioEditor({
               type="button"
               onClick={() => toggleCellStyle({ align: 'left' })}
               title="Align Left"
-              className="inline-flex h-8 w-7 items-center justify-center rounded-md text-[#444746] hover:bg-white"
+              className="inline-flex h-8 w-7 items-center justify-center rounded-md text-[#444746] hover:bg-white dark:text-slate-300 dark:hover:bg-slate-800"
             >
               <AlignLeft className="h-3.5 w-3.5" />
             </button>
@@ -856,7 +856,7 @@ export function SheetsStudioEditor({
               type="button"
               onClick={() => toggleCellStyle({ align: 'center' })}
               title="Align Center"
-              className="inline-flex h-8 w-7 items-center justify-center rounded-md text-[#444746] hover:bg-white"
+              className="inline-flex h-8 w-7 items-center justify-center rounded-md text-[#444746] hover:bg-white dark:text-slate-300 dark:hover:bg-slate-800"
             >
               <AlignCenter className="h-3.5 w-3.5" />
             </button>
@@ -864,28 +864,28 @@ export function SheetsStudioEditor({
               type="button"
               onClick={() => toggleCellStyle({ align: 'right' })}
               title="Align Right"
-              className="inline-flex h-8 w-7 items-center justify-center rounded-md text-[#444746] hover:bg-white"
+              className="inline-flex h-8 w-7 items-center justify-center rounded-md text-[#444746] hover:bg-white dark:text-slate-300 dark:hover:bg-slate-800"
             >
               <AlignRight className="h-3.5 w-3.5" />
             </button>
 
-            <div className="mx-1 h-5 w-px bg-slate-300" />
+            <div className="mx-1 h-5 w-px bg-slate-300 dark:bg-slate-700" />
 
             {/* Row / Column Controls */}
             <button
               type="button"
               onClick={() => handleInsertRow(1)}
               title="Insert Row Below"
-              className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+              className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
             >
-              <Rows3 className="h-3.5 w-3.5 text-emerald-700" />
+              <Rows3 className="h-3.5 w-3.5 text-emerald-700 dark:text-emerald-400" />
               <span>+Row</span>
             </button>
             <button
               type="button"
               onClick={handleDeleteRow}
               title="Delete Selected Row"
-              className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[11px] font-semibold text-rose-700 hover:bg-rose-50"
+              className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[11px] font-semibold text-rose-700 hover:bg-rose-50 dark:border-slate-700 dark:bg-slate-800 dark:text-rose-400 dark:hover:bg-rose-950/40"
             >
               <span>-Row</span>
             </button>
@@ -893,28 +893,28 @@ export function SheetsStudioEditor({
               type="button"
               onClick={() => handleInsertCol(1)}
               title="Insert Column Right"
-              className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+              className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
             >
-              <Columns3 className="h-3.5 w-3.5 text-emerald-700" />
+              <Columns3 className="h-3.5 w-3.5 text-emerald-700 dark:text-emerald-400" />
               <span>+Col</span>
             </button>
             <button
               type="button"
               onClick={handleDeleteCol}
               title="Delete Selected Column"
-              className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[11px] font-semibold text-rose-700 hover:bg-rose-50"
+              className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[11px] font-semibold text-rose-700 hover:bg-rose-50 dark:border-slate-700 dark:bg-slate-800 dark:text-rose-400 dark:hover:bg-rose-950/40"
             >
               <span>-Col</span>
             </button>
 
-            <div className="mx-1 h-5 w-px bg-slate-300" />
+            <div className="mx-1 h-5 w-px bg-slate-300 dark:bg-slate-700" />
 
             {/* Sort A-Z / Z-A */}
             <button
               type="button"
               onClick={() => handleSortSelectedColumn('asc')}
               title={`Sort Column ${colIndexToLetter(activeColIdx)} A → Z`}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#444746] hover:bg-white"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#444746] hover:bg-white dark:text-slate-300 dark:hover:bg-slate-800"
             >
               <ArrowUpAZ className="h-4 w-4" />
             </button>
@@ -922,7 +922,7 @@ export function SheetsStudioEditor({
               type="button"
               onClick={() => handleSortSelectedColumn('desc')}
               title={`Sort Column ${colIndexToLetter(activeColIdx)} Z → A`}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#444746] hover:bg-white"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#444746] hover:bg-white dark:text-slate-300 dark:hover:bg-slate-800"
             >
               <ArrowDownZA className="h-4 w-4" />
             </button>
@@ -939,8 +939,8 @@ export function SheetsStudioEditor({
           title="Filter Rows"
           className={`inline-flex h-8 items-center gap-1 rounded-md px-2 text-[11px] font-semibold ${
             showFilterBar
-              ? 'bg-[#D3E3FD] text-[#0B57D0]'
-              : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+              ? 'bg-[#D3E3FD] text-[#0B57D0] dark:bg-indigo-950/70 dark:text-indigo-300'
+              : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
           }`}
         >
           <Filter className="h-3.5 w-3.5" />
@@ -954,7 +954,7 @@ export function SheetsStudioEditor({
                 type="button"
                 disabled={syncingGoogle}
                 onClick={() => void handlePullGoogleSheet()}
-                className="inline-flex h-8 items-center gap-1 rounded-md border border-emerald-200 bg-white px-2.5 text-[11px] font-semibold text-[#0F9D58] hover:bg-emerald-50 disabled:opacity-60"
+                className="inline-flex h-8 items-center gap-1 rounded-md border border-emerald-200 bg-white px-2.5 text-[11px] font-semibold text-[#0F9D58] hover:bg-emerald-50 disabled:opacity-60 dark:border-emerald-900/60 dark:bg-slate-800 dark:text-emerald-400 dark:hover:bg-emerald-950/40"
               >
                 {syncingGoogle ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -983,7 +983,7 @@ export function SheetsStudioEditor({
                 void persistWorkbook(workbook);
                 onNotify('Spreadsheet Saved', `"${title}" saved to NexOps workspace.`, 'success');
               }}
-              className="inline-flex h-8 items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 text-[11px] font-semibold text-emerald-800 hover:bg-emerald-100"
+              className="inline-flex h-8 items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 text-[11px] font-semibold text-emerald-800 hover:bg-emerald-100 dark:border-emerald-900/60 dark:bg-emerald-950/60 dark:text-emerald-300 dark:hover:bg-emerald-950"
             >
               {saveState === 'saving' ? (
                 <Loader2 className="h-3 w-3 animate-spin" />
@@ -997,11 +997,11 @@ export function SheetsStudioEditor({
       </div>
 
       {/* Formula Bar (fx) */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-white px-3 py-1.5">
-        <span className="inline-flex h-7 min-w-[54px] items-center justify-center rounded border border-slate-200 bg-slate-50 px-2 font-mono text-xs font-bold text-slate-800">
+      <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-white px-3 py-1.5 dark:border-slate-800 dark:bg-slate-900">
+        <span className="inline-flex h-7 min-w-[54px] items-center justify-center rounded border border-slate-200 bg-slate-50 px-2 font-mono text-xs font-bold text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
           {selectedCell}
         </span>
-        <span className="font-serif text-sm font-bold italic text-emerald-700">fx</span>
+        <span className="font-serif text-sm font-bold italic text-emerald-700 dark:text-emerald-400">fx</span>
         <input
           type="text"
           readOnly={readOnly}
@@ -1013,7 +1013,7 @@ export function SheetsStudioEditor({
             commitCellValue(selectedCell, e.target.value);
           }}
           placeholder={readOnly ? '' : 'Enter value or formula (e.g. =SUM(A1:A5), =AVERAGE(B1:B10), =A1+B1)'}
-          className="h-7 min-w-[200px] flex-1 rounded border border-slate-200 px-2.5 font-mono text-xs text-slate-900 focus:border-[#0F9D58] focus:outline-none"
+          className="h-7 min-w-[200px] flex-1 rounded border border-slate-200 bg-white px-2.5 font-mono text-xs text-slate-900 placeholder:text-slate-400 focus:border-[#0F9D58] focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
         />
         {!readOnly && (
           <div className="hidden items-center gap-1 lg:flex">
@@ -1026,7 +1026,7 @@ export function SheetsStudioEditor({
                   setDraftInput(fn);
                   commitCellValue(selectedCell, fn);
                 }}
-                className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-slate-600 hover:bg-emerald-50 hover:text-emerald-800"
+                className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-slate-600 hover:bg-emerald-50 hover:text-emerald-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-emerald-950/60 dark:hover:text-emerald-300"
               >
                 {fn}
               </button>
@@ -1037,20 +1037,20 @@ export function SheetsStudioEditor({
 
       {/* Optional Filter Strip */}
       {showFilterBar && (
-        <div className="flex items-center gap-2 border-b border-slate-200 bg-amber-50/60 px-3 py-1.5 text-xs">
-          <Filter className="h-3.5 w-3.5 text-amber-700" />
+        <div className="flex items-center gap-2 border-b border-slate-200 bg-amber-50/60 px-3 py-1.5 text-xs dark:border-slate-800 dark:bg-amber-950/30">
+          <Filter className="h-3.5 w-3.5 text-amber-700 dark:text-amber-400" />
           <input
             type="search"
             value={filterText}
             onChange={(e) => setFilterText(e.target.value)}
             placeholder="Filter spreadsheet rows matching keyword..."
-            className="h-7 flex-1 rounded border border-amber-200 bg-white px-2.5 text-xs focus:outline-none"
+            className="h-7 flex-1 rounded border border-amber-200 bg-white px-2.5 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none dark:border-amber-900/60 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
           />
           {filterText && (
             <button
               type="button"
               onClick={() => setFilterText('')}
-              className="text-xs font-semibold text-amber-800 underline"
+              className="text-xs font-semibold text-amber-800 underline dark:text-amber-300"
             >
               Clear
             </button>
@@ -1059,18 +1059,20 @@ export function SheetsStudioEditor({
       )}
 
       {/* Spreadsheet Grid */}
-      <div className="max-h-[520px] overflow-auto bg-slate-100">
-        <table className="border-collapse bg-white text-xs">
-          <thead className="sticky top-0 z-10 bg-[#F8F9FA]">
+      <div className="max-h-[520px] overflow-auto bg-slate-100 dark:bg-slate-950">
+        <table className="border-collapse bg-white text-xs dark:bg-slate-900">
+          <thead className="sticky top-0 z-10 bg-[#F8F9FA] dark:bg-slate-950">
             <tr>
-              <th className="sticky left-0 z-20 h-7 w-11 border border-slate-300 bg-[#F1F3F4] text-center font-mono text-[11px] font-semibold text-slate-500" />
+              <th className="sticky left-0 z-20 h-7 w-11 border border-slate-300 bg-[#F1F3F4] text-center font-mono text-[11px] font-semibold text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400" />
               {Array.from({ length: activeSheet.cols }).map((_, c) => {
                 const isActiveCol = activeColIdx === c;
                 return (
                   <th
                     key={c}
-                    className={`h-7 min-w-[110px] border border-slate-300 px-2 text-center font-mono text-[11px] font-semibold ${
-                      isActiveCol ? 'bg-[#D3E3FD] text-[#0B57D0]' : 'text-slate-600'
+                    className={`h-7 min-w-[110px] border border-slate-300 px-2 text-center font-mono text-[11px] font-semibold dark:border-slate-700 ${
+                      isActiveCol
+                        ? 'bg-[#D3E3FD] text-[#0B57D0] dark:bg-indigo-950/80 dark:text-indigo-300'
+                        : 'text-slate-600 dark:text-slate-400'
                     }`}
                   >
                     {colIndexToLetter(c)}
@@ -1082,7 +1084,7 @@ export function SheetsStudioEditor({
           <tbody>
             {visibleRowIndices.map((r) => (
               <tr key={r}>
-                <td className="sticky left-0 z-10 h-7 w-11 border border-slate-300 bg-[#F1F3F4] text-center font-mono text-[11px] font-semibold text-slate-600 select-none">
+                <td className="sticky left-0 z-10 h-7 w-11 border border-slate-300 bg-[#F1F3F4] text-center font-mono text-[11px] font-semibold text-slate-600 select-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
                   {r + 1}
                 </td>
                 {Array.from({ length: activeSheet.cols }).map((_, c) => {
@@ -1111,13 +1113,15 @@ export function SheetsStudioEditor({
                       }}
                       style={{
                         backgroundColor: cell?.style?.bgColor || undefined,
-                        color: cell?.style?.textColor || '#1F1F1F',
+                        color: cell?.style?.textColor || (cell?.style?.bgColor ? '#1F1F1F' : undefined),
                         fontWeight: cell?.style?.bold ? 700 : 400,
                         fontStyle: cell?.style?.italic ? 'italic' : 'normal',
                         textAlign: cell?.style?.align || (r === 0 ? 'left' : 'left'),
-                        boxShadow: cell?.style?.border ? 'inset 0 0 0 1px #1e293b' : undefined,
+                        boxShadow: cell?.style?.border
+                          ? 'inset 0 0 0 1px rgba(100,116,139,0.75)'
+                          : undefined,
                       }}
-                      className={`h-7 min-w-[110px] max-w-[220px] border border-slate-200 px-2 py-0.5 select-none ${
+                      className={`h-7 min-w-[110px] max-w-[220px] border border-slate-200 px-2 py-0.5 text-[#1F1F1F] select-none dark:border-slate-800 dark:text-slate-100 ${
                         isSelected ? 'outline-2 -outline-offset-2 outline-[#0F9D58]' : ''
                       }`}
                     >
@@ -1132,7 +1136,7 @@ export function SheetsStudioEditor({
                             setEditingCell(null);
                           }}
                           onKeyDown={(e) => handleCellKeyDown(e, key)}
-                          className="h-full w-full bg-white text-xs text-slate-900 focus:outline-none"
+                          className="h-full w-full bg-white text-xs text-slate-900 focus:outline-none dark:bg-slate-900 dark:text-slate-100"
                         />
                       ) : (
                         <div className="truncate">{display}</div>
@@ -1147,14 +1151,14 @@ export function SheetsStudioEditor({
       </div>
 
       {/* Multi-Sheet Bottom Tab Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-[#F8F9FA] px-3 py-1.5">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-[#F8F9FA] px-3 py-1.5 dark:border-slate-800 dark:bg-slate-950/80">
         <div className="flex flex-wrap items-center gap-1.5">
           {!readOnly && (
             <button
               type="button"
               onClick={handleAddSheetTab}
               title="Add New Sheet Tab"
-              className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 hover:bg-emerald-50 hover:text-emerald-700"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-emerald-950/50 dark:hover:text-emerald-400"
             >
               <Plus className="h-3.5 w-3.5" />
             </button>
@@ -1166,8 +1170,8 @@ export function SheetsStudioEditor({
                 key={tab.id}
                 className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-semibold ${
                   isTabActive
-                    ? 'border-emerald-300 bg-white text-[#0F9D58] shadow-2xs'
-                    : 'border-transparent text-slate-600 hover:bg-slate-200/70'
+                    ? 'border-emerald-300 bg-white text-[#0F9D58] shadow-2xs dark:border-emerald-800 dark:bg-slate-900 dark:text-emerald-400'
+                    : 'border-transparent text-slate-600 hover:bg-slate-200/70 dark:text-slate-400 dark:hover:bg-slate-800'
                 }`}
               >
                 {!readOnly && renamingSheetId === tab.id ? (
@@ -1193,7 +1197,7 @@ export function SheetsStudioEditor({
                         (e.target as HTMLInputElement).blur();
                       }
                     }}
-                    className="w-20 rounded border border-emerald-400 px-1 text-xs text-slate-900 focus:outline-none"
+                    className="w-20 rounded border border-emerald-400 bg-white px-1 text-xs text-slate-900 focus:outline-none dark:border-emerald-600 dark:bg-slate-950 dark:text-slate-100"
                   />
                 ) : (
                   <button
@@ -1217,7 +1221,7 @@ export function SheetsStudioEditor({
                     type="button"
                     onClick={() => handleDeleteSheetTab(tab.id)}
                     title="Delete Sheet"
-                    className="rounded p-0.5 text-slate-400 hover:text-rose-600"
+                    className="rounded p-0.5 text-slate-400 hover:text-rose-600 dark:text-slate-500 dark:hover:text-rose-400"
                   >
                     <X className="h-3 w-3" />
                   </button>
@@ -1227,7 +1231,7 @@ export function SheetsStudioEditor({
           })}
         </div>
 
-        <span className="text-[11px] text-slate-500">
+        <span className="text-[11px] text-slate-500 dark:text-slate-400">
           Double-click any cell to edit · Formulas: =SUM(), =AVERAGE(), =COUNT(), =MIN(), =MAX()
         </span>
       </div>

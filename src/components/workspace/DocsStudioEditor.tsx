@@ -404,19 +404,19 @@ export function DocsStudioEditor({
   }, [htmlContent]);
 
   return (
-    <div className="flex flex-col bg-[#F8F9FA]">
+    <div className="flex flex-col bg-[#F8F9FA] dark:bg-slate-950">
       {/* Google Docs Style Formatting Toolbar */}
-      <div className="relative border-b border-slate-200 bg-[#EDF2FA] px-3 py-2">
+      <div className="relative border-b border-slate-200 bg-[#EDF2FA] px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
         {readOnly ? (
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="rounded-lg border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600">
+            <span className="rounded-lg border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
               Read-Only Document Preview (Viewer Role)
             </span>
             <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={handlePrint}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
               >
                 <Printer className="h-3.5 w-3.5" />
                 <span>Print</span>
@@ -424,7 +424,7 @@ export function DocsStudioEditor({
               <button
                 type="button"
                 onClick={() => handleExportFile('doc')}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
               >
                 <Download className="h-3.5 w-3.5" />
                 <span>Export .doc</span>
@@ -439,7 +439,7 @@ export function DocsStudioEditor({
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => execCommand('undo')}
               title="Undo"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#444746] hover:bg-white"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#444746] hover:bg-white dark:text-slate-300 dark:hover:bg-slate-800"
             >
               <Undo2 className="h-4 w-4" />
             </button>
@@ -448,7 +448,7 @@ export function DocsStudioEditor({
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => execCommand('redo')}
               title="Redo"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#444746] hover:bg-white"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#444746] hover:bg-white dark:text-slate-300 dark:hover:bg-slate-800"
             >
               <Redo2 className="h-4 w-4" />
             </button>
@@ -456,12 +456,12 @@ export function DocsStudioEditor({
               type="button"
               onClick={handlePrint}
               title="Print Document"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#444746] hover:bg-white"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#444746] hover:bg-white dark:text-slate-300 dark:hover:bg-slate-800"
             >
               <Printer className="h-4 w-4" />
             </button>
 
-            <div className="mx-1 h-5 w-px bg-slate-300" />
+            <div className="mx-1 h-5 w-px bg-slate-300 dark:bg-slate-700" />
 
             {/* Headings / Normal */}
             <select
@@ -470,7 +470,7 @@ export function DocsStudioEditor({
               onChange={(e) =>
                 handleBlockChange(e.target.value as 'P' | 'H1' | 'H2' | 'H3' | 'BLOCKQUOTE')
               }
-              className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs font-medium text-[#1F1F1F] focus:border-[#0B57D0] focus:outline-none"
+              className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs font-medium text-[#1F1F1F] focus:border-[#0B57D0] focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-indigo-400"
             >
               <option value="P">Normal text</option>
               <option value="H1">Heading 1</option>
@@ -484,7 +484,7 @@ export function DocsStudioEditor({
               aria-label="Font family"
               value={defaultFont}
               onChange={(e) => handleFontChange(e.target.value)}
-              className="h-8 max-w-[140px] rounded-md border border-slate-200 bg-white px-2 text-xs font-medium text-[#1F1F1F] focus:border-[#0B57D0] focus:outline-none"
+              className="h-8 max-w-[140px] rounded-md border border-slate-200 bg-white px-2 text-xs font-medium text-[#1F1F1F] focus:border-[#0B57D0] focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-indigo-400"
             >
               {FONT_OPTIONS.map((f) => (
                 <option key={f.label} value={f.value}>
@@ -498,7 +498,7 @@ export function DocsStudioEditor({
               aria-label="Font size"
               value={fontSize}
               onChange={(e) => handleFontSizeChange(e.target.value)}
-              className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs font-medium text-[#1F1F1F] focus:border-[#0B57D0] focus:outline-none"
+              className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs font-medium text-[#1F1F1F] focus:border-[#0B57D0] focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-indigo-400"
             >
               <option value="2">10pt</option>
               <option value="3">12pt</option>
@@ -508,7 +508,7 @@ export function DocsStudioEditor({
               <option value="7">32pt</option>
             </select>
 
-            <div className="mx-1 h-5 w-px bg-slate-300" />
+            <div className="mx-1 h-5 w-px bg-slate-300 dark:bg-slate-700" />
 
             {/* Inline Formatting */}
             <button
@@ -516,7 +516,7 @@ export function DocsStudioEditor({
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => execCommand('bold')}
               title="Bold (Ctrl+B)"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#1F1F1F] hover:bg-white"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#1F1F1F] hover:bg-white dark:text-slate-200 dark:hover:bg-slate-800"
             >
               <Bold className="h-4 w-4" />
             </button>
@@ -525,7 +525,7 @@ export function DocsStudioEditor({
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => execCommand('italic')}
               title="Italic (Ctrl+I)"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#1F1F1F] hover:bg-white"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#1F1F1F] hover:bg-white dark:text-slate-200 dark:hover:bg-slate-800"
             >
               <Italic className="h-4 w-4" />
             </button>
@@ -534,7 +534,7 @@ export function DocsStudioEditor({
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => execCommand('underline')}
               title="Underline (Ctrl+U)"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#1F1F1F] hover:bg-white"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#1F1F1F] hover:bg-white dark:text-slate-200 dark:hover:bg-slate-800"
             >
               <Underline className="h-4 w-4" />
             </button>
@@ -543,7 +543,7 @@ export function DocsStudioEditor({
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => execCommand('strikeThrough')}
               title="Strikethrough"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#1F1F1F] hover:bg-white"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#1F1F1F] hover:bg-white dark:text-slate-200 dark:hover:bg-slate-800"
             >
               <Strikethrough className="h-4 w-4" />
             </button>
@@ -560,14 +560,16 @@ export function DocsStudioEditor({
                   setOpenPopover((p) => (p === 'textColor' ? 'none' : 'textColor'))
                 }
                 title="Text Color"
-                className={`inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-white ${
-                  openPopover === 'textColor' ? 'bg-white text-[#0B57D0]' : 'text-[#1F1F1F]'
+                className={`inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-white dark:hover:bg-slate-800 ${
+                  openPopover === 'textColor'
+                    ? 'bg-white text-[#0B57D0] dark:bg-slate-800 dark:text-indigo-400'
+                    : 'text-[#1F1F1F] dark:text-slate-200'
                 }`}
               >
                 <Palette className="h-4 w-4" />
               </button>
               {openPopover === 'textColor' && (
-                <div className="absolute top-10 left-0 z-30 flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white p-2 shadow-lg">
+                <div className="absolute top-10 left-0 z-30 flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white p-2 shadow-lg dark:border-slate-700 dark:bg-slate-900">
                   {TEXT_COLORS.map((clr) => (
                     <button
                       key={clr}
@@ -577,7 +579,7 @@ export function DocsStudioEditor({
                         execCommand('foreColor', clr);
                         setOpenPopover('none');
                       }}
-                      className="h-5 w-5 rounded-full border border-slate-200"
+                      className="h-5 w-5 rounded-full border border-slate-200 dark:border-slate-700"
                       style={{ backgroundColor: clr }}
                       title={clr}
                     />
@@ -597,14 +599,16 @@ export function DocsStudioEditor({
                   setOpenPopover((p) => (p === 'highlight' ? 'none' : 'highlight'))
                 }
                 title="Highlight Color"
-                className={`inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-white ${
-                  openPopover === 'highlight' ? 'bg-white text-[#0B57D0]' : 'text-[#1F1F1F]'
+                className={`inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-white dark:hover:bg-slate-800 ${
+                  openPopover === 'highlight'
+                    ? 'bg-white text-[#0B57D0] dark:bg-slate-800 dark:text-indigo-400'
+                    : 'text-[#1F1F1F] dark:text-slate-200'
                 }`}
               >
                 <Highlighter className="h-4 w-4" />
               </button>
               {openPopover === 'highlight' && (
-                <div className="absolute top-10 left-0 z-30 flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white p-2 shadow-lg">
+                <div className="absolute top-10 left-0 z-30 flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white p-2 shadow-lg dark:border-slate-700 dark:bg-slate-900">
                   {HIGHLIGHT_COLORS.map((clr) => (
                     <button
                       key={clr}
@@ -614,7 +618,7 @@ export function DocsStudioEditor({
                         execCommand('hiliteColor', clr);
                         setOpenPopover('none');
                       }}
-                      className="h-5 w-5 rounded-full border border-slate-300"
+                      className="h-5 w-5 rounded-full border border-slate-300 dark:border-slate-600"
                       style={{ backgroundColor: clr === 'transparent' ? '#ffffff' : clr }}
                       title={clr === 'transparent' ? 'Clear highlight' : clr}
                     />
@@ -623,7 +627,7 @@ export function DocsStudioEditor({
               )}
             </div>
 
-            <div className="mx-1 h-5 w-px bg-slate-300" />
+            <div className="mx-1 h-5 w-px bg-slate-300 dark:bg-slate-700" />
 
             {/* Alignment */}
             <button
@@ -631,7 +635,7 @@ export function DocsStudioEditor({
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => execCommand('justifyLeft')}
               title="Align Left"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#444746] hover:bg-white"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#444746] hover:bg-white dark:text-slate-300 dark:hover:bg-slate-800"
             >
               <AlignLeft className="h-4 w-4" />
             </button>
@@ -640,7 +644,7 @@ export function DocsStudioEditor({
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => execCommand('justifyCenter')}
               title="Align Center"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#444746] hover:bg-white"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#444746] hover:bg-white dark:text-slate-300 dark:hover:bg-slate-800"
             >
               <AlignCenter className="h-4 w-4" />
             </button>
@@ -649,7 +653,7 @@ export function DocsStudioEditor({
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => execCommand('justifyRight')}
               title="Align Right"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#444746] hover:bg-white"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#444746] hover:bg-white dark:text-slate-300 dark:hover:bg-slate-800"
             >
               <AlignRight className="h-4 w-4" />
             </button>
@@ -658,12 +662,12 @@ export function DocsStudioEditor({
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => execCommand('justifyFull')}
               title="Justify"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#444746] hover:bg-white"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#444746] hover:bg-white dark:text-slate-300 dark:hover:bg-slate-800"
             >
               <AlignJustify className="h-4 w-4" />
             </button>
 
-            <div className="mx-1 h-5 w-px bg-slate-300" />
+            <div className="mx-1 h-5 w-px bg-slate-300 dark:bg-slate-700" />
 
             {/* Lists & Indent */}
             <button
@@ -671,7 +675,7 @@ export function DocsStudioEditor({
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => execCommand('insertUnorderedList')}
               title="Bulleted List"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#444746] hover:bg-white"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#444746] hover:bg-white dark:text-slate-300 dark:hover:bg-slate-800"
             >
               <List className="h-4 w-4" />
             </button>
@@ -680,7 +684,7 @@ export function DocsStudioEditor({
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => execCommand('insertOrderedList')}
               title="Numbered List"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#444746] hover:bg-white"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#444746] hover:bg-white dark:text-slate-300 dark:hover:bg-slate-800"
             >
               <ListOrdered className="h-4 w-4" />
             </button>
@@ -689,7 +693,7 @@ export function DocsStudioEditor({
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => execCommand('outdent')}
               title="Decrease Indent"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#444746] hover:bg-white"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#444746] hover:bg-white dark:text-slate-300 dark:hover:bg-slate-800"
             >
               <IndentDecrease className="h-4 w-4" />
             </button>
@@ -698,12 +702,12 @@ export function DocsStudioEditor({
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => execCommand('indent')}
               title="Increase Indent"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#444746] hover:bg-white"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#444746] hover:bg-white dark:text-slate-300 dark:hover:bg-slate-800"
             >
               <IndentIncrease className="h-4 w-4" />
             </button>
 
-            <div className="mx-1 h-5 w-px bg-slate-300" />
+            <div className="mx-1 h-5 w-px bg-slate-300 dark:bg-slate-700" />
 
             {/* Insert Link & Insert Table & Divider & Clear Formatting */}
             <div className="relative">
@@ -715,8 +719,10 @@ export function DocsStudioEditor({
                 }}
                 onClick={() => setOpenPopover((p) => (p === 'link' ? 'none' : 'link'))}
                 title="Insert Link"
-                className={`inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs font-semibold hover:bg-white ${
-                  openPopover === 'link' ? 'bg-white text-[#0B57D0]' : 'text-[#444746]'
+                className={`inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs font-semibold hover:bg-white dark:hover:bg-slate-800 ${
+                  openPopover === 'link'
+                    ? 'bg-white text-[#0B57D0] dark:bg-slate-800 dark:text-indigo-400'
+                    : 'text-[#444746] dark:text-slate-300'
                 }`}
               >
                 <Link2 className="h-3.5 w-3.5" />
@@ -725,15 +731,15 @@ export function DocsStudioEditor({
               {openPopover === 'link' && (
                 <form
                   onSubmit={handleInsertLinkSubmit}
-                  className="absolute top-10 left-0 z-30 w-72 space-y-2 rounded-xl border border-slate-200 bg-white p-3 shadow-xl"
+                  className="absolute top-10 left-0 z-30 w-72 space-y-2 rounded-xl border border-slate-200 bg-white p-3 shadow-xl dark:border-slate-700 dark:bg-slate-900"
                 >
-                  <p className="text-[11px] font-bold text-slate-800">Insert Clickable Link</p>
+                  <p className="text-[11px] font-bold text-slate-800 dark:text-slate-100">Insert Clickable Link</p>
                   <input
                     type="text"
                     value={linkText}
                     onChange={(e) => setLinkText(e.target.value)}
                     placeholder="Display text (optional)"
-                    className="h-8 w-full rounded-lg border border-slate-200 px-2.5 text-xs focus:border-[#0B57D0] focus:outline-none"
+                    className="h-8 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-900 placeholder:text-slate-400 focus:border-[#0B57D0] focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
                   />
                   <input
                     type="text"
@@ -741,19 +747,19 @@ export function DocsStudioEditor({
                     value={linkUrl}
                     onChange={(e) => setLinkUrl(e.target.value)}
                     placeholder="https://company.com/report"
-                    className="h-8 w-full rounded-lg border border-slate-200 px-2.5 font-mono text-xs focus:border-[#0B57D0] focus:outline-none"
+                    className="h-8 w-full rounded-lg border border-slate-200 bg-white px-2.5 font-mono text-xs text-slate-900 placeholder:text-slate-400 focus:border-[#0B57D0] focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
                   />
                   <div className="flex justify-end gap-1.5">
                     <button
                       type="button"
                       onClick={() => setOpenPopover('none')}
-                      className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-semibold text-slate-600"
+                      className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
                     >
                       Cancel
                     </button>
                     <button
                       type="submit"
-                      className="rounded-lg bg-[#0B57D0] px-3 py-1 text-[11px] font-semibold text-white"
+                      className="rounded-lg bg-[#0B57D0] px-3 py-1 text-[11px] font-semibold text-white hover:bg-[#0842A0]"
                     >
                       Insert
                     </button>
@@ -771,8 +777,10 @@ export function DocsStudioEditor({
                 }}
                 onClick={() => setOpenPopover((p) => (p === 'table' ? 'none' : 'table'))}
                 title="Insert Table"
-                className={`inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs font-semibold hover:bg-white ${
-                  openPopover === 'table' ? 'bg-white text-[#0B57D0]' : 'text-[#444746]'
+                className={`inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs font-semibold hover:bg-white dark:hover:bg-slate-800 ${
+                  openPopover === 'table'
+                    ? 'bg-white text-[#0B57D0] dark:bg-slate-800 dark:text-indigo-400'
+                    : 'text-[#444746] dark:text-slate-300'
                 }`}
               >
                 <Table2 className="h-3.5 w-3.5" />
@@ -781,30 +789,30 @@ export function DocsStudioEditor({
               {openPopover === 'table' && (
                 <form
                   onSubmit={handleInsertTableSubmit}
-                  className="absolute top-10 left-0 z-30 w-56 space-y-2.5 rounded-xl border border-slate-200 bg-white p-3 shadow-xl"
+                  className="absolute top-10 left-0 z-30 w-56 space-y-2.5 rounded-xl border border-slate-200 bg-white p-3 shadow-xl dark:border-slate-700 dark:bg-slate-900"
                 >
-                  <p className="text-[11px] font-bold text-slate-800">Insert Table Grid</p>
+                  <p className="text-[11px] font-bold text-slate-800 dark:text-slate-100">Insert Table Grid</p>
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <label className="text-[10px] font-semibold text-slate-500">Rows</label>
+                      <label className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">Rows</label>
                       <input
                         type="number"
                         min={1}
                         max={12}
                         value={tableRows}
                         onChange={(e) => setTableRows(Number(e.target.value) || 1)}
-                        className="mt-0.5 h-8 w-full rounded-lg border border-slate-200 px-2 text-xs"
+                        className="mt-0.5 h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                       />
                     </div>
                     <div>
-                      <label className="text-[10px] font-semibold text-slate-500">Columns</label>
+                      <label className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">Columns</label>
                       <input
                         type="number"
                         min={1}
                         max={8}
                         value={tableCols}
                         onChange={(e) => setTableCols(Number(e.target.value) || 1)}
-                        className="mt-0.5 h-8 w-full rounded-lg border border-slate-200 px-2 text-xs"
+                        className="mt-0.5 h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                       />
                     </div>
                   </div>
@@ -812,13 +820,13 @@ export function DocsStudioEditor({
                     <button
                       type="button"
                       onClick={() => setOpenPopover('none')}
-                      className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-semibold text-slate-600"
+                      className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
                     >
                       Cancel
                     </button>
                     <button
                       type="submit"
-                      className="rounded-lg bg-[#0B57D0] px-3 py-1 text-[11px] font-semibold text-white"
+                      className="rounded-lg bg-[#0B57D0] px-3 py-1 text-[11px] font-semibold text-white hover:bg-[#0842A0]"
                     >
                       Insert
                     </button>
@@ -832,7 +840,7 @@ export function DocsStudioEditor({
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => execCommand('insertHorizontalRule')}
               title="Insert Horizontal Divider"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#444746] hover:bg-white"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#444746] hover:bg-white dark:text-slate-300 dark:hover:bg-slate-800"
             >
               <Minus className="h-4 w-4" />
             </button>
@@ -841,7 +849,7 @@ export function DocsStudioEditor({
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => execCommand('removeFormat')}
               title="Clear Formatting"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#444746] hover:bg-white"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#444746] hover:bg-white dark:text-slate-300 dark:hover:bg-slate-800"
             >
               <RemoveFormatting className="h-4 w-4" />
             </button>
@@ -853,7 +861,7 @@ export function DocsStudioEditor({
                     type="button"
                     disabled={syncingGoogle}
                     onClick={() => void handlePullFromGoogle()}
-                    className="inline-flex h-8 items-center gap-1 rounded-md border border-blue-200 bg-white px-2.5 text-[11px] font-semibold text-[#1A73E8] hover:bg-blue-50 disabled:opacity-60"
+                    className="inline-flex h-8 items-center gap-1 rounded-md border border-blue-200 bg-white px-2.5 text-[11px] font-semibold text-[#1A73E8] hover:bg-blue-50 disabled:opacity-60 dark:border-blue-900/60 dark:bg-slate-800 dark:text-blue-300 dark:hover:bg-blue-950/50"
                   >
                     {syncingGoogle ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -877,7 +885,7 @@ export function DocsStudioEditor({
               <button
                 type="button"
                 onClick={() => handleExportFile('doc')}
-                className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
               >
                 <Download className="h-3.5 w-3.5" />
                 <span>.doc</span>
@@ -891,7 +899,7 @@ export function DocsStudioEditor({
                     onNotify('Document Saved', `"${title}" saved to NexOps workspace.`, 'success');
                   }
                 }}
-                className="inline-flex h-8 items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 text-[11px] font-semibold text-emerald-800 hover:bg-emerald-100"
+                className="inline-flex h-8 items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 text-[11px] font-semibold text-emerald-800 hover:bg-emerald-100 dark:border-emerald-900/60 dark:bg-emerald-950/60 dark:text-emerald-300 dark:hover:bg-emerald-950"
               >
                 {saveState === 'saving' ? (
                   <Loader2 className="h-3 w-3 animate-spin" />
@@ -906,8 +914,8 @@ export function DocsStudioEditor({
       </div>
 
       {/* Document Page Canvas */}
-      <div className="flex-1 overflow-y-auto bg-[#F1F3F4] p-4 sm:p-8">
-        <div className="mx-auto min-h-[600px] max-w-[816px] rounded-lg border border-slate-200 bg-white px-8 py-10 shadow-sm sm:px-14 sm:py-12">
+      <div className="flex-1 overflow-y-auto bg-[#F1F3F4] p-4 sm:p-8 dark:bg-slate-950">
+        <div className="mx-auto min-h-[600px] max-w-[816px] rounded-lg border border-slate-200 bg-white px-8 py-10 shadow-sm sm:px-14 sm:py-12 dark:border-slate-700">
           <div
             ref={editorRef}
             contentEditable={!readOnly}
@@ -922,13 +930,13 @@ export function DocsStudioEditor({
       </div>
 
       {/* Document Status Footer */}
-      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-white px-4 py-2 text-[11px] text-slate-500">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-white px-4 py-2 text-[11px] text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
         <div className="flex items-center gap-3">
-          <span className="font-semibold text-slate-700">
+          <span className="font-semibold text-slate-700 dark:text-slate-200">
             {stats.words} words · {stats.chars} characters
           </span>
           {lastSavedAt && (
-            <span className="inline-flex items-center gap-1 text-emerald-700">
+            <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400">
               <Check className="h-3 w-3" />
               Saved {new Date(lastSavedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </span>

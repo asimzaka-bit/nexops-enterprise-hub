@@ -42,7 +42,7 @@ export function UserAvatar({
         src={cleanUrl}
         alt={`${name} profile avatar`}
         onError={() => setImgFailed(true)}
-        className={`shrink-0 object-cover border border-slate-200 bg-slate-100 ${sizeClass} ${roundedClass} ${className}`}
+        className={`shrink-0 object-cover border border-slate-200 bg-slate-100 dark:border-slate-700 dark:bg-slate-800 ${sizeClass} ${roundedClass} ${className}`}
       />
     );
   }
@@ -50,7 +50,7 @@ export function UserAvatar({
   return (
     <span
       aria-hidden="true"
-      className={`flex shrink-0 items-center justify-center bg-slate-900 font-display font-bold text-white ${sizeClass} ${textClass} ${roundedClass} ${className}`}
+      className={`flex shrink-0 items-center justify-center bg-slate-900 font-display font-bold text-white dark:bg-indigo-600 ${sizeClass} ${textClass} ${roundedClass} ${className}`}
     >
       {getUserInitials(name)}
     </span>

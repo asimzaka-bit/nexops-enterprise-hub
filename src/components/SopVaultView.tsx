@@ -16,17 +16,20 @@ import {
 import { FormEvent, useMemo, useState } from 'react';
 import {
   Department,
+  PendingEditorChange,
   Role,
   SopCategory,
   SopDocument,
   TeamMember,
 } from '../types/nexops';
 import { formatDateTime, formatShortDate } from '../utils/storage';
+import { PendingApprovalBadge } from './StatusIndicator';
 
 interface SopVaultViewProps {
   sops: SopDocument[];
   activeRole: Role;
   currentUser: TeamMember;
+  pendingEditorChanges?: PendingEditorChange[];
   departments: string[];
   teamMembers: TeamMember[];
   onPublishSop: (sop: Omit<SopDocument, 'id' | 'acknowledgments' | 'updatedAt'>) => void;
@@ -112,14 +115,37 @@ export function SopVaultView({
   sops,
   activeRole,
   currentUser,
+  pendingEditorChanges = [],
   departments,
   teamMembers,
   onPublishSop,
   onToggleMandatory,
   onAcknowledgeSop,
 }: SopVaultViewProps) {
-  const isViewer = activeRole !== 'Admin';
-  const canManageSops = activeRole === 'Admin';
+  const isViewer = activeRole === 'Viewer';
+  const canManageSops = activeRole === 'Admin' || activeRole === 'Editor';
+
+  const pendingSopEditIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const chg of pendingEditorChanges) {
+      if (chg.status === 'pending' && chg.module === 'sops' && chg.action !== 'create') {
+        set.add(chg.targetId);
+      }
+    }
+    return set;
+  }, [pendingEditorChanges]);
+
+  const pendingCreatedSops = useMemo(() => {
+    if (!canManageSops) return [];
+    const emailLower = currentUser.email.toLowerCase();
+    return pendingEditorChanges.filter(
+      (chg) =>
+        chg.status === 'pending' &&
+        chg.module === 'sops' &&
+        chg.action === 'create' &&
+        (activeRole === 'Admin' || chg.editorEmail.toLowerCase() === emailLower),
+    );
+  }, [pendingEditorChanges, activeRole, currentUser.email, canManageSops]);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<SopCategory | 'All'>('All');
@@ -319,10 +345,14 @@ export function SopVaultView({
 
   const renderCategoryBadge = (category: SopCategory) => {
     const styles: Record<SopCategory, string> = {
-      'Standard Operating Procedure': 'border-indigo-200 bg-indigo-50 text-indigo-700',
-      'QA Guidelines': 'border-emerald-200 bg-emerald-50 text-emerald-700',
-      'HR Policies': 'border-amber-200 bg-amber-50 text-amber-800',
-      Templates: 'border-slate-200 bg-slate-100 text-slate-700',
+      'Standard Operating Procedure':
+        'border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-900/60 dark:bg-indigo-950/50 dark:text-indigo-300',
+      'QA Guidelines':
+        'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/50 dark:text-emerald-300',
+      'HR Policies':
+        'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/50 dark:text-amber-300',
+      Templates:
+        'border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300',
     };
     return (
       <span
@@ -341,7 +371,7 @@ export function SopVaultView({
           ? 'bg-indigo-600'
           : 'bg-amber-500';
     return (
-      <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
         <div
           className={`h-full rounded-full transition-all duration-300 ${barColor}`}
           style={{ width: `${percent}%` }}
@@ -357,26 +387,26 @@ export function SopVaultView({
         aria-label="SOP Compliance Summary"
         className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4"
       >
-        <div className="rounded-xl border border-slate-200 bg-white p-5">
+        <div className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-500">Total Vault Documents</span>
-            <BookOpenCheck className="h-4 w-4 text-indigo-600" />
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Total Vault Documents</span>
+            <BookOpenCheck className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
           </div>
-          <p className="mt-2 font-display text-2xl font-bold text-slate-900 tabular-nums">
+          <p className="mt-2 font-display text-2xl font-bold text-slate-900 tabular-nums dark:text-slate-100">
             {kpiStats.total}
           </p>
-          <p className="mt-1 text-xs text-slate-500">SOPs, QA guidelines, policies &amp; templates</p>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">SOPs, QA guidelines, policies &amp; templates</p>
         </div>
 
-        <div className="rounded-xl border border-slate-200 bg-white p-5">
+        <div className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-500">Mandatory Read SOPs</span>
-            <ShieldCheck className="h-4 w-4 text-slate-700" />
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Mandatory Read SOPs</span>
+            <ShieldCheck className="h-4 w-4 text-slate-700 dark:text-slate-300" />
           </div>
-          <p className="mt-2 font-display text-2xl font-bold text-slate-900 tabular-nums">
+          <p className="mt-2 font-display text-2xl font-bold text-slate-900 tabular-nums dark:text-slate-100">
             {kpiStats.mandatoryCount}
           </p>
-          <p className="mt-1 text-xs text-slate-500">Tracked for employee digital sign-off</p>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Tracked for employee digital sign-off</p>
         </div>
 
         <button
@@ -384,26 +414,26 @@ export function SopVaultView({
           onClick={() => setPendingMineOnly((prev) => !prev)}
           className={`rounded-xl border p-5 text-left transition-colors ${
             pendingMineOnly
-              ? 'border-amber-300 bg-amber-50/60'
-              : 'border-slate-200 bg-white hover:border-slate-300'
+              ? 'border-amber-300 bg-amber-50/60 dark:border-amber-800 dark:bg-amber-950/35'
+              : 'border-slate-200 bg-white hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700'
           }`}
         >
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-500">Pending My Sign-Off</span>
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Pending My Sign-Off</span>
             <Clock
               className={`h-4 w-4 ${
-                kpiStats.pendingMySignOff > 0 ? 'text-amber-600' : 'text-emerald-600'
+                kpiStats.pendingMySignOff > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'
               }`}
             />
           </div>
           <p
             className={`mt-2 font-display text-2xl font-bold tabular-nums ${
-              kpiStats.pendingMySignOff > 0 ? 'text-amber-700' : 'text-emerald-700'
+              kpiStats.pendingMySignOff > 0 ? 'text-amber-700 dark:text-amber-400' : 'text-emerald-700 dark:text-emerald-400'
             }`}
           >
             {kpiStats.pendingMySignOff}
           </p>
-          <p className="mt-1 text-xs text-slate-500">
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
             {pendingMineOnly
               ? 'Showing my pending items (click to clear)'
               : kpiStats.pendingMySignOff > 0
@@ -412,12 +442,12 @@ export function SopVaultView({
           </p>
         </button>
 
-        <div className="rounded-xl border border-slate-200 bg-white p-5">
+        <div className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-500">Team Avg Compliance</span>
-            <Users className="h-4 w-4 text-emerald-600" />
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Team Avg Compliance</span>
+            <Users className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
           </div>
-          <p className="mt-2 font-display text-2xl font-bold text-emerald-700 tabular-nums">
+          <p className="mt-2 font-display text-2xl font-bold text-emerald-700 tabular-nums dark:text-emerald-400">
             {kpiStats.avgCompliance}%
           </p>
           <div className="mt-2">{renderProgressBar(kpiStats.avgCompliance)}</div>
@@ -425,12 +455,12 @@ export function SopVaultView({
       </section>
 
       {/* Filter Toolbar & Controls */}
-      <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
+      <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <div className="flex flex-1 flex-wrap items-center gap-2.5">
             <div className="relative min-w-[230px] flex-1">
               <Search
-                className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400"
+                className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-slate-500"
                 aria-hidden="true"
               />
               <input
@@ -438,7 +468,7 @@ export function SopVaultView({
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search Document Code (SOP-QA-01), Title, Author, Department..."
-                className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50 pr-3 pl-9 text-sm text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:bg-white focus:outline-none"
+                className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50 pr-3 pl-9 text-sm text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:bg-white focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:bg-slate-950"
               />
             </div>
 
@@ -446,7 +476,7 @@ export function SopVaultView({
               aria-label="Filter by Department"
               value={departmentFilter}
               onChange={(e) => setDepartmentFilter(e.target.value)}
-              className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 focus:border-indigo-500 focus:outline-none"
+              className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
             >
               <option value="All">All Departments</option>
               {availableDepartments.map((dept) => (
@@ -456,12 +486,12 @@ export function SopVaultView({
               ))}
             </select>
 
-            <label className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs font-medium text-slate-700 hover:bg-slate-100 whitespace-nowrap">
+            <label className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs font-medium text-slate-700 hover:bg-slate-100 whitespace-nowrap dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800">
               <input
                 type="checkbox"
                 checked={mandatoryOnly}
                 onChange={(e) => setMandatoryOnly(e.target.checked)}
-                className="h-3.5 w-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                className="h-3.5 w-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-600"
               />
               <span>Mandatory Read Only</span>
             </label>
@@ -472,15 +502,15 @@ export function SopVaultView({
             <div
               role="group"
               aria-label="SOP Library Layout"
-              className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-slate-50 p-0.5"
+              className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-slate-50 p-0.5 dark:border-slate-700 dark:bg-slate-950"
             >
               <button
                 type="button"
                 onClick={() => setViewMode('cards')}
                 className={`inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-semibold transition-colors whitespace-nowrap ${
                   viewMode === 'cards'
-                    ? 'bg-white text-slate-900 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
+                    ? 'bg-white text-slate-900 shadow-xs dark:bg-slate-800 dark:text-slate-100'
+                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
                 }`}
               >
                 <LayoutGrid className="h-3.5 w-3.5" />
@@ -491,8 +521,8 @@ export function SopVaultView({
                 onClick={() => setViewMode('table')}
                 className={`inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-semibold transition-colors whitespace-nowrap ${
                   viewMode === 'table'
-                    ? 'bg-white text-slate-900 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
+                    ? 'bg-white text-slate-900 shadow-xs dark:bg-slate-800 dark:text-slate-100'
+                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
                 }`}
               >
                 <List className="h-3.5 w-3.5" />
@@ -510,8 +540,8 @@ export function SopVaultView({
                 <span>Publish New SOP</span>
               </button>
             ) : (
-              <span className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs font-medium text-slate-500 whitespace-nowrap">
-                <Lock className="h-3.5 w-3.5 text-slate-400" />
+              <span className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs font-medium text-slate-500 whitespace-nowrap dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
+                <Lock className="h-3.5 w-3.5 text-slate-400 dark:text-slate-500" />
                 <span>Read-Only Access (Viewer)</span>
               </span>
             )}
@@ -519,7 +549,7 @@ export function SopVaultView({
         </div>
 
         {/* Category Filter Tabs */}
-        <div className="flex flex-wrap items-center gap-1.5 border-t border-slate-100 pt-3">
+        <div className="flex flex-wrap items-center gap-1.5 border-t border-slate-100 pt-3 dark:border-slate-800">
           {(['All', ...SOP_CATEGORIES] as const).map((cat) => {
             const count =
               cat === 'All'
@@ -533,14 +563,16 @@ export function SopVaultView({
                 onClick={() => setCategoryFilter(cat)}
                 className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors whitespace-nowrap ${
                   active
-                    ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
-                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                    ? 'border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300'
+                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 dark:hover:text-white'
                 }`}
               >
                 <span>{cat}</span>
                 <span
                   className={`rounded px-1.5 py-0.2 font-mono text-[10px] tabular-nums ${
-                    active ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-500'
+                    active
+                      ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/70 dark:text-indigo-200'
+                      : 'bg-slate-100 text-slate-500 dark:bg-slate-900 dark:text-slate-400'
                   }`}
                 >
                   {count}
@@ -551,14 +583,47 @@ export function SopVaultView({
         </div>
       </div>
 
+      {/* Pending Maker-Checker SOP Proposals */}
+      {pendingCreatedSops.length > 0 && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-4 dark:border-amber-800/70 dark:bg-amber-950/30">
+          <div className="flex flex-wrap items-center gap-2">
+            <PendingApprovalBadge label={`${pendingCreatedSops.length} Pending Super Admin Approval`} />
+            <span className="text-xs font-semibold text-amber-950 dark:text-amber-200">
+              New SOP / Policy Drafts Awaiting Maker-Checker Review
+            </span>
+          </div>
+          <div className="mt-3 grid grid-cols-1 gap-2.5 md:grid-cols-2">
+            {pendingCreatedSops.map((chg) => (
+              <div
+                key={chg.id}
+                className="flex items-start justify-between gap-3 rounded-lg border border-amber-200/90 bg-white px-3.5 py-2.5 dark:border-amber-900/60 dark:bg-slate-900"
+              >
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="font-mono text-[11px] font-bold text-indigo-700 dark:text-indigo-400">
+                      {chg.itemLabel}
+                    </span>
+                    <PendingApprovalBadge compact />
+                  </div>
+                  <p className="mt-0.5 text-[11px] text-slate-600 dark:text-slate-300">{chg.summary}</p>
+                  <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                    By {chg.editorName} ({chg.editorDepartment}) · {formatDateTime(chg.submittedAt)}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Empty State */}
       {filteredSops.length === 0 ? (
-        <div className="rounded-xl border border-slate-200 bg-white px-6 py-16 text-center">
-          <FileText className="mx-auto h-8 w-8 text-slate-300" />
-          <p className="mt-3 font-display text-sm font-semibold text-slate-900">
+        <div className="rounded-xl border border-slate-200 bg-white px-6 py-16 text-center dark:border-slate-800 dark:bg-slate-900">
+          <FileText className="mx-auto h-8 w-8 text-slate-300 dark:text-slate-600" />
+          <p className="mt-3 font-display text-sm font-semibold text-slate-900 dark:text-slate-100">
             No documents match your current filters
           </p>
-          <p className="mt-1 text-xs text-slate-500">
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
             Reset category or search filters{canManageSops ? ', or publish a new corporate SOP' : ''}.
           </p>
           <div className="mt-4 flex items-center justify-center gap-2">
@@ -571,7 +636,7 @@ export function SopVaultView({
                 setMandatoryOnly(false);
                 setPendingMineOnly(false);
               }}
-              className="rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+              className="rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
             >
               Reset Filters
             </button>
@@ -599,18 +664,19 @@ export function SopVaultView({
               <article
                 key={sop.id}
                 onClick={() => setReaderSopId(sop.id)}
-                className="group flex cursor-pointer flex-col justify-between rounded-xl border border-slate-200 bg-white p-5 transition-colors hover:border-indigo-300"
+                className="group flex cursor-pointer flex-col justify-between rounded-xl border border-slate-200 bg-white p-5 transition-colors hover:border-indigo-300 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-indigo-700"
               >
                 <div>
                   {/* Top Metadata Row */}
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded-md border border-indigo-200 bg-indigo-50 px-2 py-0.5 font-mono text-xs font-bold text-indigo-700 tabular-nums">
+                      <span className="rounded-md border border-indigo-200 bg-indigo-50 px-2 py-0.5 font-mono text-xs font-bold text-indigo-700 tabular-nums dark:border-indigo-900/60 dark:bg-indigo-950/50 dark:text-indigo-300">
                         {sop.code}
                       </span>
-                      <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 font-mono text-[11px] font-semibold text-slate-700 tabular-nums">
+                      <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 font-mono text-[11px] font-semibold text-slate-700 tabular-nums dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
                         {sop.version}
                       </span>
+                      {pendingSopEditIds.has(sop.id) && <PendingApprovalBadge compact />}
                     </div>
 
                     {/* Mandatory Read Toggle / Badge */}
@@ -626,13 +692,13 @@ export function SopVaultView({
                         }}
                         className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[11px] font-semibold transition-colors whitespace-nowrap ${
                           sop.mandatoryRead
-                            ? 'border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100'
-                            : 'border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100'
+                            ? 'border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100 dark:border-amber-900/60 dark:bg-amber-950/50 dark:text-amber-300 dark:hover:bg-amber-900/60'
+                            : 'border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700'
                         }`}
                       >
                         <span
                           className={`inline-block h-2 w-2 rounded-full ${
-                            sop.mandatoryRead ? 'bg-amber-600' : 'bg-slate-300'
+                            sop.mandatoryRead ? 'bg-amber-600 dark:bg-amber-400' : 'bg-slate-300 dark:bg-slate-600'
                           }`}
                         />
                         <span>{sop.mandatoryRead ? 'Mandatory' : 'Optional'}</span>
@@ -641,8 +707,8 @@ export function SopVaultView({
                       <span
                         className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap ${
                           sop.mandatoryRead
-                            ? 'border-amber-200 bg-amber-50 text-amber-800'
-                            : 'border-slate-200 bg-slate-50 text-slate-500'
+                            ? 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/50 dark:text-amber-300'
+                            : 'border-slate-200 bg-slate-50 text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400'
                         }`}
                       >
                         {sop.mandatoryRead ? 'Mandatory Read' : 'Reference'}
@@ -652,16 +718,16 @@ export function SopVaultView({
 
                   {/* Category & Title */}
                   <div className="mt-3">{renderCategoryBadge(sop.category)}</div>
-                  <h3 className="mt-2 font-display text-sm font-bold leading-snug text-slate-900 group-hover:text-indigo-700">
+                  <h3 className="mt-2 font-display text-sm font-bold leading-snug text-slate-900 group-hover:text-indigo-700 dark:text-slate-100 dark:group-hover:text-indigo-400">
                     {sop.title}
                   </h3>
-                  <p className="mt-1.5 line-clamp-2 text-xs leading-relaxed text-slate-600">
+                  <p className="mt-1.5 line-clamp-2 text-xs leading-relaxed text-slate-600 dark:text-slate-400">
                     {sop.purpose}
                   </p>
 
                   {/* Dept & Effective Date */}
-                  <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500">
-                    <span className="font-semibold text-slate-700">{sop.department}</span>
+                  <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400">
+                    <span className="font-semibold text-slate-700 dark:text-slate-300">{sop.department}</span>
                     <span aria-hidden="true">·</span>
                     <span className="tabular-nums">Effective {formatShortDate(sop.effectiveDate)}</span>
                     <span aria-hidden="true">·</span>
@@ -670,12 +736,12 @@ export function SopVaultView({
                 </div>
 
                 {/* Compliance Progress Bar & User Sign-Off Footer */}
-                <div className="mt-4 border-t border-slate-100 pt-3.5">
+                <div className="mt-4 border-t border-slate-100 pt-3.5 dark:border-slate-800">
                   <div className="flex items-center justify-between gap-2 text-xs">
-                    <span className="font-semibold text-slate-700 tabular-nums">
+                    <span className="font-semibold text-slate-700 tabular-nums dark:text-slate-300">
                       {compliance.percent}% Team Acknowledged
                     </span>
-                    <span className="font-mono text-[11px] text-slate-500 tabular-nums">
+                    <span className="font-mono text-[11px] text-slate-500 tabular-nums dark:text-slate-400">
                       {compliance.acknowledgedCount}/{compliance.totalCount} staff
                     </span>
                   </div>
@@ -683,12 +749,12 @@ export function SopVaultView({
 
                   <div className="mt-3 flex items-center justify-between gap-2">
                     {myAck ? (
-                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700">
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
                         <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
                         <span>Acknowledged</span>
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700">
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700 dark:text-amber-400">
                         <Clock className="h-3.5 w-3.5 shrink-0" />
                         <span>
                           {sop.mandatoryRead ? 'Sign-Off Required' : 'Pending Review'}
@@ -696,7 +762,7 @@ export function SopVaultView({
                       </span>
                     )}
 
-                    <span className="text-xs font-semibold text-indigo-600 group-hover:text-indigo-700 whitespace-nowrap">
+                    <span className="text-xs font-semibold text-indigo-600 group-hover:text-indigo-700 whitespace-nowrap dark:text-indigo-400 dark:group-hover:text-indigo-300">
                       Read &amp; Sign →
                     </span>
                   </div>
@@ -707,11 +773,11 @@ export function SopVaultView({
         </div>
       ) : (
         /* Table View */
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
           <div className="overflow-x-auto">
             <table className="w-full min-w-[1040px] border-collapse text-left text-sm">
               <thead>
-                <tr className="border-b border-slate-200 bg-slate-50/80 text-xs font-semibold text-slate-500">
+                <tr className="border-b border-slate-200 bg-slate-50/80 text-xs font-semibold text-slate-500 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-400">
                   <th className="py-3 pr-3 pl-5">Doc Code</th>
                   <th className="px-3 py-3">Document Title &amp; Category</th>
                   <th className="px-3 py-3">Version</th>
@@ -722,7 +788,7 @@ export function SopVaultView({
                   <th className="py-3 pr-5 pl-3 text-right">Sign-Off</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {filteredSops.map((sop) => {
                   const compliance = computeSopCompliance(sop, teamMembers);
                   const myAck = sop.acknowledgments.find((ack) =>
@@ -732,27 +798,30 @@ export function SopVaultView({
                     <tr
                       key={sop.id}
                       onClick={() => setReaderSopId(sop.id)}
-                      className="cursor-pointer transition-colors hover:bg-slate-50/80"
+                      className="cursor-pointer transition-colors hover:bg-slate-50/80 dark:hover:bg-slate-800/50"
                     >
-                      <td className="py-3.5 pr-3 pl-5 font-mono text-xs font-bold text-indigo-700 tabular-nums whitespace-nowrap">
+                      <td className="py-3.5 pr-3 pl-5 font-mono text-xs font-bold text-indigo-700 tabular-nums whitespace-nowrap dark:text-indigo-400">
                         {sop.code}
                       </td>
                       <td className="px-3 py-3.5">
-                        <p className="font-semibold text-slate-900">{sop.title}</p>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <p className="font-semibold text-slate-900 dark:text-slate-100">{sop.title}</p>
+                          {pendingSopEditIds.has(sop.id) && <PendingApprovalBadge compact />}
+                        </div>
                         <div className="mt-1 flex items-center gap-2">
                           {renderCategoryBadge(sop.category)}
-                          <span className="text-[11px] text-slate-500">
+                          <span className="text-[11px] text-slate-500 dark:text-slate-400">
                             Author: {sop.authorName}
                           </span>
                         </div>
                       </td>
-                      <td className="px-3 py-3.5 font-mono text-xs font-semibold text-slate-700 tabular-nums whitespace-nowrap">
+                      <td className="px-3 py-3.5 font-mono text-xs font-semibold text-slate-700 tabular-nums whitespace-nowrap dark:text-slate-300">
                         {sop.version}
                       </td>
-                      <td className="px-3 py-3.5 text-xs font-medium text-slate-700 whitespace-nowrap">
+                      <td className="px-3 py-3.5 text-xs font-medium text-slate-700 whitespace-nowrap dark:text-slate-300">
                         {sop.department}
                       </td>
-                      <td className="px-3 py-3.5 font-mono text-xs text-slate-600 tabular-nums whitespace-nowrap">
+                      <td className="px-3 py-3.5 font-mono text-xs text-slate-600 tabular-nums whitespace-nowrap dark:text-slate-400">
                         {formatShortDate(sop.effectiveDate)}
                       </td>
                       <td
@@ -767,29 +836,29 @@ export function SopVaultView({
                             onClick={() => onToggleMandatory(sop.id)}
                             className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-semibold transition-colors ${
                               sop.mandatoryRead
-                                ? 'border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100'
-                                : 'border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100'
+                                ? 'border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100 dark:border-amber-900/60 dark:bg-amber-950/50 dark:text-amber-300 dark:hover:bg-amber-900/60'
+                                : 'border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700'
                             }`}
                           >
                             <span
                               className={`inline-block h-2 w-2 rounded-full ${
-                                sop.mandatoryRead ? 'bg-amber-600' : 'bg-slate-300'
+                                sop.mandatoryRead ? 'bg-amber-600 dark:bg-amber-400' : 'bg-slate-300 dark:bg-slate-600'
                               }`}
                             />
                             <span>{sop.mandatoryRead ? 'Mandatory' : 'Optional'}</span>
                           </button>
                         ) : (
-                          <span className="text-xs font-medium text-slate-600">
+                          <span className="text-xs font-medium text-slate-600 dark:text-slate-400">
                             {sop.mandatoryRead ? 'Mandatory' : 'Optional'}
                           </span>
                         )}
                       </td>
                       <td className="px-3 py-3.5 min-w-[170px]">
                         <div className="flex items-center justify-between gap-2 text-[11px]">
-                          <span className="font-semibold text-slate-800 tabular-nums">
+                          <span className="font-semibold text-slate-800 tabular-nums dark:text-slate-200">
                             {compliance.percent}% Acknowledged
                           </span>
-                          <span className="font-mono text-slate-500 tabular-nums">
+                          <span className="font-mono text-slate-500 tabular-nums dark:text-slate-400">
                             {compliance.acknowledgedCount}/{compliance.totalCount}
                           </span>
                         </div>
@@ -804,8 +873,8 @@ export function SopVaultView({
                           }}
                           className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors ${
                             myAck
-                              ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                              : 'border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100'
+                              ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-900/60 dark:bg-emerald-950/50 dark:text-emerald-300 dark:hover:bg-emerald-900/60'
+                              : 'border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 dark:border-indigo-900/60 dark:bg-indigo-950/50 dark:text-indigo-300 dark:hover:bg-indigo-900/60'
                           }`}
                         >
                           {myAck ? (
@@ -833,7 +902,7 @@ export function SopVaultView({
       {/* SOP Reader & Employee Compliance Sign-Off Modal */}
       {activeReaderSop && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs sm:p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs sm:p-4 dark:bg-slate-950/75"
           role="dialog"
           aria-modal="true"
           aria-labelledby="sop-reader-title"
@@ -844,23 +913,23 @@ export function SopVaultView({
               matchesMemberAck(ack, currentUser),
             );
             return (
-              <div className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+              <div className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900">
                 {/* Modal Header */}
-                <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-4 py-3.5 sm:gap-4 sm:px-6 sm:py-4">
+                <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-4 py-3.5 sm:gap-4 sm:px-6 sm:py-4 dark:border-slate-800">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded-md border border-indigo-200 bg-indigo-50 px-2 py-0.5 font-mono text-xs font-bold text-indigo-700 tabular-nums">
+                      <span className="rounded-md border border-indigo-200 bg-indigo-50 px-2 py-0.5 font-mono text-xs font-bold text-indigo-700 tabular-nums dark:border-indigo-800/60 dark:bg-indigo-950/60 dark:text-indigo-300">
                         {activeReaderSop.code}
                       </span>
-                      <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 font-mono text-xs font-semibold text-slate-700 tabular-nums">
+                      <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 font-mono text-xs font-semibold text-slate-700 tabular-nums dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
                         {activeReaderSop.version}
                       </span>
                       {renderCategoryBadge(activeReaderSop.category)}
                       <span
                         className={`rounded-md border px-2 py-0.5 text-[11px] font-semibold ${
                           activeReaderSop.mandatoryRead
-                            ? 'border-amber-200 bg-amber-50 text-amber-800'
-                            : 'border-slate-200 bg-slate-50 text-slate-600'
+                            ? 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/50 dark:text-amber-300'
+                            : 'border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300'
                         }`}
                       >
                         {activeReaderSop.mandatoryRead ? 'Mandatory Read' : 'Reference Policy'}
@@ -868,24 +937,24 @@ export function SopVaultView({
                     </div>
                     <h2
                       id="sop-reader-title"
-                      className="mt-2 font-display text-lg font-bold text-slate-900"
+                      className="mt-2 font-display text-lg font-bold text-slate-900 dark:text-slate-100"
                     >
                       {activeReaderSop.title}
                     </h2>
-                    <p className="mt-1 text-xs text-slate-500">
-                      Department: <strong className="text-slate-700">{activeReaderSop.department}</strong>{' '}
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      Department: <strong className="text-slate-700 dark:text-slate-200">{activeReaderSop.department}</strong>{' '}
                       · Effective Date:{' '}
-                      <strong className="font-mono text-slate-700 tabular-nums">
+                      <strong className="font-mono text-slate-700 tabular-nums dark:text-slate-200">
                         {formatShortDate(activeReaderSop.effectiveDate)}
                       </strong>{' '}
-                      · Owner: <strong className="text-slate-700">{activeReaderSop.authorName}</strong>
+                      · Owner: <strong className="text-slate-700 dark:text-slate-200">{activeReaderSop.authorName}</strong>
                     </p>
                   </div>
                   <button
                     type="button"
                     onClick={() => setReaderSopId(null)}
                     aria-label="Close SOP reader"
-                    className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                    className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
                   >
                     <X className="h-4 w-4" />
                   </button>
@@ -895,33 +964,33 @@ export function SopVaultView({
                 <div className="flex-1 space-y-5 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
                   {/* Structured SOP Sections */}
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
-                      <h3 className="text-xs font-bold tracking-wide text-indigo-700">
+                    <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-950/60">
+                      <h3 className="text-xs font-bold tracking-wide text-indigo-700 dark:text-indigo-400">
                         01. PURPOSE
                       </h3>
-                      <p className="mt-2 text-xs leading-relaxed text-slate-700">
+                      <p className="mt-2 text-xs leading-relaxed text-slate-700 dark:text-slate-300">
                         {activeReaderSop.purpose}
                       </p>
                     </section>
 
-                    <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
-                      <h3 className="text-xs font-bold tracking-wide text-indigo-700">
+                    <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-950/60">
+                      <h3 className="text-xs font-bold tracking-wide text-indigo-700 dark:text-indigo-400">
                         02. SCOPE
                       </h3>
-                      <p className="mt-2 text-xs leading-relaxed text-slate-700">
+                      <p className="mt-2 text-xs leading-relaxed text-slate-700 dark:text-slate-300">
                         {activeReaderSop.scope}
                       </p>
                     </section>
                   </div>
 
-                  <section className="rounded-xl border border-slate-200 bg-white p-4">
-                    <h3 className="text-xs font-bold tracking-wide text-slate-900">
+                  <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950/40">
+                    <h3 className="text-xs font-bold tracking-wide text-slate-900 dark:text-slate-100">
                       03. STEP-BY-STEP PROCEDURE
                     </h3>
                     <ol className="mt-3 space-y-2.5">
                       {activeReaderSop.procedureSteps.map((step, idx) => (
-                        <li key={idx} className="flex items-start gap-3 text-xs text-slate-700">
-                          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-indigo-50 font-mono text-[11px] font-bold text-indigo-700 tabular-nums">
+                        <li key={idx} className="flex items-start gap-3 text-xs text-slate-700 dark:text-slate-300">
+                          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-indigo-50 font-mono text-[11px] font-bold text-indigo-700 tabular-nums dark:bg-indigo-950/60 dark:text-indigo-300">
                             {idx + 1}
                           </span>
                           <span className="leading-relaxed">{step}</span>
@@ -930,14 +999,14 @@ export function SopVaultView({
                     </ol>
                   </section>
 
-                  <section className="rounded-xl border border-slate-200 bg-white p-4">
-                    <h3 className="text-xs font-bold tracking-wide text-slate-900">
+                  <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950/40">
+                    <h3 className="text-xs font-bold tracking-wide text-slate-900 dark:text-slate-100">
                       04. COMPLIANCE RULES &amp; GOVERNANCE CONTROLS
                     </h3>
                     <ul className="mt-3 space-y-2">
                       {activeReaderSop.complianceRules.map((rule, idx) => (
-                        <li key={idx} className="flex items-start gap-2.5 text-xs text-slate-700">
-                          <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                        <li key={idx} className="flex items-start gap-2.5 text-xs text-slate-700 dark:text-slate-300">
+                          <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
                           <span className="leading-relaxed">{rule}</span>
                         </li>
                       ))}
@@ -945,18 +1014,18 @@ export function SopVaultView({
                   </section>
 
                   {/* Team Compliance Progress & Sign-Off Tracking */}
-                  <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+                  <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-950/60">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div>
-                        <h3 className="text-xs font-bold text-slate-900">
+                        <h3 className="text-xs font-bold text-slate-900 dark:text-slate-100">
                           Compliance Acknowledgment Progress
                         </h3>
-                        <p className="mt-0.5 text-[11px] text-slate-500">
+                        <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
                           {compliance.acknowledgedCount} of {compliance.totalCount} active corporate
                           staff digitally signed off
                         </p>
                       </div>
-                      <span className="rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-mono text-xs font-bold text-emerald-700 tabular-nums">
+                      <span className="rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-mono text-xs font-bold text-emerald-700 tabular-nums dark:border-emerald-900/60 dark:bg-emerald-950/50 dark:text-emerald-300">
                         {compliance.percent}% Team Acknowledged
                       </span>
                     </div>
@@ -966,28 +1035,28 @@ export function SopVaultView({
                     {/* Detailed Employee Roster for Admins & Managers */}
                     {canManageSops && (
                       <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                        <div className="rounded-lg border border-slate-200 bg-white p-3">
-                          <p className="text-[11px] font-semibold text-emerald-700">
+                        <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">
+                          <p className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
                             Acknowledged ({activeReaderSop.acknowledgments.length})
                           </p>
                           {activeReaderSop.acknowledgments.length === 0 ? (
-                            <p className="mt-2 text-xs text-slate-400">No sign-offs recorded yet.</p>
+                            <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">No sign-offs recorded yet.</p>
                           ) : (
                             <ul className="mt-2 max-h-36 space-y-2 overflow-y-auto">
                               {activeReaderSop.acknowledgments.map((ack) => (
                                 <li
                                   key={`${ack.userId}-${ack.acknowledgedAt}`}
-                                  className="flex items-start justify-between gap-2 border-b border-slate-100 pb-1.5 last:border-b-0 last:pb-0"
+                                  className="flex items-start justify-between gap-2 border-b border-slate-100 pb-1.5 last:border-b-0 last:pb-0 dark:border-slate-800"
                                 >
                                   <div className="min-w-0">
-                                    <p className="truncate text-xs font-semibold text-slate-900">
+                                    <p className="truncate text-xs font-semibold text-slate-900 dark:text-slate-100">
                                       {ack.userName}
                                     </p>
-                                    <p className="truncate text-[10px] text-slate-500">
+                                    <p className="truncate text-[10px] text-slate-500 dark:text-slate-400">
                                       {ack.signOffTitle || ack.role} · {ack.department}
                                     </p>
                                   </div>
-                                  <span className="shrink-0 font-mono text-[10px] text-slate-500 tabular-nums">
+                                  <span className="shrink-0 font-mono text-[10px] text-slate-500 tabular-nums dark:text-slate-400">
                                     {formatDateTime(ack.acknowledgedAt)}
                                   </span>
                                 </li>
@@ -996,12 +1065,12 @@ export function SopVaultView({
                           )}
                         </div>
 
-                        <div className="rounded-lg border border-slate-200 bg-white p-3">
-                          <p className="text-[11px] font-semibold text-amber-700">
+                        <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">
+                          <p className="text-[11px] font-semibold text-amber-700 dark:text-amber-400">
                             Pending Sign-Off ({compliance.pendingMembers.length})
                           </p>
                           {compliance.pendingMembers.length === 0 ? (
-                            <p className="mt-2 text-xs text-emerald-600">
+                            <p className="mt-2 text-xs text-emerald-600 dark:text-emerald-400">
                               100% of active staff have acknowledged.
                             </p>
                           ) : (
@@ -1009,17 +1078,17 @@ export function SopVaultView({
                               {compliance.pendingMembers.map((member) => (
                                 <li
                                   key={member.id}
-                                  className="flex items-center justify-between gap-2 border-b border-slate-100 pb-1.5 last:border-b-0 last:pb-0"
+                                  className="flex items-center justify-between gap-2 border-b border-slate-100 pb-1.5 last:border-b-0 last:pb-0 dark:border-slate-800"
                                 >
                                   <div className="min-w-0">
-                                    <p className="truncate text-xs font-semibold text-slate-900">
+                                    <p className="truncate text-xs font-semibold text-slate-900 dark:text-slate-100">
                                       {member.name}
                                     </p>
-                                    <p className="truncate text-[10px] text-slate-500">
+                                    <p className="truncate text-[10px] text-slate-500 dark:text-slate-400">
                                       {member.department} · {member.role}
                                     </p>
                                   </div>
-                                  <span className="shrink-0 font-mono text-[10px] text-slate-400 tabular-nums">
+                                  <span className="shrink-0 font-mono text-[10px] text-slate-400 tabular-nums dark:text-slate-500">
                                     {member.employeeId}
                                   </span>
                                 </li>
@@ -1033,12 +1102,12 @@ export function SopVaultView({
                 </div>
 
                 {/* Modal Footer: Digital Sign-Off Action */}
-                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-4 py-3.5 sm:px-6 sm:py-4">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-4 py-3.5 sm:px-6 sm:py-4 dark:border-slate-800 dark:bg-slate-950/60">
                   <div className="min-w-0">
-                    <p className="text-xs font-semibold text-slate-900">
+                    <p className="text-xs font-semibold text-slate-900 dark:text-slate-100">
                       Signing Identity: {currentUser.name}
                     </p>
-                    <p className="text-[11px] text-slate-500">
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
                       {currentUser.signOffTitle || currentUser.title} · {currentUser.employeeId}
                     </p>
                   </div>
@@ -1047,21 +1116,21 @@ export function SopVaultView({
                     <button
                       type="button"
                       onClick={() => setReaderSopId(null)}
-                      className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                      className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                     >
                       Close
                     </button>
 
                     {myAck ? (
-                      <div className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3.5 py-2 text-xs font-semibold text-emerald-800">
-                        <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+                      <div className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3.5 py-2 text-xs font-semibold text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/50 dark:text-emerald-300">
+                        <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
                         <span>
                           Acknowledged · {formatDateTime(myAck.acknowledgedAt)}
                         </span>
                       </div>
                     ) : isViewer ? (
-                      <div className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-500">
-                        <Lock className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                      <div className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
+                        <Lock className="h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-slate-500" />
                         <span>Read-Only Access (Viewer)</span>
                       </div>
                     ) : (
@@ -1085,21 +1154,21 @@ export function SopVaultView({
       {/* Publish New SOP Modal (Admin / Manager Only) */}
       {publishOpen && canManageSops && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs sm:p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs sm:p-4 dark:bg-slate-950/75"
           role="dialog"
           aria-modal="true"
           aria-labelledby="publish-sop-title"
         >
-          <div className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
-            <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3.5 sm:px-6 sm:py-4">
+          <div className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3.5 sm:px-6 sm:py-4 dark:border-slate-800">
               <div className="min-w-0">
                 <h2
                   id="publish-sop-title"
-                  className="font-display text-base font-bold text-slate-900"
+                  className="font-display text-base font-bold text-slate-900 dark:text-slate-100"
                 >
                   Publish New SOP / Governance Policy
                 </h2>
-                <p className="mt-0.5 text-xs text-slate-500">
+                <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                   Author structured corporate guidance with optional mandatory employee sign-off
                 </p>
               </div>
@@ -1107,7 +1176,7 @@ export function SopVaultView({
                 type="button"
                 onClick={() => setPublishOpen(false)}
                 aria-label="Close publish modal"
-                className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -1120,7 +1189,7 @@ export function SopVaultView({
               {pubError && (
                 <div
                   role="alert"
-                  className="rounded-lg border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs font-medium text-rose-800"
+                  className="rounded-lg border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs font-medium text-rose-800 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300"
                 >
                   {pubError}
                 </div>
@@ -1128,8 +1197,8 @@ export function SopVaultView({
 
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <div>
-                  <label htmlFor="sop-code" className="block text-xs font-semibold text-slate-700">
-                    Document Code <span className="text-rose-600">*</span>
+                  <label htmlFor="sop-code" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Document Code <span className="text-rose-600 dark:text-rose-400">*</span>
                   </label>
                   <input
                     id="sop-code"
@@ -1140,12 +1209,12 @@ export function SopVaultView({
                       setPubError(null);
                     }}
                     placeholder="SOP-QA-02"
-                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 font-mono text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 font-mono text-sm text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
                   />
                 </div>
                 <div className="sm:col-span-2">
-                  <label htmlFor="sop-title" className="block text-xs font-semibold text-slate-700">
-                    Document Title <span className="text-rose-600">*</span>
+                  <label htmlFor="sop-title" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Document Title <span className="text-rose-600 dark:text-rose-400">*</span>
                   </label>
                   <input
                     id="sop-title"
@@ -1156,14 +1225,14 @@ export function SopVaultView({
                       setPubError(null);
                     }}
                     placeholder="e.g. Incident Post-Mortem & SLA Escalation Protocol"
-                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
                 <div className="sm:col-span-2">
-                  <label htmlFor="sop-cat" className="block text-xs font-semibold text-slate-700">
+                  <label htmlFor="sop-cat" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
                     Category
                   </label>
                   <select
@@ -1172,7 +1241,7 @@ export function SopVaultView({
                     onChange={(e) =>
                       handlePublishCategoryChange(e.target.value as SopCategory)
                     }
-                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                   >
                     {SOP_CATEGORIES.map((cat) => (
                       <option key={cat} value={cat}>
@@ -1183,7 +1252,7 @@ export function SopVaultView({
                 </div>
 
                 <div>
-                  <label htmlFor="sop-ver" className="block text-xs font-semibold text-slate-700">
+                  <label htmlFor="sop-ver" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
                     Version
                   </label>
                   <input
@@ -1192,12 +1261,12 @@ export function SopVaultView({
                     value={pubVersion}
                     onChange={(e) => setPubVersion(e.target.value)}
                     placeholder="v1.0"
-                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 font-mono text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 font-mono text-sm text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
                   />
                 </div>
 
                 <div>
-                  <label htmlFor="sop-date" className="block text-xs font-semibold text-slate-700">
+                  <label htmlFor="sop-date" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
                     Effective Date
                   </label>
                   <input
@@ -1205,21 +1274,21 @@ export function SopVaultView({
                     type="date"
                     value={pubEffectiveDate}
                     onChange={(e) => setPubEffectiveDate(e.target.value)}
-                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 font-mono text-xs text-slate-900 focus:border-indigo-500 focus:outline-none"
+                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 font-mono text-xs text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
-                  <label htmlFor="sop-dept" className="block text-xs font-semibold text-slate-700">
+                  <label htmlFor="sop-dept" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
                     Owning Department
                   </label>
                   <select
                     id="sop-dept"
                     value={pubDepartment}
                     onChange={(e) => setPubDepartment(e.target.value as Department)}
-                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                   >
                     {availableDepartments.map((dept) => (
                       <option key={dept} value={dept}>
@@ -1230,23 +1299,23 @@ export function SopVaultView({
                 </div>
 
                 <div className="flex items-end">
-                  <label className="flex h-10 w-full cursor-pointer items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3.5">
-                    <span className="text-xs font-semibold text-slate-800">
+                  <label className="flex h-10 w-full cursor-pointer items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3.5 dark:border-slate-700 dark:bg-slate-950">
+                    <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">
                       Mandatory Employee Read &amp; Sign-Off
                     </span>
                     <input
                       type="checkbox"
                       checked={pubMandatory}
                       onChange={(e) => setPubMandatory(e.target.checked)}
-                      className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                      className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-800"
                     />
                   </label>
                 </div>
               </div>
 
               <div>
-                <label htmlFor="sop-purpose" className="block text-xs font-semibold text-slate-700">
-                  1. Purpose <span className="text-rose-600">*</span>
+                <label htmlFor="sop-purpose" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  1. Purpose <span className="text-rose-600 dark:text-rose-400">*</span>
                 </label>
                 <textarea
                   id="sop-purpose"
@@ -1257,13 +1326,13 @@ export function SopVaultView({
                     setPubError(null);
                   }}
                   placeholder="Describe why this SOP or policy exists and what operational risk it mitigates..."
-                  className="mt-1.5 w-full rounded-lg border border-slate-200 p-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                  className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
                 />
               </div>
 
               <div>
-                <label htmlFor="sop-scope" className="block text-xs font-semibold text-slate-700">
-                  2. Scope <span className="text-rose-600">*</span>
+                <label htmlFor="sop-scope" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  2. Scope <span className="text-rose-600 dark:text-rose-400">*</span>
                 </label>
                 <textarea
                   id="sop-scope"
@@ -1274,16 +1343,16 @@ export function SopVaultView({
                     setPubError(null);
                   }}
                   placeholder="Specify teams, systems, vendors, or request categories governed by this document..."
-                  className="mt-1.5 w-full rounded-lg border border-slate-200 p-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                  className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
                 />
               </div>
 
               <div>
                 <div className="flex items-center justify-between">
-                  <label htmlFor="sop-steps" className="block text-xs font-semibold text-slate-700">
-                    3. Step-by-Step Procedure <span className="text-rose-600">*</span>
+                  <label htmlFor="sop-steps" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    3. Step-by-Step Procedure <span className="text-rose-600 dark:text-rose-400">*</span>
                   </label>
-                  <span className="text-[11px] text-slate-400">One step per line</span>
+                  <span className="text-[11px] text-slate-400 dark:text-slate-500">One step per line</span>
                 </div>
                 <textarea
                   id="sop-steps"
@@ -1296,16 +1365,16 @@ export function SopVaultView({
                   placeholder={
                     'Verify staging validation logs before submitting request.\nAttach asset tag or project code when applicable.\nObtain Editor / QA Reviewer sign-off prior to deployment.'
                   }
-                  className="mt-1.5 w-full rounded-lg border border-slate-200 p-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                  className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
                 />
               </div>
 
               <div>
                 <div className="flex items-center justify-between">
-                  <label htmlFor="sop-rules" className="block text-xs font-semibold text-slate-700">
-                    4. Compliance Rules <span className="text-rose-600">*</span>
+                  <label htmlFor="sop-rules" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    4. Compliance Rules <span className="text-rose-600 dark:text-rose-400">*</span>
                   </label>
-                  <span className="text-[11px] text-slate-400">One rule per line</span>
+                  <span className="text-[11px] text-slate-400 dark:text-slate-500">One rule per line</span>
                 </div>
                 <textarea
                   id="sop-rules"
@@ -1318,15 +1387,15 @@ export function SopVaultView({
                   placeholder={
                     'Zero mandatory QA gates may be bypassed without Admin override.\nAll deviations must be recorded in the NexOps audit trail.'
                   }
-                  className="mt-1.5 w-full rounded-lg border border-slate-200 p-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                  className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
                 />
               </div>
 
-              <div className="flex items-center justify-end gap-2.5 border-t border-slate-200 pt-4">
+              <div className="flex items-center justify-end gap-2.5 border-t border-slate-200 pt-4 dark:border-slate-800">
                 <button
                   type="button"
                   onClick={() => setPublishOpen(false)}
-                  className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                  className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                 >
                   Cancel
                 </button>

@@ -20,6 +20,7 @@ import {
   CurrencyCode,
   Department,
   OperationalRequest,
+  PendingEditorChange,
   ProjectStatus,
   ProjectType,
   Role,
@@ -33,12 +34,14 @@ import {
   getBudgetUtilizationPct,
   toUsdEquivalent,
 } from '../utils/storage';
-import { BudgetHealthBar } from './StatusIndicator';
+import { BudgetHealthBar, PendingApprovalBadge } from './StatusIndicator';
 
 interface ProjectsDirectoryViewProps {
   projects: CompanyProject[];
   requests: OperationalRequest[];
   activeRole: Role;
+  currentUserEmail?: string;
+  pendingEditorChanges?: PendingEditorChange[];
   departments: string[];
   teamMembers: TeamMember[];
   onCreateProject: (project: Omit<CompanyProject, 'id' | 'updatedAt'>) => void;
@@ -74,6 +77,8 @@ export function ProjectsDirectoryView({
   projects,
   requests,
   activeRole,
+  currentUserEmail,
+  pendingEditorChanges = [],
   departments,
   teamMembers,
   onCreateProject,
@@ -81,7 +86,29 @@ export function ProjectsDirectoryView({
   onDeleteProject,
   onFilterQueueByProject,
 }: ProjectsDirectoryViewProps) {
-  const canManage = activeRole === 'Admin';
+  const canManage = activeRole === 'Admin' || activeRole === 'Editor';
+
+  const pendingProjectEditIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const chg of pendingEditorChanges) {
+      if (chg.status === 'pending' && chg.module === 'projects' && chg.action !== 'create') {
+        set.add(chg.targetId);
+      }
+    }
+    return set;
+  }, [pendingEditorChanges]);
+
+  const pendingCreatedProjects = useMemo(() => {
+    if (!canManage) return [];
+    const emailLower = (currentUserEmail ?? '').toLowerCase();
+    return pendingEditorChanges.filter(
+      (chg) =>
+        chg.status === 'pending' &&
+        chg.module === 'projects' &&
+        chg.action === 'create' &&
+        (activeRole === 'Admin' || chg.editorEmail.toLowerCase() === emailLower),
+    );
+  }, [pendingEditorChanges, activeRole, currentUserEmail, canManage]);
 
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
   const [searchQuery, setSearchQuery] = useState('');
@@ -267,7 +294,7 @@ export function ProjectsDirectoryView({
   const renderStatusBadge = (s: ProjectStatus) => {
     if (s === 'Active') {
       return (
-        <span className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700 whitespace-nowrap">
+        <span className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700 whitespace-nowrap dark:border-emerald-900/60 dark:bg-emerald-950/50 dark:text-emerald-300">
           <CheckCircle2 className="h-3 w-3 shrink-0" />
           <span>Active</span>
         </span>
@@ -275,14 +302,14 @@ export function ProjectsDirectoryView({
     }
     if (s === 'On Hold') {
       return (
-        <span className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800 whitespace-nowrap">
+        <span className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800 whitespace-nowrap dark:border-amber-900/60 dark:bg-amber-950/50 dark:text-amber-300">
           <PauseCircle className="h-3 w-3 shrink-0" />
           <span>On Hold</span>
         </span>
       );
     }
     return (
-      <span className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700 whitespace-nowrap">
+      <span className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700 whitespace-nowrap dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
         <Clock className="h-3 w-3 shrink-0" />
         <span>Completed</span>
       </span>
@@ -293,51 +320,51 @@ export function ProjectsDirectoryView({
     <div className="space-y-6">
       {/* Summary KPI Cards */}
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <div className="rounded-xl border border-slate-200 bg-white p-5">
+        <div className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-500">Registered Engagements</span>
-            <FolderKanban className="h-4 w-4 text-indigo-600" />
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Registered Engagements</span>
+            <FolderKanban className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
           </div>
-          <p className="mt-2 font-display text-2xl font-bold text-slate-900 tabular-nums">
+          <p className="mt-2 font-display text-2xl font-bold text-slate-900 tabular-nums dark:text-slate-100">
             {projects.length}
           </p>
-          <p className="mt-1 text-xs text-slate-500">Projects, clients &amp; vendor programs</p>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Projects, clients &amp; vendor programs</p>
         </div>
 
-        <div className="rounded-xl border border-slate-200 bg-white p-5">
+        <div className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-500">Active Programs</span>
-            <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Active Programs</span>
+            <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
           </div>
-          <p className="mt-2 font-display text-2xl font-bold text-emerald-700 tabular-nums">
+          <p className="mt-2 font-display text-2xl font-bold text-emerald-700 tabular-nums dark:text-emerald-400">
             {activeCount}
           </p>
-          <p className="mt-1 text-xs text-slate-500">Available for request linking</p>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Available for request linking</p>
         </div>
 
-        <div className="rounded-xl border border-slate-200 bg-white p-5">
+        <div className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-500">On Hold / Completed</span>
-            <Briefcase className="h-4 w-4 text-amber-600" />
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">On Hold / Completed</span>
+            <Briefcase className="h-4 w-4 text-amber-600 dark:text-amber-400" />
           </div>
-          <p className="mt-2 font-display text-2xl font-bold text-slate-900 tabular-nums">
+          <p className="mt-2 font-display text-2xl font-bold text-slate-900 tabular-nums dark:text-slate-100">
             {onHoldOrCompletedCount}
           </p>
-          <p className="mt-1 text-xs text-slate-500">Paused or archived engagements</p>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Paused or archived engagements</p>
         </div>
 
-        <div className="rounded-xl border border-slate-200 bg-white p-5">
+        <div className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-500">Portfolio Budget Utilization</span>
-            <Wallet className="h-4 w-4 text-indigo-600" />
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Portfolio Budget Utilization</span>
+            <Wallet className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
           </div>
           <div className="mt-2 flex items-baseline justify-between gap-2">
-            <p className="font-display text-2xl font-bold text-slate-900 tabular-nums">
+            <p className="font-display text-2xl font-bold text-slate-900 tabular-nums dark:text-slate-100">
               {financialRollup.utilPct}%
             </p>
             <span
               className={`font-mono text-[11px] font-semibold tabular-nums ${
-                financialRollup.overBudgetCount > 0 ? 'text-rose-700' : 'text-emerald-700'
+                financialRollup.overBudgetCount > 0 ? 'text-rose-700 dark:text-rose-400' : 'text-emerald-700 dark:text-emerald-400'
               }`}
             >
               {financialRollup.overBudgetCount > 0
@@ -345,7 +372,7 @@ export function ProjectsDirectoryView({
                 : 'Within budget'}
             </span>
           </div>
-          <p className="mt-1 font-mono text-[11px] text-slate-500 tabular-nums">
+          <p className="mt-1 font-mono text-[11px] text-slate-500 tabular-nums dark:text-slate-400">
             {formatCurrency(financialRollup.totalSpendUsd, 'USD')} /{' '}
             {formatCurrency(financialRollup.totalEstUsd, 'USD')} eq.
           </p>
@@ -354,8 +381,8 @@ export function ProjectsDirectoryView({
 
       {/* Role Notice for Staff */}
       {!canManage && (
-        <div className="flex items-center gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">
-          <ShieldAlert className="h-4 w-4 shrink-0 text-amber-600" />
+        <div className="flex items-center gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/50 dark:text-amber-200">
+          <ShieldAlert className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
           <span>
             Viewing directory in read-only mode as <strong>{activeRole}</strong>.{' '}
             <strong>Admin</strong> or <strong>Editor</strong> permissions are required to add,
@@ -365,11 +392,11 @@ export function ProjectsDirectoryView({
       )}
 
       {/* Toolbar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
         <div className="flex flex-1 flex-wrap items-center gap-3">
           <div className="relative min-w-[240px] flex-1">
             <Search
-              className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400"
+              className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-slate-500"
               aria-hidden="true"
             />
             <input
@@ -377,12 +404,12 @@ export function ProjectsDirectoryView({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search Project Code (PRJ-101), Client Name, Lead Manager..."
-              className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50 pr-3 pl-9 text-sm text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:bg-white focus:outline-none"
+              className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50 pr-3 pl-9 text-sm text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:bg-white focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:bg-slate-950"
             />
           </div>
 
           <div
-            className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-0.5"
+            className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-0.5 dark:border-slate-700 dark:bg-slate-950"
             role="tablist"
             aria-label="Filter projects by status"
           >
@@ -397,8 +424,8 @@ export function ProjectsDirectoryView({
                   onClick={() => setStatusFilter(st)}
                   className={`rounded-md px-2.5 py-1 text-xs font-semibold transition-colors whitespace-nowrap ${
                     active
-                      ? 'bg-slate-900 text-white'
-                      : 'text-slate-600 hover:bg-white hover:text-slate-900'
+                      ? 'bg-slate-900 text-white dark:bg-indigo-600'
+                      : 'text-slate-600 hover:bg-white hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100'
                   }`}
                 >
                   {st}
@@ -407,7 +434,7 @@ export function ProjectsDirectoryView({
             })}
           </div>
           <div
-            className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-100 p-0.5"
+            className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-100 p-0.5 dark:border-slate-700 dark:bg-slate-950"
             role="group"
             aria-label="Projects layout switcher"
           >
@@ -417,8 +444,8 @@ export function ProjectsDirectoryView({
               onClick={() => setViewMode('cards')}
               className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold transition-colors whitespace-nowrap ${
                 viewMode === 'cards'
-                  ? 'bg-white text-slate-900 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
+                  ? 'bg-white text-slate-900 shadow-xs dark:bg-slate-800 dark:text-slate-100'
+                  : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100'
               }`}
             >
               <LayoutGrid className="h-3.5 w-3.5" />
@@ -430,8 +457,8 @@ export function ProjectsDirectoryView({
               onClick={() => setViewMode('table')}
               className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold transition-colors whitespace-nowrap ${
                 viewMode === 'table'
-                  ? 'bg-white text-slate-900 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
+                  ? 'bg-white text-slate-900 shadow-xs dark:bg-slate-800 dark:text-slate-100'
+                  : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100'
               }`}
             >
               <Table2 className="h-3.5 w-3.5" />
@@ -452,13 +479,46 @@ export function ProjectsDirectoryView({
         )}
       </div>
 
+      {/* Pending Maker-Checker Project Proposals */}
+      {pendingCreatedProjects.length > 0 && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-4 dark:border-amber-800/70 dark:bg-amber-950/30">
+          <div className="flex flex-wrap items-center gap-2">
+            <PendingApprovalBadge label={`${pendingCreatedProjects.length} Pending Super Admin Approval`} />
+            <span className="text-xs font-semibold text-amber-950 dark:text-amber-200">
+              New Project / Client Submissions Awaiting Maker-Checker Review
+            </span>
+          </div>
+          <div className="mt-3 grid grid-cols-1 gap-2.5 md:grid-cols-2">
+            {pendingCreatedProjects.map((chg) => (
+              <div
+                key={chg.id}
+                className="flex items-start justify-between gap-3 rounded-lg border border-amber-200/90 bg-white px-3.5 py-2.5 dark:border-amber-900/60 dark:bg-slate-900"
+              >
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="font-mono text-[11px] font-bold text-indigo-700 dark:text-indigo-400">
+                      {chg.itemLabel}
+                    </span>
+                    <PendingApprovalBadge compact />
+                  </div>
+                  <p className="mt-0.5 text-[11px] text-slate-600 dark:text-slate-300">{chg.summary}</p>
+                  <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                    By {chg.editorName} ({chg.editorDepartment}) · {formatDateTime(chg.submittedAt)}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Directory Display: Cards Grid OR Table View */}
       {filteredProjects.length === 0 ? (
-        <div className="rounded-xl border border-slate-200 bg-white px-6 py-16 text-center">
-          <p className="font-display text-sm font-semibold text-slate-900">
+        <div className="rounded-xl border border-slate-200 bg-white px-6 py-16 text-center dark:border-slate-800 dark:bg-slate-900">
+          <p className="font-display text-sm font-semibold text-slate-900 dark:text-slate-100">
             No projects or clients match your search
           </p>
-          <p className="mt-1 text-xs text-slate-500">
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
             Adjust your status filter or register a new corporate project or vendor program.
           </p>
         </div>
@@ -476,23 +536,24 @@ export function ProjectsDirectoryView({
             return (
               <article
                 key={proj.id}
-                className="flex flex-col justify-between rounded-xl border border-slate-200 bg-white p-5 transition-colors hover:border-slate-300"
+                className="flex flex-col justify-between rounded-xl border border-slate-200 bg-white p-5 transition-colors hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700"
               >
                 <div>
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-mono text-xs font-bold text-indigo-700 tabular-nums">
+                        <span className="font-mono text-xs font-bold text-indigo-700 tabular-nums dark:text-indigo-400">
                           {proj.code}
                         </span>
-                        <span className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-slate-600">
+                        <span className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
                           {cur}
                         </span>
-                        <span className="text-[11px] font-medium text-slate-500">
+                        <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
                           {proj.type}
                         </span>
+                        {pendingProjectEditIds.has(proj.id) && <PendingApprovalBadge compact />}
                       </div>
-                      <h3 className="mt-1.5 font-display text-sm font-bold text-slate-900">
+                      <h3 className="mt-1.5 font-display text-sm font-bold text-slate-900 dark:text-slate-100">
                         {proj.name}
                       </h3>
                     </div>
@@ -506,7 +567,7 @@ export function ProjectsDirectoryView({
                             status: e.target.value as ProjectStatus,
                           })
                         }
-                        className="h-7 shrink-0 rounded-md border border-slate-200 bg-white px-2 text-[11px] font-semibold text-slate-800 focus:border-indigo-500 focus:outline-none"
+                        className="h-7 shrink-0 rounded-md border border-slate-200 bg-white px-2 text-[11px] font-semibold text-slate-800 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                       >
                         {PROJECT_STATUSES.map((st) => (
                           <option key={st} value={st}>
@@ -519,14 +580,14 @@ export function ProjectsDirectoryView({
                     )}
                   </div>
 
-                  <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-600">
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-600 dark:text-slate-400">
                     <div>
-                      <span className="text-[11px] text-slate-400">Lead Manager</span>
-                      <p className="font-semibold text-slate-800">{proj.leadManager}</p>
+                      <span className="text-[11px] text-slate-400 dark:text-slate-500">Lead Manager</span>
+                      <p className="font-semibold text-slate-800 dark:text-slate-200">{proj.leadManager}</p>
                     </div>
                     <div>
-                      <span className="text-[11px] text-slate-400">Department · Hours</span>
-                      <p className="font-semibold text-slate-800">
+                      <span className="text-[11px] text-slate-400 dark:text-slate-500">Department · Hours</span>
+                      <p className="font-semibold text-slate-800 dark:text-slate-200">
                         {proj.department} ·{' '}
                         <span className="font-mono tabular-nums">
                           {proj.budgetHours.toLocaleString()}h
@@ -536,18 +597,18 @@ export function ProjectsDirectoryView({
                   </div>
 
                   {/* Cost-Center Budget Health Box */}
-                  <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50/70 p-3.5">
+                  <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50/70 p-3.5 dark:border-slate-800 dark:bg-slate-950/50">
                     <div className="flex items-center justify-between gap-2 text-[11px]">
-                      <span className="font-semibold text-slate-700">
+                      <span className="font-semibold text-slate-700 dark:text-slate-300">
                         Cost-Center Budget Utilization
                       </span>
                       <span
                         className={`font-mono font-bold tabular-nums ${
                           tone === 'rose'
-                            ? 'text-rose-700'
+                            ? 'text-rose-700 dark:text-rose-400'
                             : tone === 'amber'
-                              ? 'text-amber-800'
-                              : 'text-emerald-700'
+                              ? 'text-amber-800 dark:text-amber-400'
+                              : 'text-emerald-700 dark:text-emerald-400'
                         }`}
                       >
                         {variance >= 0
@@ -560,16 +621,16 @@ export function ProjectsDirectoryView({
                       <BudgetHealthBar utilizationPct={utilPct} />
                     </div>
 
-                    <div className="mt-2.5 flex items-center justify-between text-[11px] text-slate-600">
+                    <div className="mt-2.5 flex items-center justify-between text-[11px] text-slate-600 dark:text-slate-400">
                       <span>
                         Actual:{' '}
-                        <strong className="font-mono text-slate-900 tabular-nums">
+                        <strong className="font-mono text-slate-900 tabular-nums dark:text-slate-100">
                           {formatCurrency(spend, cur)}
                         </strong>
                       </span>
                       <span>
                         Budget:{' '}
-                        <strong className="font-mono text-slate-900 tabular-nums">
+                        <strong className="font-mono text-slate-900 tabular-nums dark:text-slate-100">
                           {formatCurrency(est, cur)}
                         </strong>
                       </span>
@@ -577,18 +638,18 @@ export function ProjectsDirectoryView({
                   </div>
                 </div>
 
-                <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3">
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
                   <div>
                     {linkedCount > 0 && onFilterQueueByProject ? (
                       <button
                         type="button"
                         onClick={() => onFilterQueueByProject(proj.code)}
-                        className="inline-flex items-center rounded-md border border-indigo-200 bg-indigo-50 px-2.5 py-1 font-mono text-xs font-semibold text-indigo-700 tabular-nums hover:bg-indigo-100"
+                        className="inline-flex items-center rounded-md border border-indigo-200 bg-indigo-50 px-2.5 py-1 font-mono text-xs font-semibold text-indigo-700 tabular-nums hover:bg-indigo-100 dark:border-indigo-900/60 dark:bg-indigo-950/50 dark:text-indigo-300 dark:hover:bg-indigo-900/60"
                       >
                         {linkedCount} linked request{linkedCount > 1 ? 's' : ''}
                       </button>
                     ) : (
-                      <span className="font-mono text-[11px] text-slate-400 tabular-nums">
+                      <span className="font-mono text-[11px] text-slate-400 tabular-nums dark:text-slate-500">
                         0 linked requests
                       </span>
                     )}
@@ -599,7 +660,7 @@ export function ProjectsDirectoryView({
                       <button
                         type="button"
                         onClick={() => openEditModal(proj)}
-                        className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 hover:text-slate-900"
+                        className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 dark:hover:text-white"
                       >
                         <Edit3 className="h-3.5 w-3.5" />
                         <span>Edit</span>
@@ -619,7 +680,7 @@ export function ProjectsDirectoryView({
                           <button
                             type="button"
                             onClick={() => setConfirmDeleteId(null)}
-                            className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                            className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
                           >
                             Cancel
                           </button>
@@ -629,7 +690,7 @@ export function ProjectsDirectoryView({
                           type="button"
                           onClick={() => setConfirmDeleteId(proj.id)}
                           aria-label={`Delete ${proj.code}`}
-                          className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-400 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
+                          className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-400 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-500 dark:hover:border-rose-900/60 dark:hover:bg-rose-950/50 dark:hover:text-rose-400"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
@@ -642,11 +703,11 @@ export function ProjectsDirectoryView({
           })}
         </div>
       ) : (
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
           <div className="overflow-x-auto">
             <table className="w-full min-w-[1040px] border-collapse text-left text-sm">
               <thead>
-                <tr className="border-b border-slate-200 bg-slate-50/80 text-xs font-semibold text-slate-500">
+                <tr className="border-b border-slate-200 bg-slate-50/80 text-xs font-semibold text-slate-500 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-400">
                   <th className="py-3 pr-3 pl-5">Project Code</th>
                   <th className="px-3 py-3">Project / Client / Vendor</th>
                   <th className="px-3 py-3">Lead &amp; Dept</th>
@@ -658,7 +719,7 @@ export function ProjectsDirectoryView({
                   {canManage && <th className="py-3 pr-5 pl-3 text-right">Actions</th>}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {filteredProjects.map((proj) => {
                   const linkedCount = getLinkedRequestsCount(proj);
                   const cur = proj.currency || 'USD';
@@ -666,19 +727,22 @@ export function ProjectsDirectoryView({
                   const spend = proj.actualSpend ?? 0;
                   const utilPct = getBudgetUtilizationPct(est, spend);
                   return (
-                    <tr key={proj.id} className="transition-colors hover:bg-slate-50/80">
-                      <td className="py-3.5 pr-3 pl-5 font-mono text-xs font-bold text-indigo-700 tabular-nums whitespace-nowrap">
+                    <tr key={proj.id} className="transition-colors hover:bg-slate-50/80 dark:hover:bg-slate-800/50">
+                      <td className="py-3.5 pr-3 pl-5 font-mono text-xs font-bold text-indigo-700 tabular-nums whitespace-nowrap dark:text-indigo-400">
                         {proj.code}
                       </td>
                       <td className="px-3 py-3.5">
-                        <p className="font-semibold text-slate-900">{proj.name}</p>
-                        <p className="mt-0.5 text-[11px] text-slate-500">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <p className="font-semibold text-slate-900 dark:text-slate-100">{proj.name}</p>
+                          {pendingProjectEditIds.has(proj.id) && <PendingApprovalBadge compact />}
+                        </div>
+                        <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
                           {proj.type} · Updated {formatDateTime(proj.updatedAt)}
                         </p>
                       </td>
                       <td className="px-3 py-3.5 whitespace-nowrap">
-                        <p className="text-xs font-medium text-slate-800">{proj.leadManager}</p>
-                        <p className="text-[11px] text-slate-500">{proj.department}</p>
+                        <p className="text-xs font-medium text-slate-800 dark:text-slate-200">{proj.leadManager}</p>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">{proj.department}</p>
                       </td>
                       <td className="px-3 py-3.5">
                         {canManage ? (
@@ -690,7 +754,7 @@ export function ProjectsDirectoryView({
                                 status: e.target.value as ProjectStatus,
                               })
                             }
-                            className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-800 focus:border-indigo-500 focus:outline-none"
+                            className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-800 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
                           >
                             {PROJECT_STATUSES.map((st) => (
                               <option key={st} value={st}>
@@ -702,14 +766,14 @@ export function ProjectsDirectoryView({
                           renderStatusBadge(proj.status)
                         )}
                       </td>
-                      <td className="px-3 py-3.5 font-mono text-xs text-slate-800 tabular-nums whitespace-nowrap">
+                      <td className="px-3 py-3.5 font-mono text-xs text-slate-800 tabular-nums whitespace-nowrap dark:text-slate-200">
                         <span className="font-semibold">{formatCurrency(spend, cur)}</span>
-                        <span className="text-slate-400"> / {formatCurrency(est, cur)}</span>
+                        <span className="text-slate-400 dark:text-slate-500"> / {formatCurrency(est, cur)}</span>
                       </td>
                       <td className="px-3 py-3.5">
                         <BudgetHealthBar utilizationPct={utilPct} />
                       </td>
-                      <td className="px-3 py-3.5 text-right font-mono text-xs font-semibold text-slate-700 tabular-nums whitespace-nowrap">
+                      <td className="px-3 py-3.5 text-right font-mono text-xs font-semibold text-slate-700 tabular-nums whitespace-nowrap dark:text-slate-300">
                         {proj.budgetHours.toLocaleString()}h
                       </td>
                       <td className="px-3 py-3.5 text-right whitespace-nowrap">
@@ -717,12 +781,12 @@ export function ProjectsDirectoryView({
                           <button
                             type="button"
                             onClick={() => onFilterQueueByProject(proj.code)}
-                            className="inline-flex items-center rounded-md border border-indigo-200 bg-indigo-50 px-2 py-0.5 font-mono text-xs font-semibold text-indigo-700 tabular-nums hover:bg-indigo-100"
+                            className="inline-flex items-center rounded-md border border-indigo-200 bg-indigo-50 px-2 py-0.5 font-mono text-xs font-semibold text-indigo-700 tabular-nums hover:bg-indigo-100 dark:border-indigo-900/60 dark:bg-indigo-950/50 dark:text-indigo-300 dark:hover:bg-indigo-900/60"
                           >
                             {linkedCount} req{linkedCount > 1 ? 's' : ''}
                           </button>
                         ) : (
-                          <span className="font-mono text-xs text-slate-400 tabular-nums">
+                          <span className="font-mono text-xs text-slate-400 tabular-nums dark:text-slate-500">
                             {linkedCount}
                           </span>
                         )}
@@ -733,7 +797,7 @@ export function ProjectsDirectoryView({
                             <button
                               type="button"
                               onClick={() => openEditModal(proj)}
-                              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 hover:text-slate-900"
+                              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 dark:hover:text-white"
                             >
                               <Edit3 className="h-3.5 w-3.5" />
                               <span>Edit</span>
@@ -753,7 +817,7 @@ export function ProjectsDirectoryView({
                                 <button
                                   type="button"
                                   onClick={() => setConfirmDeleteId(null)}
-                                  className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                                  className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
                                 >
                                   Cancel
                                 </button>
@@ -763,7 +827,7 @@ export function ProjectsDirectoryView({
                                 type="button"
                                 onClick={() => setConfirmDeleteId(proj.id)}
                                 aria-label={`Delete ${proj.code}`}
-                                className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-400 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
+                                className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-400 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400 dark:hover:border-rose-900/60 dark:hover:bg-rose-950/50 dark:hover:text-rose-400"
                               >
                                 <Trash2 className="h-3.5 w-3.5" />
                               </button>
@@ -783,21 +847,21 @@ export function ProjectsDirectoryView({
       {/* Add / Edit Project Modal */}
       {modalOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs sm:p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs sm:p-4 dark:bg-slate-950/75"
           role="dialog"
           aria-modal="true"
           aria-labelledby="project-modal-title"
         >
-          <div className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
-            <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3.5 sm:px-6 sm:py-4">
+          <div className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3.5 sm:px-6 sm:py-4 dark:border-slate-800">
               <div className="min-w-0">
                 <h2
                   id="project-modal-title"
-                  className="font-display text-base font-bold text-slate-900"
+                  className="font-display text-base font-bold text-slate-900 dark:text-slate-100"
                 >
                   {editingProject ? `Edit ${editingProject.code}` : 'Register Project / Client'}
                 </h2>
-                <p className="mt-0.5 text-xs text-slate-500">
+                <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                   Associate operational requests and QA audits with active engagements
                 </p>
               </div>
@@ -805,7 +869,7 @@ export function ProjectsDirectoryView({
                 type="button"
                 onClick={() => setModalOpen(false)}
                 aria-label="Close modal"
-                className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:text-slate-500 dark:hover:bg-slate-800 dark:hover:text-slate-200"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -815,7 +879,7 @@ export function ProjectsDirectoryView({
               {formError && (
                 <div
                   role="alert"
-                  className="rounded-lg border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs font-medium text-rose-800"
+                  className="rounded-lg border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs font-medium text-rose-800 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300"
                 >
                   {formError}
                 </div>
@@ -823,8 +887,8 @@ export function ProjectsDirectoryView({
 
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <div>
-                  <label htmlFor="prj-code" className="block text-xs font-semibold text-slate-700">
-                    Project Code <span className="text-rose-600">*</span>
+                  <label htmlFor="prj-code" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Project Code <span className="text-rose-600 dark:text-rose-400">*</span>
                   </label>
                   <input
                     id="prj-code"
@@ -835,13 +899,13 @@ export function ProjectsDirectoryView({
                       setFormError(null);
                     }}
                     placeholder="PRJ-106"
-                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 font-mono text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 font-mono text-sm text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
                   />
                 </div>
 
                 <div className="sm:col-span-2">
-                  <label htmlFor="prj-name" className="block text-xs font-semibold text-slate-700">
-                    Project / Client / Vendor Name <span className="text-rose-600">*</span>
+                  <label htmlFor="prj-name" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Project / Client / Vendor Name <span className="text-rose-600 dark:text-rose-400">*</span>
                   </label>
                   <input
                     id="prj-name"
@@ -852,21 +916,21 @@ export function ProjectsDirectoryView({
                       setFormError(null);
                     }}
                     placeholder="e.g. Northstar Enterprise Cloud Migration"
-                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
-                  <label htmlFor="prj-type" className="block text-xs font-semibold text-slate-700">
+                  <label htmlFor="prj-type" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
                     Engagement Type
                   </label>
                   <select
                     id="prj-type"
                     value={type}
                     onChange={(e) => setType(e.target.value as ProjectType)}
-                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                   >
                     {PROJECT_TYPES.map((t) => (
                       <option key={t} value={t}>
@@ -877,14 +941,14 @@ export function ProjectsDirectoryView({
                 </div>
 
                 <div>
-                  <label htmlFor="prj-dept" className="block text-xs font-semibold text-slate-700">
+                  <label htmlFor="prj-dept" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
                     Primary Department
                   </label>
                   <select
                     id="prj-dept"
                     value={department}
                     onChange={(e) => setDepartment(e.target.value as Department)}
-                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                   >
                     {availableDepartments.map((d) => (
                       <option key={d} value={d}>
@@ -895,8 +959,8 @@ export function ProjectsDirectoryView({
                 </div>
 
                 <div>
-                  <label htmlFor="prj-lead" className="block text-xs font-semibold text-slate-700">
-                    Lead Manager <span className="text-rose-600">*</span>
+                  <label htmlFor="prj-lead" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Lead Manager <span className="text-rose-600 dark:text-rose-400">*</span>
                   </label>
                   <input
                     id="prj-lead"
@@ -908,7 +972,7 @@ export function ProjectsDirectoryView({
                       setFormError(null);
                     }}
                     placeholder="Select or enter lead manager name"
-                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
                   />
                   <datalist id="nexops-lead-managers">
                     {availableManagers.map((m) => (
@@ -918,14 +982,14 @@ export function ProjectsDirectoryView({
                 </div>
 
                 <div>
-                  <label htmlFor="prj-status" className="block text-xs font-semibold text-slate-700">
+                  <label htmlFor="prj-status" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
                     Status
                   </label>
                   <select
                     id="prj-status"
                     value={status}
                     onChange={(e) => setStatus(e.target.value as ProjectStatus)}
-                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                   >
                     {PROJECT_STATUSES.map((st) => (
                       <option key={st} value={st}>
@@ -938,14 +1002,14 @@ export function ProjectsDirectoryView({
 
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <div>
-                  <label htmlFor="prj-currency" className="block text-xs font-semibold text-slate-700">
+                  <label htmlFor="prj-currency" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
                     Cost-Center Currency
                   </label>
                   <select
                     id="prj-currency"
                     value={currency}
                     onChange={(e) => setCurrency(e.target.value as CurrencyCode)}
-                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 font-mono text-sm font-semibold text-slate-900 focus:border-indigo-500 focus:outline-none"
+                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 font-mono text-sm font-semibold text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                   >
                     {SUPPORTED_CURRENCIES.map((cur) => (
                       <option key={cur} value={cur}>
@@ -956,7 +1020,7 @@ export function ProjectsDirectoryView({
                 </div>
 
                 <div>
-                  <label htmlFor="prj-budget" className="block text-xs font-semibold text-slate-700">
+                  <label htmlFor="prj-budget" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
                     Estimated Budget ({currency})
                   </label>
                   <input
@@ -969,12 +1033,12 @@ export function ProjectsDirectoryView({
                       setEstimatedBudget(e.target.value);
                       setFormError(null);
                     }}
-                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 font-mono text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 font-mono text-sm text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                   />
                 </div>
 
                 <div>
-                  <label htmlFor="prj-spend" className="block text-xs font-semibold text-slate-700">
+                  <label htmlFor="prj-spend" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
                     Actual Spend ({currency})
                   </label>
                   <input
@@ -987,13 +1051,13 @@ export function ProjectsDirectoryView({
                       setActualSpend(e.target.value);
                       setFormError(null);
                     }}
-                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 font-mono text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 font-mono text-sm text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                   />
                 </div>
               </div>
 
               <div>
-                <label htmlFor="prj-hours" className="block text-xs font-semibold text-slate-700">
+                <label htmlFor="prj-hours" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
                   Allocated Target Hours
                 </label>
                 <input
@@ -1006,15 +1070,15 @@ export function ProjectsDirectoryView({
                     setBudgetHours(e.target.value);
                     setFormError(null);
                   }}
-                  className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 font-mono text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                  className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 font-mono text-sm text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                 />
               </div>
 
-              <div className="flex items-center justify-end gap-2.5 border-t border-slate-200 pt-4">
+              <div className="flex items-center justify-end gap-2.5 border-t border-slate-200 pt-4 dark:border-slate-800">
                 <button
                   type="button"
                   onClick={() => setModalOpen(false)}
-                  className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                  className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                 >
                   Cancel
                 </button>
@@ -1022,7 +1086,11 @@ export function ProjectsDirectoryView({
                   type="submit"
                   className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-700"
                 >
-                  {editingProject ? 'Save Changes' : 'Save Project'}
+                  {activeRole === 'Editor'
+                    ? 'Submit for Approval'
+                    : editingProject
+                      ? 'Save Changes'
+                      : 'Save Project'}
                 </button>
               </div>
             </form>

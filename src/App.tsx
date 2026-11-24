@@ -42,12 +42,17 @@ import {
   DEFAULT_SLA_POLICY,
   Department,
   DocumentVaultItem,
+  EditorChangePayload,
   LeaveRequest,
   MeetingActionItem,
   MeetingMinute,
   NavSection,
   NexOpsState,
   OperationalRequest,
+  PendingEditorChange,
+  PendingEditorChangeAction,
+  PendingEditorChangeDiff,
+  PendingEditorChangeModule,
   PermissionMatrix,
   Priority,
   RequestStatus,
@@ -85,6 +90,7 @@ import {
   isAssetAlert,
   isSuperAdminEmail,
   normalizePermissionMatrix,
+  normalizeRole,
   requiresTwoTierApproval,
   resolveEffectiveReviewer,
 } from './utils/storage';
@@ -107,6 +113,22 @@ export default function App() {
     }
   });
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('nexops_theme_v1') === 'dark';
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      document.documentElement.classList.toggle('dark', isDarkMode);
+      localStorage.setItem('nexops_theme_v1', isDarkMode ? 'dark' : 'light');
+    } catch {
+      // Ignore storage restrictions
+    }
+  }, [isDarkMode]);
 
   // Queue filters & search
   const [searchQuery, setSearchQuery] = useState('');
@@ -121,6 +143,7 @@ export default function App() {
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [templateSource, setTemplateSource] = useState<OperationalRequest | null>(null);
+  const [editingRequest, setEditingRequest] = useState<OperationalRequest | null>(null);
   const [reportModalState, setReportModalState] = useState<{
     open: boolean;
     requestId: string | null;
@@ -561,6 +584,11 @@ export default function App() {
           (m.approvalStatus ?? (m.active ? 'approved' : 'pending')) === 'pending',
       ).length,
     [state.teamMembers],
+  );
+
+  const pendingEditorChangesCount = useMemo(
+    () => state.pendingEditorChanges.filter((c) => c.status === 'pending').length,
+    [state.pendingEditorChanges],
   );
 
   useEffect(() => {
@@ -1660,6 +1688,7 @@ export default function App() {
     setCreateModalOpen(false);
     setImportModalOpen(false);
     setTemplateSource(null);
+    setEditingRequest(null);
     setProfileModalOpen(false);
     setReportModalState({ open: false, requestId: null });
     setMobileMenuOpen(false);
@@ -1716,23 +1745,107 @@ export default function App() {
     setActiveSection('requests');
   };
 
-  // Open Create Modal fresh or from template
+  // Maker-Checker Governance Helper for Editor Role
+  const submitEditorChangeProposal = (params: {
+    module: PendingEditorChangeModule;
+    moduleLabel: string;
+    action: PendingEditorChangeAction;
+    targetId: string;
+    itemLabel: string;
+    summary: string;
+    diffs: PendingEditorChangeDiff[];
+    payload: EditorChangePayload;
+  }) => {
+    const now = new Date().toISOString();
+    const changeId = `chg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const pendingChange: PendingEditorChange = {
+      id: changeId,
+      module: params.module,
+      moduleLabel: params.moduleLabel,
+      action: params.action,
+      targetId: params.targetId,
+      itemLabel: params.itemLabel,
+      summary: params.summary,
+      diffs: params.diffs,
+      editorId: currentUser.id,
+      editorName: currentUser.name,
+      editorEmail: currentUser.email,
+      editorDepartment: currentUser.department,
+      submittedAt: now,
+      status: 'pending',
+      payload: params.payload,
+    };
+
+    const adminNotif: AppNotification = {
+      id: `notif-ed-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      title: `Editor Approval Needed · ${params.moduleLabel}`,
+      message: `${currentUser.name} proposed: ${params.summary}`,
+      timestamp: now,
+      read: false,
+      targetSection: 'settings',
+      recipientRole: 'Admin',
+      actorEmail: currentUser.email,
+      category: 'editor_approval',
+      severity: 'warning',
+    };
+
+    const auditEntry = createAuditEvent(
+      params.targetId || params.module.toUpperCase(),
+      'Team Updated',
+      `[Maker-Checker Pending] Editor ${currentUser.name} (${currentUser.email}) submitted ${params.action} proposal in ${params.moduleLabel}: ${params.summary}`,
+    );
+
+    const nextPendingChanges = [pendingChange, ...state.pendingEditorChanges];
+    setState((prev) => ({
+      ...prev,
+      pendingEditorChanges: [pendingChange, ...prev.pendingEditorChanges],
+      notifications: [adminNotif, ...prev.notifications],
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+    }));
+
+    void Promise.all([
+      dataService.editorChanges.saveAll(nextPendingChanges, currentUser.name, auditEntry),
+      dataService.notifications.create(adminNotif),
+    ])
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      })
+      .catch(handleCloudWriteError);
+
+    pushToast(
+      'Submitted!',
+      'Your edit has been sent to the Super Admin for approval.',
+      'info',
+    );
+  };
+
+  // Open Create / Edit Modal fresh, from template, or in Edit mode
   const handleOpenBlankCreateModal = () => {
-    if (currentUser.role !== 'Admin') return;
+    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    setEditingRequest(null);
     setTemplateSource(null);
     setCreateModalOpen(true);
   };
 
   const handleDuplicateRequest = (req: OperationalRequest) => {
-    if (currentUser.role !== 'Admin') return;
+    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
     setSelectedRequestId(null);
+    setEditingRequest(null);
     setTemplateSource(req);
     setCreateModalOpen(true);
   };
 
-  // Create new request
+  const handleOpenEditRequestModal = (req: OperationalRequest) => {
+    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    setSelectedRequestId(null);
+    setTemplateSource(null);
+    setEditingRequest(req);
+    setCreateModalOpen(true);
+  };
+
+  // Create new request (Admin direct or Editor Maker-Checker)
   const handleCreateRequest = (payload: CreateRequestPayload) => {
-    if (currentUser.role !== 'Admin') return;
+    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
     const now = new Date().toISOString();
     const newId = generateNextRequestId(state.requests);
     const initialStatus: RequestStatus = payload.submitImmediately ? 'Submitted' : 'Draft';
@@ -1793,6 +1906,42 @@ export default function App() {
       })),
       auditTrail: [auditEntry],
     };
+
+    if (currentUser.role === 'Editor') {
+      submitEditorChangeProposal({
+        module: 'requests',
+        moduleLabel: 'Operational Requests',
+        action: 'create',
+        targetId: newId,
+        itemLabel: `${newId} · ${payload.title}`,
+        summary: `Create operational request "${payload.title}" (${payload.department}, Priority: ${payload.priority}, Status: ${initialStatus})`,
+        diffs: [
+          { field: 'Title', before: '— (New Request)', after: payload.title },
+          { field: 'Department', before: '—', after: payload.department },
+          { field: 'Category', before: '—', after: payload.category },
+          { field: 'Priority', before: '—', after: payload.priority },
+          { field: 'Due Date', before: '—', after: payload.dueDate },
+          ...(payload.estimatedCost > 0
+            ? [
+                {
+                  field: 'Estimated Budget',
+                  before: '—',
+                  after: formatCurrency(payload.estimatedCost, payload.currency),
+                },
+              ]
+            : []),
+        ],
+        payload: {
+          op: 'request_create',
+          request: newRequest,
+        },
+      });
+      setCreateModalOpen(false);
+      setTemplateSource(null);
+      setEditingRequest(null);
+      setActiveSection('requests');
+      return;
+    }
 
     const reviewerMember = state.teamMembers.find(
       (m) => m.name.trim().toLowerCase() === reviewerResolution.assignedReviewer.trim().toLowerCase(),
@@ -1866,6 +2015,7 @@ export default function App() {
 
     setCreateModalOpen(false);
     setTemplateSource(null);
+    setEditingRequest(null);
     setActiveSection('requests');
     setSelectedRequestId(newId);
     pushToast(
@@ -1875,11 +2025,211 @@ export default function App() {
     );
   };
 
-  // Delete operational request
-  const handleDeleteRequest = (requestId: string) => {
-    if (currentUser.role !== 'Admin') return;
+  // Edit existing operational request (Admin direct or Editor Maker-Checker)
+  const handleEditRequest = (requestId: string, payload: CreateRequestPayload) => {
+    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
     const target = state.requests.find((r) => r.id === requestId);
     if (!target) return;
+
+    const nextChecklist = payload.checklist.map((item, idx) => {
+      const existing = target.checklist.find(
+        (c) => c.label.trim().toLowerCase() === item.label.trim().toLowerCase(),
+      );
+      return (
+        existing ?? {
+          id: `chk-${requestId}-${Date.now()}-${idx + 1}`,
+          label: item.label,
+          mandatory: item.mandatory,
+          checked: false,
+        }
+      );
+    });
+
+    const diffs: PendingEditorChangeDiff[] = [];
+    if (target.title !== payload.title) {
+      diffs.push({ field: 'Title', before: target.title, after: payload.title });
+    }
+    if (target.category !== payload.category) {
+      diffs.push({ field: 'Category', before: target.category, after: payload.category });
+    }
+    if (target.department !== payload.department) {
+      diffs.push({ field: 'Department', before: target.department, after: payload.department });
+    }
+    if (target.priority !== payload.priority) {
+      diffs.push({ field: 'Priority', before: target.priority, after: payload.priority });
+    }
+    if (target.dueDate !== payload.dueDate) {
+      diffs.push({ field: 'Due Date', before: target.dueDate, after: payload.dueDate });
+    }
+    if (target.description !== payload.description) {
+      diffs.push({
+        field: 'Description',
+        before: target.description.slice(0, 80) || '—',
+        after: payload.description.slice(0, 80) || '—',
+      });
+    }
+    if ((target.deliverableUrl || '') !== (payload.deliverableUrl || '')) {
+      diffs.push({
+        field: 'Deliverable URL',
+        before: target.deliverableUrl || '—',
+        after: payload.deliverableUrl || '—',
+      });
+    }
+    if ((target.projectCode || '') !== (payload.projectCode || '')) {
+      diffs.push({
+        field: 'Linked Project',
+        before: target.projectCode || 'None',
+        after: payload.projectCode || 'None',
+      });
+    }
+    if ((target.assetTag || '') !== (payload.assetTag || '')) {
+      diffs.push({
+        field: 'Linked Asset',
+        before: target.assetTag || 'None',
+        after: payload.assetTag || 'None',
+      });
+    }
+    if ((target.currency || 'USD') !== payload.currency) {
+      diffs.push({
+        field: 'Currency',
+        before: target.currency || 'USD',
+        after: payload.currency,
+      });
+    }
+    if ((target.estimatedCost ?? 0) !== payload.estimatedCost) {
+      diffs.push({
+        field: 'Estimated Budget',
+        before: formatCurrency(target.estimatedCost ?? 0, target.currency || 'USD'),
+        after: formatCurrency(payload.estimatedCost, payload.currency),
+      });
+    }
+    if ((target.actualSpend ?? 0) !== payload.actualSpend) {
+      diffs.push({
+        field: 'Actual Spend',
+        before: formatCurrency(target.actualSpend ?? 0, target.currency || 'USD'),
+        after: formatCurrency(payload.actualSpend, payload.currency),
+      });
+    }
+    const prevChecklistSig = target.checklist.map((c) => `${c.label}:${c.mandatory}`).join('|');
+    const nextChecklistSig = nextChecklist.map((c) => `${c.label}:${c.mandatory}`).join('|');
+    if (prevChecklistSig !== nextChecklistSig) {
+      diffs.push({
+        field: 'QA Checklist Gates',
+        before: `${target.checklist.length} gates`,
+        after: `${nextChecklist.length} gates`,
+      });
+    }
+
+    if (diffs.length === 0) {
+      setCreateModalOpen(false);
+      setEditingRequest(null);
+      pushToast('No Changes Detected', `${requestId} details remain unchanged.`, 'info');
+      return;
+    }
+
+    const patch = {
+      title: payload.title,
+      category: payload.category,
+      department: payload.department,
+      priority: payload.priority,
+      dueDate: payload.dueDate,
+      description: payload.description,
+      deliverableUrl: payload.deliverableUrl,
+      projectId: payload.projectId,
+      projectCode: payload.projectCode,
+      projectName: payload.projectName,
+      assetId: payload.assetId,
+      assetTag: payload.assetTag,
+      assetName: payload.assetName,
+      currency: payload.currency,
+      estimatedCost: payload.estimatedCost,
+      actualSpend: payload.actualSpend,
+      checklist: nextChecklist,
+    };
+
+    if (currentUser.role === 'Editor') {
+      submitEditorChangeProposal({
+        module: 'requests',
+        moduleLabel: 'Operational Requests',
+        action: 'update',
+        targetId: requestId,
+        itemLabel: `${requestId} · ${target.title}`,
+        summary: `Edit ${requestId} (${diffs.map((d) => d.field).join(', ')})`,
+        diffs,
+        payload: {
+          op: 'request_update',
+          requestId,
+          patch,
+        },
+      });
+      setCreateModalOpen(false);
+      setEditingRequest(null);
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const auditEntry = createAuditEvent(
+      requestId,
+      'Comment Added',
+      `Updated request ${requestId} fields (${diffs.map((d) => d.field).join(', ')}).`,
+    );
+    const updatedRequest: OperationalRequest = {
+      ...target,
+      ...patch,
+      updatedAt: now,
+      auditTrail: [...target.auditTrail, auditEntry],
+    };
+
+    setState((prev) => ({
+      ...prev,
+      requests: prev.requests.map((r) => (r.id === requestId ? updatedRequest : r)),
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+    }));
+
+    void dataService.requests
+      .updateContent(updatedRequest, auditEntry)
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      })
+      .catch(handleCloudWriteError);
+
+    setCreateModalOpen(false);
+    setEditingRequest(null);
+    setSelectedRequestId(requestId);
+    pushToast(`Updated ${requestId}`, `Saved ${diffs.length} field update(s).`, 'success');
+  };
+
+  // Delete operational request
+  const handleDeleteRequest = (requestId: string) => {
+    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    const target = state.requests.find((r) => r.id === requestId);
+    if (!target) return;
+
+    if (currentUser.role === 'Editor') {
+      submitEditorChangeProposal({
+        module: 'requests',
+        moduleLabel: 'Operational Requests',
+        action: 'delete',
+        targetId: requestId,
+        itemLabel: `${requestId} · ${target.title}`,
+        summary: `Delete operational request ${requestId} ("${target.title}")`,
+        diffs: [
+          {
+            field: 'Record Status',
+            before: `${target.status} (${target.department})`,
+            after: 'Delete Requested',
+          },
+        ],
+        payload: {
+          op: 'request_delete',
+          requestId,
+        },
+      });
+      if (selectedRequestId === requestId) {
+        setSelectedRequestId(null);
+      }
+      return;
+    }
 
     const auditEntry = createAuditEvent(
       requestId,
@@ -1911,15 +2261,42 @@ export default function App() {
 
   // Toggle QA checklist item
   const handleToggleChecklistItem = (requestId: string, itemId: string) => {
-    if (currentUser.role !== 'Admin') return;
+    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
     const target = state.requests.find((r) => r.id === requestId);
     if (!target) return;
     const item = target.checklist.find((c) => c.id === itemId);
     if (!item) return;
 
-    const now = new Date().toISOString();
     const toggledLabel = item.label;
     const nextChecked = !item.checked;
+
+    if (currentUser.role === 'Editor') {
+      submitEditorChangeProposal({
+        module: 'requests',
+        moduleLabel: 'Operational Requests',
+        action: 'update',
+        targetId: requestId,
+        itemLabel: `${requestId} · QA Gate`,
+        summary: `${nextChecked ? 'Verify' : 'Uncheck'} QA gate "${toggledLabel}" on ${requestId}`,
+        diffs: [
+          {
+            field: `QA Gate: ${toggledLabel}`,
+            before: item.checked ? 'Verified' : 'Unchecked',
+            after: nextChecked ? 'Verified' : 'Unchecked',
+          },
+        ],
+        payload: {
+          op: 'request_toggle_checklist',
+          requestId,
+          itemId,
+          nextChecked,
+          label: toggledLabel,
+        },
+      });
+      return;
+    }
+
+    const now = new Date().toISOString();
     const verifier = getActorForRole(state.activeRole, state.teamMembers);
 
     const updatedChecklist = target.checklist.map((chk) =>
@@ -2034,11 +2411,36 @@ export default function App() {
 
   // Update Cost-Center Actual Spend on an individual request
   const handleUpdateRequestFinancials = (requestId: string, actualSpend: number) => {
-    if (currentUser.role !== 'Admin') return;
+    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
     const target = state.requests.find((r) => r.id === requestId);
     if (!target) return;
-    const now = new Date().toISOString();
     const cur = target.currency || 'USD';
+
+    if (currentUser.role === 'Editor') {
+      submitEditorChangeProposal({
+        module: 'requests',
+        moduleLabel: 'Operational Requests',
+        action: 'update',
+        targetId: requestId,
+        itemLabel: `${requestId} · Financials`,
+        summary: `Update actual spend on ${requestId} to ${formatCurrency(actualSpend, cur)}`,
+        diffs: [
+          {
+            field: 'Actual Spend',
+            before: formatCurrency(target.actualSpend ?? 0, cur),
+            after: formatCurrency(actualSpend, cur),
+          },
+        ],
+        payload: {
+          op: 'request_update_financials',
+          requestId,
+          actualSpend,
+        },
+      });
+      return;
+    }
+
+    const now = new Date().toISOString();
     const auditEntry = createAuditEvent(
       requestId,
       'Comment Added',
@@ -2291,7 +2693,26 @@ export default function App() {
 
   // Add comment to audit trail
   const handleAddComment = (requestId: string, comment: string) => {
-    if (currentUser.role !== 'Admin') return;
+    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    if (currentUser.role === 'Editor') {
+      const target = state.requests.find((r) => r.id === requestId);
+      submitEditorChangeProposal({
+        module: 'requests',
+        moduleLabel: 'Operational Requests',
+        action: 'update',
+        targetId: requestId,
+        itemLabel: `${requestId} · Audit Note`,
+        summary: `Add audit note to ${requestId}: "${comment.slice(0, 80)}${comment.length > 80 ? '...' : ''}"`,
+        diffs: [{ field: 'Audit Trail Note', before: '—', after: comment }],
+        payload: {
+          op: 'request_add_comment',
+          requestId,
+          comment,
+        },
+      });
+      if (target) return;
+      return;
+    }
     const now = new Date().toISOString();
     setState((prev) => {
       const auditEntry = createAuditEvent(
@@ -2380,13 +2801,41 @@ export default function App() {
   const handleCreateProject = (
     projectInput: Omit<CompanyProject, 'id' | 'updatedAt'>,
   ) => {
-    if (currentUser.role !== 'Admin') return;
+    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
     const now = new Date().toISOString();
     const newProject: CompanyProject = {
       ...projectInput,
       id: `prj-${Date.now()}`,
       updatedAt: now,
     };
+
+    if (currentUser.role === 'Editor') {
+      submitEditorChangeProposal({
+        module: 'projects',
+        moduleLabel: 'Projects & Clients',
+        action: 'create',
+        targetId: newProject.id,
+        itemLabel: `${newProject.code} · ${newProject.name}`,
+        summary: `Register ${newProject.type} ${newProject.code} ("${newProject.name}")`,
+        diffs: [
+          { field: 'Project Code', before: '— (New Project)', after: newProject.code },
+          { field: 'Name', before: '—', after: newProject.name },
+          { field: 'Department', before: '—', after: newProject.department },
+          { field: 'Lead Manager', before: '—', after: newProject.leadManager },
+          {
+            field: 'Estimated Budget',
+            before: '—',
+            after: formatCurrency(newProject.estimatedBudget, newProject.currency),
+          },
+        ],
+        payload: {
+          op: 'project_create',
+          project: newProject,
+        },
+      });
+      return;
+    }
+
     const auditEntry = createAuditEvent(
       'PRJ-DIRECTORY',
       'Team Updated',
@@ -2414,9 +2863,65 @@ export default function App() {
     projectId: string,
     patch: Partial<Omit<CompanyProject, 'id' | 'updatedAt'>>,
   ) => {
-    if (currentUser.role !== 'Admin') return;
+    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
     const target = state.projects.find((p) => p.id === projectId);
     if (!target) return;
+
+    if (currentUser.role === 'Editor') {
+      const diffs: PendingEditorChangeDiff[] = [];
+      if (patch.name !== undefined && patch.name !== target.name) {
+        diffs.push({ field: 'Project Name', before: target.name, after: patch.name });
+      }
+      if (patch.status !== undefined && patch.status !== target.status) {
+        diffs.push({ field: 'Status', before: target.status, after: patch.status });
+      }
+      if (patch.leadManager !== undefined && patch.leadManager !== target.leadManager) {
+        diffs.push({ field: 'Lead Manager', before: target.leadManager, after: patch.leadManager });
+      }
+      if (patch.department !== undefined && patch.department !== target.department) {
+        diffs.push({ field: 'Department', before: target.department, after: patch.department });
+      }
+      if (patch.budgetHours !== undefined && patch.budgetHours !== target.budgetHours) {
+        diffs.push({
+          field: 'Budget Hours',
+          before: `${target.budgetHours}h`,
+          after: `${patch.budgetHours}h`,
+        });
+      }
+      if (patch.estimatedBudget !== undefined && patch.estimatedBudget !== target.estimatedBudget) {
+        diffs.push({
+          field: 'Estimated Budget',
+          before: formatCurrency(target.estimatedBudget, target.currency),
+          after: formatCurrency(patch.estimatedBudget, patch.currency ?? target.currency),
+        });
+      }
+      if (patch.actualSpend !== undefined && patch.actualSpend !== target.actualSpend) {
+        diffs.push({
+          field: 'Actual Spend',
+          before: formatCurrency(target.actualSpend, target.currency),
+          after: formatCurrency(patch.actualSpend, patch.currency ?? target.currency),
+        });
+      }
+      if (diffs.length === 0) {
+        diffs.push({ field: 'Project Record', before: target.status, after: patch.status ?? target.status });
+      }
+      submitEditorChangeProposal({
+        module: 'projects',
+        moduleLabel: 'Projects & Clients',
+        action: 'update',
+        targetId: projectId,
+        itemLabel: `${target.code} · ${target.name}`,
+        summary: `Update project ${target.code} (${diffs.map((d) => d.field).join(', ')})`,
+        diffs,
+        payload: {
+          op: 'project_update',
+          projectId,
+          patch,
+        },
+      });
+      return;
+    }
+
     const now = new Date().toISOString();
     const updatedProject: CompanyProject = {
       ...target,
@@ -2456,9 +2961,33 @@ export default function App() {
   };
 
   const handleDeleteProject = (projectId: string) => {
-    if (currentUser.role !== 'Admin') return;
+    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
     const target = state.projects.find((p) => p.id === projectId);
     if (!target) return;
+
+    if (currentUser.role === 'Editor') {
+      submitEditorChangeProposal({
+        module: 'projects',
+        moduleLabel: 'Projects & Clients',
+        action: 'delete',
+        targetId: projectId,
+        itemLabel: `${target.code} · ${target.name}`,
+        summary: `Delete project ${target.code} ("${target.name}")`,
+        diffs: [
+          {
+            field: 'Project Status',
+            before: `${target.status} (${target.department})`,
+            after: 'Delete Requested',
+          },
+        ],
+        payload: {
+          op: 'project_delete',
+          projectId,
+        },
+      });
+      return;
+    }
+
     const auditEntry = createAuditEvent(
       'PRJ-DIRECTORY',
       'Team Updated',
@@ -2482,7 +3011,7 @@ export default function App() {
   const handleRegisterAsset = (
     assetInput: Omit<CompanyAsset, 'id' | 'updatedAt' | 'history'>,
   ) => {
-    if (currentUser.role !== 'Admin') return;
+    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
     const now = new Date().toISOString();
     const actor = getActorForRole(state.activeRole, state.teamMembers);
     const initialHistory: AssetHistoryEntry = {
@@ -2498,6 +3027,30 @@ export default function App() {
       updatedAt: now,
       history: [initialHistory],
     };
+
+    if (currentUser.role === 'Editor') {
+      submitEditorChangeProposal({
+        module: 'assets',
+        moduleLabel: 'Assets & Inventory',
+        action: 'create',
+        targetId: newAsset.id,
+        itemLabel: `${newAsset.tag} · ${newAsset.name}`,
+        summary: `Register asset ${newAsset.tag} ("${newAsset.name}", ${newAsset.category})`,
+        diffs: [
+          { field: 'Asset Tag', before: '— (New Asset)', after: newAsset.tag },
+          { field: 'Name', before: '—', after: newAsset.name },
+          { field: 'Category', before: '—', after: newAsset.category },
+          { field: 'Assigned To', before: '—', after: newAsset.assignedTo || 'Inventory' },
+          { field: 'Status', before: '—', after: `${newAsset.status} (${newAsset.condition})` },
+        ],
+        payload: {
+          op: 'asset_create',
+          asset: newAsset,
+        },
+      });
+      return;
+    }
+
     const auditEntry = createAuditEvent(
       newAsset.tag,
       'Team Updated',
@@ -2532,9 +3085,44 @@ export default function App() {
       notes?: string;
     },
   ) => {
-    if (currentUser.role !== 'Admin') return;
+    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
     const target = state.assets.find((a) => a.id === assetId);
     if (!target) return;
+
+    if (currentUser.role === 'Editor') {
+      const diffs: PendingEditorChangeDiff[] = [];
+      if (target.assignedTo !== payload.assignedTo) {
+        diffs.push({ field: 'Custodian', before: target.assignedTo, after: payload.assignedTo });
+      }
+      if (target.department !== payload.department) {
+        diffs.push({ field: 'Department', before: target.department, after: payload.department });
+      }
+      if (target.status !== payload.status) {
+        diffs.push({ field: 'Status', before: target.status, after: payload.status });
+      }
+      if (target.condition !== payload.condition) {
+        diffs.push({ field: 'Condition', before: target.condition, after: payload.condition });
+      }
+      if (payload.notes) {
+        diffs.push({ field: 'Transfer Notes', before: '—', after: payload.notes });
+      }
+      submitEditorChangeProposal({
+        module: 'assets',
+        moduleLabel: 'Assets & Inventory',
+        action: 'update',
+        targetId: assetId,
+        itemLabel: `${target.tag} · ${target.name}`,
+        summary: `Transfer/update custody for ${target.tag} to ${payload.assignedTo} (${payload.status})`,
+        diffs: diffs.length > 0 ? diffs : [{ field: 'Custodian', before: target.assignedTo, after: payload.assignedTo }],
+        payload: {
+          op: 'asset_transfer',
+          assetId,
+          patch: payload,
+        },
+      });
+      return;
+    }
+
     const now = new Date().toISOString();
     const actor = getActorForRole(state.activeRole, state.teamMembers);
     const noteSuffix = payload.notes ? ` Note: ${payload.notes}` : '';
@@ -2590,9 +3178,32 @@ export default function App() {
       notes: string;
     },
   ) => {
-    if (currentUser.role !== 'Admin') return;
+    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
     const target = state.assets.find((a) => a.id === assetId);
     if (!target) return;
+
+    if (currentUser.role === 'Editor') {
+      submitEditorChangeProposal({
+        module: 'assets',
+        moduleLabel: 'Assets & Inventory',
+        action: 'update',
+        targetId: assetId,
+        itemLabel: `${target.tag} · ${target.name}`,
+        summary: `Log maintenance on ${target.tag} (${payload.status}, ${payload.condition})`,
+        diffs: [
+          { field: 'Status', before: target.status, after: payload.status },
+          { field: 'Condition', before: target.condition, after: payload.condition },
+          { field: 'Maintenance Notes', before: '—', after: payload.notes },
+        ],
+        payload: {
+          op: 'asset_maintenance',
+          assetId,
+          patch: payload,
+        },
+      });
+      return;
+    }
+
     const now = new Date().toISOString();
     const actor = getActorForRole(state.activeRole, state.teamMembers);
     const detailMsg = `Maintenance log (${payload.status} · Condition: ${payload.condition}): ${payload.notes}`;
@@ -2641,7 +3252,7 @@ export default function App() {
   const handlePublishSop = (
     sopInput: Omit<SopDocument, 'id' | 'acknowledgments' | 'updatedAt'>,
   ) => {
-    if (currentUser.role !== 'Admin') return;
+    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
     const now = new Date().toISOString();
     const newSop: SopDocument = {
       ...sopInput,
@@ -2649,6 +3260,29 @@ export default function App() {
       acknowledgments: [],
       updatedAt: now,
     };
+
+    if (currentUser.role === 'Editor') {
+      submitEditorChangeProposal({
+        module: 'sops',
+        moduleLabel: 'SOP & Policy Vault',
+        action: 'create',
+        targetId: newSop.id,
+        itemLabel: `${newSop.code} · ${newSop.title}`,
+        summary: `Publish ${newSop.category} ${newSop.code} ${newSop.version} ("${newSop.title}")`,
+        diffs: [
+          { field: 'SOP Code', before: '— (New Policy)', after: `${newSop.code} (${newSop.version})` },
+          { field: 'Title', before: '—', after: newSop.title },
+          { field: 'Department', before: '—', after: newSop.department },
+          { field: 'Mandatory Read', before: '—', after: newSop.mandatoryRead ? 'Yes' : 'No' },
+        ],
+        payload: {
+          op: 'sop_create',
+          sop: newSop,
+        },
+      });
+      return;
+    }
+
     const auditEntry = createAuditEvent(
       newSop.code,
       'Team Updated',
@@ -2674,11 +3308,36 @@ export default function App() {
   };
 
   const handleToggleSopMandatory = (sopId: string) => {
-    if (currentUser.role !== 'Admin') return;
+    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
     const target = state.sops.find((s) => s.id === sopId);
     if (!target) return;
-    const now = new Date().toISOString();
     const nextMandatory = !target.mandatoryRead;
+
+    if (currentUser.role === 'Editor') {
+      submitEditorChangeProposal({
+        module: 'sops',
+        moduleLabel: 'SOP & Policy Vault',
+        action: 'update',
+        targetId: sopId,
+        itemLabel: `${target.code} · ${target.title}`,
+        summary: `Set ${target.code} read policy to ${nextMandatory ? 'Mandatory Read' : 'Optional Reference'}`,
+        diffs: [
+          {
+            field: 'Mandatory Read',
+            before: target.mandatoryRead ? 'Mandatory Read' : 'Optional Reference',
+            after: nextMandatory ? 'Mandatory Read' : 'Optional Reference',
+          },
+        ],
+        payload: {
+          op: 'sop_toggle_mandatory',
+          sopId,
+          nextMandatory,
+        },
+      });
+      return;
+    }
+
+    const now = new Date().toISOString();
     const auditEntry = createAuditEvent(
       target.code,
       'Team Updated',
@@ -2712,7 +3371,7 @@ export default function App() {
   };
 
   const handleAcknowledgeSop = (sopId: string) => {
-    if (currentUser.role !== 'Admin') return;
+    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
     const target = state.sops.find((s) => s.id === sopId);
     if (!target) return;
 
@@ -3191,7 +3850,7 @@ export default function App() {
     const prevMembers = state.teamMembers;
     const prevAudits = state.globalAuditLogs;
     const isSuper = isSuperAdminEmail(cleanEmail);
-    const effectiveRole: Role = isSuper ? 'Admin' : payload.role === 'Admin' ? 'Admin' : 'Viewer';
+    const effectiveRole: Role = isSuper ? 'Admin' : normalizeRole(payload.role);
     const now = new Date().toISOString();
     const localExisting = prevMembers.find(
       (m) => m.email.trim().toLowerCase() === cleanEmail,
@@ -3216,7 +3875,9 @@ export default function App() {
           ? 'Primary Super Administrator'
           : effectiveRole === 'Admin'
             ? 'Operations Administrator'
-            : 'Workspace Viewer',
+            : effectiveRole === 'Editor'
+              ? 'Operations Editor'
+              : 'Workspace Viewer',
       signOffTitle: localExisting?.signOffTitle || currentUser.signOffTitle,
       avatarUrl: localExisting?.avatarUrl,
       active: true,
@@ -3846,7 +4507,7 @@ export default function App() {
 
   // Meetings & Action Items (MoM) Tracker Handlers
   const handleCreateMeeting = (payload: CreateMeetingPayload) => {
-    if (currentUser.role !== 'Admin') return;
+    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
     const now = new Date().toISOString();
     const maxNum = state.meetings.reduce((max, m) => {
       const match = m.code.match(/^MOM-\d{4}-(\d+)$/);
@@ -3875,6 +4536,29 @@ export default function App() {
       createdAt: now,
       updatedAt: now,
     };
+
+    if (currentUser.role === 'Editor') {
+      submitEditorChangeProposal({
+        module: 'meetings',
+        moduleLabel: 'Meetings & MoM',
+        action: 'create',
+        targetId: newMeeting.id,
+        itemLabel: `${code} · ${payload.title}`,
+        summary: `Log Meeting Minutes ${code} ("${payload.title}", ${newMeeting.actionItems.length} action items)`,
+        diffs: [
+          { field: 'MoM Code', before: '— (New Meeting)', after: code },
+          { field: 'Title', before: '—', after: payload.title },
+          { field: 'Department', before: '—', after: payload.department },
+          { field: 'Meeting Date', before: '—', after: payload.meetingDate },
+          { field: 'Action Items', before: '—', after: `${newMeeting.actionItems.length} item(s)` },
+        ],
+        payload: {
+          op: 'meeting_create',
+          meeting: newMeeting,
+        },
+      });
+      return;
+    }
 
     const auditEntry = createAuditEvent(
       code,
@@ -3906,7 +4590,7 @@ export default function App() {
       dueDate: string;
     },
   ) => {
-    if (currentUser.role !== 'Admin') return;
+    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
     const meeting = state.meetings.find((m) => m.id === meetingId);
     if (!meeting) return;
     const newAction: MeetingActionItem = {
@@ -3918,6 +4602,29 @@ export default function App() {
       dueDate: item.dueDate,
       status: 'Open',
     };
+
+    if (currentUser.role === 'Editor') {
+      submitEditorChangeProposal({
+        module: 'meetings',
+        moduleLabel: 'Meetings & MoM',
+        action: 'update',
+        targetId: meetingId,
+        itemLabel: `${meeting.code} · New Action Item`,
+        summary: `Add action item to ${meeting.code}: "${item.description}" (Owner: ${item.ownerName})`,
+        diffs: [
+          { field: 'Action Item', before: '—', after: item.description },
+          { field: 'Owner', before: '—', after: item.ownerName },
+          { field: 'Priority / Due', before: '—', after: `${item.priority} · ${item.dueDate}` },
+        ],
+        payload: {
+          op: 'meeting_add_action',
+          meetingId,
+          actionItem: newAction,
+        },
+      });
+      return;
+    }
+
     const auditEntry = createAuditEvent(
       meeting.code,
       'Team Updated',
@@ -3944,10 +4651,31 @@ export default function App() {
   };
 
   const handleConvertActionToRequest = (meetingId: string, actionItemId: string) => {
-    if (currentUser.role !== 'Admin') return;
+    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
     const meeting = state.meetings.find((m) => m.id === meetingId);
     const actionItem = meeting?.actionItems.find((a) => a.id === actionItemId);
     if (!meeting || !actionItem || actionItem.linkedRequestId) return;
+
+    if (currentUser.role === 'Editor') {
+      submitEditorChangeProposal({
+        module: 'meetings',
+        moduleLabel: 'Meetings & MoM',
+        action: 'update',
+        targetId: meetingId,
+        itemLabel: `${meeting.code} · Convert Action`,
+        summary: `Convert ${meeting.code} action item "${actionItem.description}" into an operational request`,
+        diffs: [
+          { field: 'Action Status', before: actionItem.status, after: 'Converted to Request' },
+          { field: 'Action Description', before: actionItem.description, after: `${actionItem.description} (Owner: ${actionItem.ownerName})` },
+        ],
+        payload: {
+          op: 'meeting_convert_action',
+          meetingId,
+          actionItemId,
+        },
+      });
+      return;
+    }
 
     const now = new Date().toISOString();
     const newId = generateNextRequestId(state.requests);
@@ -4041,10 +4769,34 @@ export default function App() {
   };
 
   const handleCompleteMeetingActionItem = (meetingId: string, actionItemId: string) => {
-    if (currentUser.role !== 'Admin') return;
+    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
     const meeting = state.meetings.find((m) => m.id === meetingId);
     const actionItem = meeting?.actionItems.find((a) => a.id === actionItemId);
     if (!meeting || !actionItem) return;
+
+    if (currentUser.role === 'Editor') {
+      submitEditorChangeProposal({
+        module: 'meetings',
+        moduleLabel: 'Meetings & MoM',
+        action: 'update',
+        targetId: meetingId,
+        itemLabel: `${meeting.code} · Complete Action`,
+        summary: `Mark MoM action item completed in ${meeting.code}: "${actionItem.description}"`,
+        diffs: [
+          {
+            field: actionItem.description,
+            before: actionItem.status,
+            after: 'Completed',
+          },
+        ],
+        payload: {
+          op: 'meeting_complete_action',
+          meetingId,
+          actionItemId,
+        },
+      });
+      return;
+    }
 
     const auditEntry = createAuditEvent(
       meeting.code,
@@ -4265,7 +5017,24 @@ export default function App() {
 
   // Task Sub-Tasks Checklist & Threaded Team Comments (@mentions)
   const handleAddSubtask = (requestId: string, title: string) => {
-    if (currentUser.role !== 'Admin') return;
+    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    if (currentUser.role === 'Editor') {
+      submitEditorChangeProposal({
+        module: 'requests',
+        moduleLabel: 'Operational Requests',
+        action: 'update',
+        targetId: requestId,
+        itemLabel: `${requestId} · Sub-Task`,
+        summary: `Add sub-task "${title}" to ${requestId}`,
+        diffs: [{ field: 'New Sub-Task', before: '—', after: title }],
+        payload: {
+          op: 'request_add_subtask',
+          requestId,
+          title,
+        },
+      });
+      return;
+    }
     const now = new Date().toISOString();
     const subtask: TaskSubtask = {
       id: `sub-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -4295,11 +5064,35 @@ export default function App() {
   };
 
   const handleToggleSubtask = (subtaskId: string) => {
-    if (currentUser.role !== 'Admin') return;
+    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
     const target = state.subtasks.find((s) => s.id === subtaskId);
     if (!target) return;
-    const now = new Date().toISOString();
     const nextCompleted = !target.completed;
+    if (currentUser.role === 'Editor') {
+      submitEditorChangeProposal({
+        module: 'requests',
+        moduleLabel: 'Operational Requests',
+        action: 'update',
+        targetId: target.requestId,
+        itemLabel: `${target.requestId} · Sub-Task`,
+        summary: `${nextCompleted ? 'Complete' : 'Reopen'} sub-task "${target.title}" on ${target.requestId}`,
+        diffs: [
+          {
+            field: target.title,
+            before: target.completed ? 'Completed' : 'Open',
+            after: nextCompleted ? 'Completed' : 'Open',
+          },
+        ],
+        payload: {
+          op: 'request_toggle_subtask',
+          requestId: target.requestId,
+          subtaskId,
+          nextCompleted,
+        },
+      });
+      return;
+    }
+    const now = new Date().toISOString();
     const updatedSubtask: TaskSubtask = {
       ...target,
       completed: nextCompleted,
@@ -4325,9 +5118,26 @@ export default function App() {
   };
 
   const handleDeleteSubtask = (subtaskId: string) => {
-    if (currentUser.role !== 'Admin') return;
+    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
     const target = state.subtasks.find((s) => s.id === subtaskId);
     if (!target) return;
+    if (currentUser.role === 'Editor') {
+      submitEditorChangeProposal({
+        module: 'requests',
+        moduleLabel: 'Operational Requests',
+        action: 'update',
+        targetId: target.requestId,
+        itemLabel: `${target.requestId} · Sub-Task`,
+        summary: `Remove sub-task "${target.title}" from ${target.requestId}`,
+        diffs: [{ field: 'Sub-Task', before: target.title, after: 'Delete Requested' }],
+        payload: {
+          op: 'request_delete_subtask',
+          requestId: target.requestId,
+          subtaskId,
+        },
+      });
+      return;
+    }
     const auditEntry = createAuditEvent(
       target.requestId,
       'Subtask Updated',
@@ -4347,7 +5157,25 @@ export default function App() {
   };
 
   const handleAddTaskComment = (requestId: string, body: string, mentions: string[]) => {
-    if (currentUser.role !== 'Admin') return;
+    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    if (currentUser.role === 'Editor') {
+      submitEditorChangeProposal({
+        module: 'requests',
+        moduleLabel: 'Operational Requests',
+        action: 'update',
+        targetId: requestId,
+        itemLabel: `${requestId} · Discussion Comment`,
+        summary: `Post discussion comment on ${requestId}: "${body.slice(0, 80)}${body.length > 80 ? '...' : ''}"`,
+        diffs: [{ field: 'Discussion Comment', before: '—', after: body }],
+        payload: {
+          op: 'request_add_task_comment',
+          requestId,
+          body,
+          mentions,
+        },
+      });
+      return;
+    }
     const now = new Date().toISOString();
     const comment: TaskComment = {
       id: `cmt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -4417,19 +5245,42 @@ export default function App() {
 
   // Department Document Vault Handlers
   const handleAddVaultDocument = (item: DocumentVaultItem) => {
-    if (currentUser.role !== 'Admin') return;
+    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    if (currentUser.role === 'Editor') {
+      submitEditorChangeProposal({
+        module: 'vault',
+        moduleLabel: 'Document Vault',
+        action: 'create',
+        targetId: item.id,
+        itemLabel: item.title,
+        summary: `Add document "${item.title}" to ${item.folder} (${item.accessTag}, ${item.department})`,
+        diffs: [
+          { field: 'Title', before: '— (New Document)', after: item.title },
+          { field: 'Folder', before: '—', after: item.folder },
+          { field: 'Department', before: '—', after: item.department },
+          { field: 'Access Policy', before: '—', after: item.accessTag },
+          ...(item.fileName ? [{ field: 'File Name', before: '—', after: item.fileName }] : []),
+        ],
+        payload: {
+          op: 'vault_create',
+          document: item,
+        },
+      });
+      return;
+    }
     const auditEntry = createAuditEvent(
       'DOC-VAULT',
       'Vault Updated',
       `Added "${item.title}" to ${item.folder} (${item.accessTag}, ${item.department}).`,
     );
+    const nextVaultDocs = [item, ...state.vaultDocuments];
     setState((prev) => ({
       ...prev,
       vaultDocuments: [item, ...prev.vaultDocuments],
       globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
     }));
     void dataService.documentVault
-      .upsert(item, auditEntry)
+      .upsert(item, auditEntry, nextVaultDocs)
       .then(() => {
         if (dataService.isSupabaseConfigured()) setDbConnected(true);
       })
@@ -4438,21 +5289,44 @@ export default function App() {
   };
 
   const handleDeleteVaultDocument = (itemId: string) => {
-    if (currentUser.role !== 'Admin') return;
+    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
     const target = state.vaultDocuments.find((d) => d.id === itemId);
     if (!target) return;
+    if (currentUser.role === 'Editor') {
+      submitEditorChangeProposal({
+        module: 'vault',
+        moduleLabel: 'Document Vault',
+        action: 'delete',
+        targetId: itemId,
+        itemLabel: target.title,
+        summary: `Delete document "${target.title}" from ${target.folder}`,
+        diffs: [
+          {
+            field: 'Document Record',
+            before: `${target.title} (${target.folder})`,
+            after: 'Delete Requested',
+          },
+        ],
+        payload: {
+          op: 'vault_delete',
+          documentId: itemId,
+        },
+      });
+      return;
+    }
     const auditEntry = createAuditEvent(
       'DOC-VAULT',
       'Vault Updated',
       `Removed "${target.title}" from ${target.folder}.`,
     );
+    const remainingVaultDocs = state.vaultDocuments.filter((d) => d.id !== itemId);
     setState((prev) => ({
       ...prev,
       vaultDocuments: prev.vaultDocuments.filter((d) => d.id !== itemId),
       globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
     }));
     void dataService.documentVault
-      .remove(itemId, auditEntry)
+      .remove(itemId, auditEntry, target, remainingVaultDocs)
       .then(() => {
         if (dataService.isSupabaseConfigured()) setDbConnected(true);
       })
@@ -4587,7 +5461,7 @@ export default function App() {
 
   // Bulk CSV Import
   const handleImportRequests = (rows: ImportedRequestRow[]) => {
-    if (currentUser.role !== 'Admin') return;
+    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
     if (rows.length === 0) return;
     const now = new Date().toISOString();
     const baseId = generateNextRequestId(state.requests);
@@ -4637,6 +5511,36 @@ export default function App() {
       auditEntries.push(auditEntry);
     });
 
+    if (currentUser.role === 'Editor') {
+      submitEditorChangeProposal({
+        module: 'requests',
+        moduleLabel: 'Operational Requests',
+        action: 'create',
+        targetId: newRequests[0]?.id || 'CSV-IMPORT',
+        itemLabel: `CSV Bulk Import (${newRequests.length} Requests)`,
+        summary: `Import ${newRequests.length} operational request(s) via CSV (${newRequests[0]?.id}–${newRequests[newRequests.length - 1]?.id})`,
+        diffs: [
+          {
+            field: 'Batch Size',
+            before: '— (CSV Import)',
+            after: `${newRequests.length} operational requests`,
+          },
+          ...newRequests.slice(0, 4).map((r) => ({
+            field: r.id,
+            before: '—',
+            after: `${r.title} (${r.department} · ${r.priority})`,
+          })),
+        ],
+        payload: {
+          op: 'request_bulk_import',
+          requests: newRequests,
+        },
+      });
+      setImportModalOpen(false);
+      setActiveSection('requests');
+      return;
+    }
+
     const notification: AppNotification = {
       id: `notif-${Date.now()}`,
       title: `CSV Bulk Import (${newRequests.length} Requests)`,
@@ -4667,6 +5571,588 @@ export default function App() {
       `Assigned IDs ${newRequests[0].id} through ${newRequests[newRequests.length - 1].id}.`,
       'success',
     );
+  };
+
+  // Super Admin Maker-Checker Approval & Rejection Handlers
+  const handleApproveEditorChange = (changeId: string) => {
+    if (currentUser.role !== 'Admin') {
+      pushToast('Super Admin Required', 'Only Administrators can approve Editor changes.', 'error');
+      return;
+    }
+    const chg = state.pendingEditorChanges.find((c) => c.id === changeId);
+    if (!chg || chg.status !== 'pending') return;
+
+    const now = new Date().toISOString();
+    const targetSectionMap: Record<PendingEditorChangeModule, NavSection> = {
+      requests: 'requests',
+      projects: 'projects',
+      assets: 'assets',
+      sops: 'sops',
+      vault: 'vault',
+      meetings: 'meetings',
+    };
+
+    const approvalAudit = createAuditEvent(
+      chg.targetId || chg.module.toUpperCase(),
+      'Team Updated',
+      `Approved & applied Editor proposal by ${chg.editorName} (${chg.editorEmail}) in ${chg.moduleLabel}: ${chg.summary}`,
+    );
+
+    const editorNotif: AppNotification = {
+      id: `notif-ed-app-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      title: `Edit Approved · ${chg.moduleLabel}`,
+      message: `${currentUser.name} approved and published your change: ${chg.summary}`,
+      timestamp: now,
+      read: false,
+      targetSection: targetSectionMap[chg.module],
+      recipientEmail: chg.editorEmail,
+      actorEmail: currentUser.email,
+      category: 'editor_approval',
+      severity: 'success',
+    };
+
+    const nextPendingChanges: PendingEditorChange[] = state.pendingEditorChanges.map((c) =>
+      c.id === changeId
+        ? { ...c, status: 'approved', reviewedBy: currentUser.name, reviewedAt: now }
+        : c,
+    );
+
+    let nextRequests = state.requests;
+    let nextProjects = state.projects;
+    let nextAssets = state.assets;
+    let nextSops = state.sops;
+    let nextVault = state.vaultDocuments;
+    let nextMeetings = state.meetings;
+    let nextSubtasks = state.subtasks;
+    let nextTaskComments = state.taskComments;
+    const extraNotifications: AppNotification[] = [editorNotif];
+    const cloudTasks: Promise<unknown>[] = [
+      dataService.editorChanges.saveAll(nextPendingChanges, currentUser.name, approvalAudit),
+      dataService.notifications.create(editorNotif),
+    ];
+
+    const p = chg.payload;
+    switch (p.op) {
+      case 'request_create': {
+        const collision = state.requests.some((r) => r.id === p.request.id);
+        const resolvedId = collision ? generateNextRequestId(state.requests) : p.request.id;
+        const createdReq: OperationalRequest = {
+          ...p.request,
+          id: resolvedId,
+          updatedAt: now,
+          checklist: p.request.checklist.map((c, idx) => ({
+            ...c,
+            id: collision ? `chk-${resolvedId}-${idx + 1}` : c.id,
+          })),
+          auditTrail: [...p.request.auditTrail, approvalAudit],
+        };
+        nextRequests = [createdReq, ...state.requests];
+        if (createdReq.assetId || createdReq.assetTag) {
+          const linkedAsset = state.assets.find(
+            (ast) => ast.id === createdReq.assetId || ast.tag === createdReq.assetTag,
+          );
+          if (linkedAsset) {
+            const updatedAst: CompanyAsset = {
+              ...linkedAsset,
+              updatedAt: now,
+              history: [
+                {
+                  id: `ah-req-${Date.now()}`,
+                  timestamp: now,
+                  actorName: chg.editorName,
+                  eventType: 'Request Linked',
+                  details: `Linked to ${createdReq.category} ${resolvedId} ("${createdReq.title}") — Approved by ${currentUser.name}.`,
+                  requestId: resolvedId,
+                },
+                ...linkedAsset.history,
+              ],
+            };
+            nextAssets = state.assets.map((ast) => (ast.id === updatedAst.id ? updatedAst : ast));
+            cloudTasks.push(dataService.assets.upsert(updatedAst));
+          }
+        }
+        cloudTasks.push(dataService.requests.create(createdReq, approvalAudit, null));
+        break;
+      }
+      case 'request_bulk_import': {
+        const baseId = generateNextRequestId(state.requests);
+        const idMatch = baseId.match(/^(REQ-\d{4}-)(\d+)$/);
+        const startNum = idMatch ? parseInt(idMatch[2], 10) : 1;
+        const prefix = idMatch ? idMatch[1] : 'REQ-2026-';
+        const importedReqs = p.requests.map((r, idx) => {
+          const exists = state.requests.some((ex) => ex.id === r.id);
+          const resolvedId = exists ? `${prefix}${String(startNum + idx).padStart(3, '0')}` : r.id;
+          return {
+            ...r,
+            id: resolvedId,
+            updatedAt: now,
+            checklist: r.checklist.map((c, cIdx) => ({
+              ...c,
+              id: exists ? `chk-${resolvedId}-${cIdx + 1}` : c.id,
+            })),
+            auditTrail: [...r.auditTrail, approvalAudit],
+          };
+        });
+        nextRequests = [...importedReqs, ...state.requests];
+        cloudTasks.push(dataService.requests.bulkCreate(importedReqs, [approvalAudit], null));
+        break;
+      }
+      case 'request_update': {
+        const target = state.requests.find((r) => r.id === p.requestId);
+        if (target) {
+          const updatedReq: OperationalRequest = {
+            ...target,
+            ...p.patch,
+            updatedAt: now,
+            auditTrail: [...target.auditTrail, approvalAudit],
+          };
+          nextRequests = state.requests.map((r) => (r.id === p.requestId ? updatedReq : r));
+          cloudTasks.push(dataService.requests.updateContent(updatedReq, approvalAudit));
+        }
+        break;
+      }
+      case 'request_delete': {
+        nextRequests = state.requests.filter((r) => r.id !== p.requestId);
+        nextSubtasks = state.subtasks.filter((st) => st.requestId !== p.requestId);
+        nextTaskComments = state.taskComments.filter((cmt) => cmt.requestId !== p.requestId);
+        if (selectedRequestId === p.requestId) setSelectedRequestId(null);
+        cloudTasks.push(dataService.requests.remove(p.requestId, approvalAudit));
+        break;
+      }
+      case 'request_toggle_checklist': {
+        const target = state.requests.find((r) => r.id === p.requestId);
+        if (target) {
+          const updatedChecklist = target.checklist.map((chk) =>
+            chk.id === p.itemId
+              ? {
+                  ...chk,
+                  checked: p.nextChecked,
+                  verifiedBy: p.nextChecked ? `${chg.editorName} (Approved by ${currentUser.name})` : undefined,
+                  verifiedAt: p.nextChecked ? now : undefined,
+                }
+              : chk,
+          );
+          nextRequests = state.requests.map((r) =>
+            r.id === p.requestId
+              ? { ...r, updatedAt: now, checklist: updatedChecklist, auditTrail: [...r.auditTrail, approvalAudit] }
+              : r,
+          );
+          cloudTasks.push(
+            dataService.checklists.updateRequestChecklist(
+              p.requestId,
+              updatedChecklist,
+              now,
+              approvalAudit,
+            ),
+          );
+        }
+        break;
+      }
+      case 'request_update_financials': {
+        const target = state.requests.find((r) => r.id === p.requestId);
+        if (target) {
+          nextRequests = state.requests.map((r) =>
+            r.id === p.requestId
+              ? { ...r, actualSpend: p.actualSpend, updatedAt: now, auditTrail: [...r.auditTrail, approvalAudit] }
+              : r,
+          );
+          dataService.requests.updateMetaSync(p.requestId, { actualSpend: p.actualSpend });
+          cloudTasks.push(
+            dataService.requests.syncMetaCloud(p.requestId, { actualSpend: p.actualSpend }, currentUser.name),
+          );
+        }
+        break;
+      }
+      case 'request_add_subtask': {
+        const subtask: TaskSubtask = {
+          id: `sub-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          requestId: p.requestId,
+          title: p.title,
+          completed: false,
+          createdBy: chg.editorName,
+          createdAt: now,
+        };
+        nextSubtasks = [...state.subtasks, subtask];
+        cloudTasks.push(dataService.subtasks.upsert(subtask, approvalAudit));
+        break;
+      }
+      case 'request_toggle_subtask': {
+        const target = state.subtasks.find((s) => s.id === p.subtaskId);
+        if (target) {
+          const updatedSubtask: TaskSubtask = {
+            ...target,
+            completed: p.nextCompleted,
+            completedBy: p.nextCompleted ? chg.editorName : undefined,
+            completedAt: p.nextCompleted ? now : undefined,
+          };
+          nextSubtasks = state.subtasks.map((s) => (s.id === p.subtaskId ? updatedSubtask : s));
+          cloudTasks.push(dataService.subtasks.upsert(updatedSubtask, approvalAudit));
+        }
+        break;
+      }
+      case 'request_delete_subtask': {
+        nextSubtasks = state.subtasks.filter((s) => s.id !== p.subtaskId);
+        cloudTasks.push(dataService.subtasks.remove(p.subtaskId, approvalAudit));
+        break;
+      }
+      case 'request_add_comment': {
+        nextRequests = state.requests.map((r) =>
+          r.id === p.requestId
+            ? {
+                ...r,
+                updatedAt: now,
+                auditTrail: [
+                  ...r.auditTrail,
+                  {
+                    ...approvalAudit,
+                    actionType: 'Comment Added',
+                    actorName: chg.editorName,
+                    actorEmail: chg.editorEmail,
+                    actorRole: 'Editor',
+                    details: `${p.comment} (Approved by ${currentUser.name})`,
+                  },
+                ],
+              }
+            : r,
+        );
+        break;
+      }
+      case 'request_add_task_comment': {
+        const comment: TaskComment = {
+          id: `cmt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          requestId: p.requestId,
+          authorId: chg.editorId,
+          authorName: chg.editorName,
+          authorEmail: chg.editorEmail,
+          authorRole: 'Editor',
+          body: p.body,
+          mentions: p.mentions,
+          createdAt: now,
+        };
+        nextTaskComments = [...state.taskComments, comment];
+        const uniqueMentionEmails = Array.from(
+          new Set(
+            p.mentions
+              .map((m) => m.trim().toLowerCase())
+              .filter((email) => email && email !== chg.editorEmail.trim().toLowerCase()),
+          ),
+        );
+        const mentionNotifs: AppNotification[] = uniqueMentionEmails.map((recipientEmail, idx) => ({
+          id: `notif-mnt-${Date.now()}-${idx}`,
+          title: `Mentioned in ${p.requestId}`,
+          message: `${chg.editorName} mentioned you: "${p.body.slice(0, 100)}${p.body.length > 100 ? '...' : ''}"`,
+          timestamp: now,
+          read: false,
+          requestId: p.requestId,
+          targetSection: 'requests',
+          recipientEmail,
+          actorEmail: chg.editorEmail,
+          category: 'mention',
+          severity: 'info',
+        }));
+        extraNotifications.push(...mentionNotifs);
+        cloudTasks.push(dataService.taskComments.create(comment, approvalAudit));
+        if (mentionNotifs.length > 0) {
+          cloudTasks.push(dataService.notifications.createMany(mentionNotifs));
+        }
+        break;
+      }
+      case 'project_create': {
+        const createdProject: CompanyProject = { ...p.project, updatedAt: now };
+        nextProjects = [createdProject, ...state.projects];
+        cloudTasks.push(dataService.projects.upsert(createdProject, approvalAudit));
+        break;
+      }
+      case 'project_update': {
+        const target = state.projects.find((pr) => pr.id === p.projectId);
+        if (target) {
+          const updatedProject: CompanyProject = { ...target, ...p.patch, updatedAt: now };
+          nextProjects = state.projects.map((pr) => (pr.id === p.projectId ? updatedProject : pr));
+          nextRequests = state.requests.map((r) =>
+            r.projectId === p.projectId
+              ? { ...r, projectCode: updatedProject.code, projectName: updatedProject.name }
+              : r,
+          );
+          cloudTasks.push(dataService.projects.upsert(updatedProject, approvalAudit));
+        }
+        break;
+      }
+      case 'project_delete': {
+        nextProjects = state.projects.filter((pr) => pr.id !== p.projectId);
+        cloudTasks.push(dataService.projects.remove(p.projectId, approvalAudit));
+        break;
+      }
+      case 'asset_create': {
+        const createdAsset: CompanyAsset = { ...p.asset, updatedAt: now };
+        nextAssets = [createdAsset, ...state.assets];
+        cloudTasks.push(dataService.assets.upsert(createdAsset, approvalAudit));
+        break;
+      }
+      case 'asset_transfer': {
+        const target = state.assets.find((a) => a.id === p.assetId);
+        if (target) {
+          const noteSuffix = p.patch.notes ? ` Note: ${p.patch.notes}` : '';
+          const historyEntry: AssetHistoryEntry = {
+            id: `ah-tx-${Date.now()}`,
+            timestamp: now,
+            actorName: `${chg.editorName} (Approved by ${currentUser.name})`,
+            eventType: 'Assigned / Transferred',
+            details: `Custody updated from "${target.assignedTo}" to "${p.patch.assignedTo}" (${p.patch.department}, Status: ${p.patch.status}, Condition: ${p.patch.condition}).${noteSuffix}`,
+          };
+          const updatedAsset: CompanyAsset = {
+            ...target,
+            assignedTo: p.patch.assignedTo,
+            department: p.patch.department,
+            condition: p.patch.condition,
+            status: p.patch.status,
+            updatedAt: now,
+            history: [historyEntry, ...target.history],
+          };
+          nextAssets = state.assets.map((a) => (a.id === p.assetId ? updatedAsset : a));
+          cloudTasks.push(dataService.assets.upsert(updatedAsset, approvalAudit));
+        }
+        break;
+      }
+      case 'asset_maintenance': {
+        const target = state.assets.find((a) => a.id === p.assetId);
+        if (target) {
+          const historyEntry: AssetHistoryEntry = {
+            id: `ah-mnt-${Date.now()}`,
+            timestamp: now,
+            actorName: `${chg.editorName} (Approved by ${currentUser.name})`,
+            eventType: 'Maintenance Logged',
+            details: `Maintenance log (${p.patch.status} · Condition: ${p.patch.condition}): ${p.patch.notes}`,
+          };
+          const updatedAsset: CompanyAsset = {
+            ...target,
+            condition: p.patch.condition,
+            status: p.patch.status,
+            updatedAt: now,
+            history: [historyEntry, ...target.history],
+          };
+          nextAssets = state.assets.map((a) => (a.id === p.assetId ? updatedAsset : a));
+          cloudTasks.push(dataService.assets.upsert(updatedAsset, approvalAudit));
+        }
+        break;
+      }
+      case 'sop_create': {
+        const createdSop: SopDocument = { ...p.sop, updatedAt: now };
+        nextSops = [createdSop, ...state.sops];
+        cloudTasks.push(dataService.sops.upsert(createdSop, approvalAudit));
+        break;
+      }
+      case 'sop_toggle_mandatory': {
+        const target = state.sops.find((s) => s.id === p.sopId);
+        if (target) {
+          const updatedSop: SopDocument = {
+            ...target,
+            mandatoryRead: p.nextMandatory,
+            updatedAt: now,
+          };
+          nextSops = state.sops.map((s) => (s.id === p.sopId ? updatedSop : s));
+          cloudTasks.push(dataService.sops.upsert(updatedSop, approvalAudit));
+        }
+        break;
+      }
+      case 'vault_create': {
+        const createdDoc: DocumentVaultItem = { ...p.document, updatedAt: now };
+        nextVault = [createdDoc, ...state.vaultDocuments];
+        cloudTasks.push(dataService.documentVault.upsert(createdDoc, approvalAudit, nextVault));
+        break;
+      }
+      case 'vault_delete': {
+        const target = state.vaultDocuments.find((d) => d.id === p.documentId);
+        nextVault = state.vaultDocuments.filter((d) => d.id !== p.documentId);
+        cloudTasks.push(dataService.documentVault.remove(p.documentId, approvalAudit, target, nextVault));
+        break;
+      }
+      case 'meeting_create': {
+        const createdMeeting: MeetingMinute = { ...p.meeting, updatedAt: now };
+        nextMeetings = [createdMeeting, ...state.meetings];
+        cloudTasks.push(dataService.meetings.upsert(createdMeeting, approvalAudit));
+        break;
+      }
+      case 'meeting_add_action': {
+        const target = state.meetings.find((m) => m.id === p.meetingId);
+        if (target) {
+          const updatedMeeting: MeetingMinute = {
+            ...target,
+            updatedAt: now,
+            actionItems: [...target.actionItems, p.actionItem],
+          };
+          nextMeetings = state.meetings.map((m) => (m.id === p.meetingId ? updatedMeeting : m));
+          cloudTasks.push(dataService.meetings.upsert(updatedMeeting, approvalAudit));
+        }
+        break;
+      }
+      case 'meeting_convert_action': {
+        const targetMeeting = state.meetings.find((m) => m.id === p.meetingId);
+        const actionItem = targetMeeting?.actionItems.find((a) => a.id === p.actionItemId);
+        if (targetMeeting && actionItem && !actionItem.linkedRequestId) {
+          const newId = generateNextRequestId(state.requests);
+          const reviewerResolution = resolveEffectiveReviewer(defaultReviewerName, state.teamMembers);
+          const ownerMember = state.teamMembers.find(
+            (m) => m.name.toLowerCase() === actionItem.ownerName.toLowerCase(),
+          );
+          const newRequest: OperationalRequest = {
+            id: newId,
+            title: actionItem.description,
+            category: branding.categories[0] || 'Operational Change',
+            department: actionItem.department,
+            submittedBy: actionItem.ownerName,
+            submitterId: ownerMember?.id || chg.editorId,
+            assignedReviewer: reviewerResolution.assignedReviewer,
+            delegatedFromReviewer: reviewerResolution.delegatedFromReviewer,
+            priority: actionItem.priority,
+            status: 'Submitted',
+            dueDate: actionItem.dueDate,
+            createdAt: now,
+            updatedAt: now,
+            description: `Converted from Executive Meeting Minutes ${targetMeeting.code} (${targetMeeting.title}, held ${targetMeeting.meetingDate}).\n\nMeeting Summary: ${targetMeeting.summary}`,
+            deliverableUrl: '',
+            momCode: targetMeeting.code,
+            checklist: [
+              {
+                id: `chk-${newId}-1`,
+                label: `MoM ${targetMeeting.code} action item execution verified`,
+                mandatory: true,
+                checked: false,
+              },
+              {
+                id: `chk-${newId}-2`,
+                label: 'Department Lead & QA sign-off attached',
+                mandatory: true,
+                checked: false,
+              },
+            ],
+            auditTrail: [approvalAudit],
+          };
+          const updatedMeeting: MeetingMinute = {
+            ...targetMeeting,
+            updatedAt: now,
+            actionItems: targetMeeting.actionItems.map((a) =>
+              a.id === p.actionItemId
+                ? { ...a, status: 'Converted to Request', linkedRequestId: newId }
+                : a,
+            ),
+          };
+          nextRequests = [newRequest, ...state.requests];
+          nextMeetings = state.meetings.map((m) => (m.id === p.meetingId ? updatedMeeting : m));
+          cloudTasks.push(
+            dataService.requests.create(newRequest, approvalAudit, null),
+            dataService.meetings.upsert(updatedMeeting),
+          );
+        }
+        break;
+      }
+      case 'meeting_complete_action': {
+        const target = state.meetings.find((m) => m.id === p.meetingId);
+        if (target) {
+          const updatedMeeting: MeetingMinute = {
+            ...target,
+            updatedAt: now,
+            actionItems: target.actionItems.map((a) =>
+              a.id === p.actionItemId ? { ...a, status: 'Completed' } : a,
+            ),
+          };
+          nextMeetings = state.meetings.map((m) => (m.id === p.meetingId ? updatedMeeting : m));
+          cloudTasks.push(dataService.meetings.upsert(updatedMeeting, approvalAudit));
+        }
+        break;
+      }
+    }
+
+    setState((prev) => ({
+      ...prev,
+      requests: nextRequests,
+      projects: nextProjects,
+      assets: nextAssets,
+      sops: nextSops,
+      vaultDocuments: nextVault,
+      meetings: nextMeetings,
+      subtasks: nextSubtasks,
+      taskComments: nextTaskComments,
+      pendingEditorChanges: nextPendingChanges,
+      globalAuditLogs: [approvalAudit, ...prev.globalAuditLogs],
+      notifications: [...extraNotifications, ...prev.notifications],
+    }));
+
+    void Promise.all(cloudTasks)
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      })
+      .catch(handleCloudWriteError);
+
+    pushToast('Change Approved & Applied', `${chg.itemLabel} published live.`, 'success');
+  };
+
+  const handleRejectEditorChange = (changeId: string, reason?: string) => {
+    if (currentUser.role !== 'Admin') {
+      pushToast('Super Admin Required', 'Only Administrators can reject Editor changes.', 'error');
+      return;
+    }
+    const chg = state.pendingEditorChanges.find((c) => c.id === changeId);
+    if (!chg || chg.status !== 'pending') return;
+
+    const now = new Date().toISOString();
+    const cleanReason = reason?.trim() || undefined;
+    const targetSectionMap: Record<PendingEditorChangeModule, NavSection> = {
+      requests: 'requests',
+      projects: 'projects',
+      assets: 'assets',
+      sops: 'sops',
+      vault: 'vault',
+      meetings: 'meetings',
+    };
+
+    const rejectionAudit = createAuditEvent(
+      chg.targetId || chg.module.toUpperCase(),
+      'Team Updated',
+      `Declined Editor proposal by ${chg.editorName} (${chg.editorEmail}) in ${chg.moduleLabel}: ${chg.summary}${cleanReason ? ` — Reason: ${cleanReason}` : ''}`,
+    );
+
+    const editorNotif: AppNotification = {
+      id: `notif-ed-rej-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      title: `Edit Declined · ${chg.moduleLabel}`,
+      message: `${currentUser.name} declined your proposed edit (${chg.itemLabel})${cleanReason ? `: ${cleanReason}` : '.'}`,
+      timestamp: now,
+      read: false,
+      targetSection: targetSectionMap[chg.module],
+      recipientEmail: chg.editorEmail,
+      actorEmail: currentUser.email,
+      category: 'editor_approval',
+      severity: 'warning',
+    };
+
+    const nextPendingChanges: PendingEditorChange[] = state.pendingEditorChanges.map((c) =>
+      c.id === changeId
+        ? {
+            ...c,
+            status: 'rejected',
+            reviewedBy: currentUser.name,
+            reviewedAt: now,
+            rejectionReason: cleanReason,
+          }
+        : c,
+    );
+
+    setState((prev) => ({
+      ...prev,
+      pendingEditorChanges: nextPendingChanges,
+      globalAuditLogs: [rejectionAudit, ...prev.globalAuditLogs],
+      notifications: [editorNotif, ...prev.notifications],
+    }));
+
+    void Promise.all([
+      dataService.editorChanges.saveAll(nextPendingChanges, currentUser.name, rejectionAudit),
+      dataService.notifications.create(editorNotif),
+    ])
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      })
+      .catch(handleCloudWriteError);
+
+    pushToast('Editor Proposal Declined', `${chg.itemLabel} was not applied.`, 'warning');
   };
 
   // Command Search Quick Actions
@@ -4866,7 +6352,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen max-w-full overflow-x-hidden bg-slate-50 text-slate-900">
+    <div className="min-h-screen max-w-full overflow-x-hidden bg-slate-50 text-slate-900 transition-colors dark:bg-slate-950 dark:text-slate-100">
       {/* Main App Shell (hidden during window.print() when OfficialReportModal is open) */}
       <div className={reportModalState.open ? 'no-print' : ''}>
         {/* Fixed Left Sidebar */}
@@ -4890,6 +6376,7 @@ export default function App() {
           openActionItemsCount={openActionItemsCount}
           workspaceLinksCount={state.workspaceLinks.length}
           pendingUsersCount={pendingUsersCount}
+          pendingEditorChangesCount={pendingEditorChangesCount}
           collapsed={sidebarCollapsed}
           onToggleCollapse={() => setSidebarCollapsed((prev) => !prev)}
           mobileOpen={mobileMenuOpen}
@@ -4912,6 +6399,7 @@ export default function App() {
             departments={branding.departments}
             requests={state.requests}
             auditLogs={state.globalAuditLogs}
+            pendingEditorChanges={state.pendingEditorChanges}
             dbConnected={dbConnected}
             isSyncing={isSyncing}
             onSyncNow={() => void syncFromSupabase(true, false)}
@@ -4931,6 +6419,8 @@ export default function App() {
             onSignOut={handleSignOut}
             activeWorkspaceTool={activeWorkspaceTool}
             slaPolicy={branding.slaPolicy ?? DEFAULT_SLA_POLICY}
+            isDarkMode={isDarkMode}
+            onToggleDarkMode={() => setIsDarkMode((prev) => !prev)}
             onSelectWorkspaceTool={(tool) => {
               setActiveWorkspaceTool(tool);
               setActiveSection('workspace');
@@ -4994,8 +6484,10 @@ export default function App() {
                     requests={state.requests}
                     departments={branding.departments}
                     activeRole={currentUser.role}
+                    currentUserEmail={currentUser.email}
                     approvalBudgetThresholdUsd={branding.approvalBudgetThresholdUsd ?? 5000}
                     slaPolicy={branding.slaPolicy ?? DEFAULT_SLA_POLICY}
+                    pendingEditorChanges={state.pendingEditorChanges}
                     searchQuery={searchQuery}
                     onSearchQueryChange={setSearchQuery}
                     statusFilter={statusFilter}
@@ -5026,8 +6518,10 @@ export default function App() {
                     projects={state.projects}
                     requests={state.requests}
                     activeRole={currentUser.role}
+                    currentUserEmail={currentUser.email}
                     departments={branding.departments}
                     teamMembers={state.teamMembers}
+                    pendingEditorChanges={state.pendingEditorChanges}
                     onCreateProject={handleCreateProject}
                     onUpdateProject={handleUpdateProject}
                     onDeleteProject={handleDeleteProject}
@@ -5046,8 +6540,10 @@ export default function App() {
                   <AssetsInventoryView
                     assets={state.assets}
                     activeRole={currentUser.role}
+                    currentUserEmail={currentUser.email}
                     departments={branding.departments}
                     teamMembers={state.teamMembers}
+                    pendingEditorChanges={state.pendingEditorChanges}
                     onRegisterAsset={handleRegisterAsset}
                     onTransferAsset={handleTransferAsset}
                     onLogMaintenance={handleLogAssetMaintenance}
@@ -5069,6 +6565,7 @@ export default function App() {
                     currentUser={currentUser}
                     departments={branding.departments}
                     teamMembers={state.teamMembers}
+                    pendingEditorChanges={state.pendingEditorChanges}
                     onPublishSop={handlePublishSop}
                     onToggleMandatory={handleToggleSopMandatory}
                     onAcknowledgeSop={handleAcknowledgeSop}
@@ -5081,6 +6578,7 @@ export default function App() {
                     departments={branding.departments}
                     activeRole={currentUser.role}
                     currentUser={currentUser}
+                    pendingEditorChanges={state.pendingEditorChanges}
                     onAddDocument={handleAddVaultDocument}
                     onDeleteDocument={handleDeleteVaultDocument}
                   />
@@ -5109,6 +6607,7 @@ export default function App() {
                     currentUser={currentUser}
                     departments={branding.departments}
                     teamMembers={state.teamMembers}
+                    pendingEditorChanges={state.pendingEditorChanges}
                     onCreateMeeting={handleCreateMeeting}
                     onAddActionItem={handleAddMeetingActionItem}
                     onConvertActionToRequest={handleConvertActionToRequest}
@@ -5168,6 +6667,7 @@ export default function App() {
                     requests={state.requests}
                     auditLogs={state.globalAuditLogs}
                     notificationsCount={state.notifications.length}
+                    vaultDocuments={state.vaultDocuments}
                     dbConnected={dbConnected}
                     onUpdateBranding={handleUpdateBranding}
                     onResetBranding={handleResetBranding}
@@ -5185,6 +6685,9 @@ export default function App() {
                     onDownloadBackup={handleDownloadBackup}
                     onRestoreBackup={handleRestoreBackup}
                     onBackupError={(msg) => pushToast('Backup Restore Failed', msg, 'error')}
+                    pendingEditorChanges={state.pendingEditorChanges}
+                    onApproveEditorChange={handleApproveEditorChange}
+                    onRejectEditorChange={handleRejectEditorChange}
                   />
                 )}
               </>
@@ -5192,29 +6695,34 @@ export default function App() {
           </main>
         </div>
 
-        {/* Create Request Modal */}
-        {createModalOpen && currentUser.role === 'Admin' && (
+        {/* Create / Edit Request Modal */}
+        {createModalOpen && (currentUser.role === 'Admin' || currentUser.role === 'Editor') && (
           <CreateRequestModal
             nextRequestId={nextRequestId}
             departments={branding.departments}
             categories={branding.categories}
             projects={state.projects}
             assets={state.assets}
+            activeRole={currentUser.role}
             approvalBudgetThresholdUsd={branding.approvalBudgetThresholdUsd ?? 5000}
             templateSource={templateSource}
+            editingRequest={editingRequest}
             onClose={() => {
               setCreateModalOpen(false);
               setTemplateSource(null);
+              setEditingRequest(null);
             }}
             onCreate={handleCreateRequest}
+            onEdit={handleEditRequest}
           />
         )}
 
         {/* CSV Bulk Import Modal */}
-        {importModalOpen && currentUser.role === 'Admin' && (
+        {importModalOpen && (currentUser.role === 'Admin' || currentUser.role === 'Editor') && (
           <ImportRequestsModal
             nextRequestId={nextRequestId}
             departments={branding.departments}
+            activeRole={currentUser.role}
             onClose={() => setImportModalOpen(false)}
             onImport={handleImportRequests}
           />
@@ -5244,10 +6752,12 @@ export default function App() {
             activeRole={currentUser.role}
             approvalBudgetThresholdUsd={branding.approvalBudgetThresholdUsd ?? 5000}
             slaPolicy={branding.slaPolicy ?? DEFAULT_SLA_POLICY}
+            pendingEditorChanges={state.pendingEditorChanges}
             subtasks={state.subtasks}
             taskComments={state.taskComments}
             teamMembers={state.teamMembers}
             onClose={() => setSelectedRequestId(null)}
+            onEditRequest={handleOpenEditRequestModal}
             onToggleChecklistItem={handleToggleChecklistItem}
             onTransitionStatus={handleTransitionStatus}
             onStage1Approve={handleStage1SignOff}

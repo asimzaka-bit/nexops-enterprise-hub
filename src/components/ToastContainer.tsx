@@ -27,13 +27,15 @@ export function ToastContainer({ toasts, onDismiss }: ToastContainerProps) {
           <div
             key={toast.id}
             role="status"
-            className="pointer-events-auto flex items-start gap-3 rounded-lg border border-slate-200 bg-white p-3.5 shadow-lg transition-all duration-200"
+            className="pointer-events-auto flex items-start gap-3 rounded-lg border border-slate-200 bg-white p-3.5 shadow-lg transition-all duration-200 dark:border-slate-800 dark:bg-slate-900"
           >
             <div className="mt-0.5">{iconMap[toast.variant]}</div>
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold text-slate-900">{toast.title}</p>
+              <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                {toast.title}
+              </p>
               {toast.description && (
-                <p className="mt-0.5 text-xs leading-relaxed text-slate-600">
+                <p className="mt-0.5 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
                   {toast.description}
                 </p>
               )}
@@ -42,7 +44,7 @@ export function ToastContainer({ toasts, onDismiss }: ToastContainerProps) {
               type="button"
               onClick={() => onDismiss(toast.id)}
               aria-label="Dismiss notification"
-              className="rounded-md p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 focus-visible:outline-2 focus-visible:outline-indigo-600"
+              className="rounded-md p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 focus-visible:outline-2 focus-visible:outline-indigo-600 dark:hover:bg-slate-800 dark:hover:text-slate-200"
             >
               <X className="h-3.5 w-3.5" />
             </button>

@@ -44,13 +44,13 @@ export const DEFAULT_PERMISSION_MATRIX: PermissionMatrix = {
     manage_admin_settings: true,
   },
   Editor: {
-    create_requests: false,
+    create_requests: true,
     approve_requests: false,
-    manage_projects: false,
-    manage_assets: false,
-    publish_sops: false,
+    manage_projects: true,
+    manage_assets: true,
+    publish_sops: true,
     approve_leaves: false,
-    manage_meetings: false,
+    manage_meetings: true,
     publish_announcements: false,
     manage_admin_settings: false,
   },
@@ -91,6 +91,7 @@ export function createSeedState(): NexOpsState {
     subtasks: [],
     taskComments: [],
     vaultDocuments: [],
+    pendingEditorChanges: [],
     permissionMatrix: structuredClone(DEFAULT_PERMISSION_MATRIX),
   };
 }
