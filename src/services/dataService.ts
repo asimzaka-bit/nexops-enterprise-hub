@@ -277,6 +277,7 @@ import {
   AuditActionType,
   AuditEvent,
   AuthSession,
+  CalendarEvent,
   ChecklistItem,
   CompanyAnnouncement,
   CompanyAsset,
@@ -626,6 +627,7 @@ function readWorkspaceState(): NexOpsState {
         : [],
       corporateMails: Array.isArray(parsed.corporateMails) ? parsed.corporateMails : [],
       chatMessages: Array.isArray(parsed.chatMessages) ? parsed.chatMessages : [],
+      calendarEvents: Array.isArray(parsed.calendarEvents) ? parsed.calendarEvents : [],
       permissionMatrix: normalizePermissionMatrix(parsed.permissionMatrix),
     };
 
@@ -1969,6 +1971,7 @@ export const SYSTEM_STATE_KEYS = {
   CORPORATE_MAILS: 'nexops_mails',
   CHAT_MESSAGES: 'nexops_chats',
   MEET_CALL_CARDS: 'nexops_meet_cards',
+  CALENDAR_EVENTS: 'nexops_calendar_events',
   OWNERSHIP_TRANSFER_V1: 'ownership_transfer_hassanzaka018_v1',
 } as const;
 
@@ -2125,6 +2128,31 @@ export function mergeChatMessages(
   return Array.from(byId.values())
     .sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime())
     .slice(-400);
+}
+
+export function mergeCalendarEvents(
+  existing: CalendarEvent[],
+  incoming: CalendarEvent[],
+  deletedIds?: Iterable<string>,
+): CalendarEvent[] {
+  const deletedSet = new Set<string>(deletedIds ?? []);
+  const byId = new Map<string, CalendarEvent>();
+
+  for (const item of [...existing, ...incoming]) {
+    if (!item || !item.id || deletedSet.has(item.id)) continue;
+    const prev = byId.get(item.id);
+    if (!prev) {
+      byId.set(item.id, item);
+      continue;
+    }
+    const prevTs = new Date(prev.updatedAt || prev.createdAt || 0).getTime();
+    const nextTs = new Date(item.updatedAt || item.createdAt || 0).getTime();
+    byId.set(item.id, nextTs >= prevTs ? item : prev);
+  }
+
+  return Array.from(byId.values())
+    .sort((a, b) => `${a.date}T${a.time || '00:00'}`.localeCompare(`${b.date}T${b.time || '00:00'}`))
+    .slice(0, 500);
 }
 
 export function mergeMeetings(
@@ -2880,6 +2908,12 @@ export const dataService = {
         )
       : localSnapshot.chatMessages;
 
+    const calendarRow = sysMap.get(SYSTEM_STATE_KEYS.CALENDAR_EVENTS);
+    const calendarEvents: CalendarEvent[] =
+      calendarRow && Array.isArray(calendarRow.payload)
+        ? mergeCalendarEvents([], calendarRow.payload as CalendarEvent[])
+        : localSnapshot.calendarEvents;
+
     const projectLinksMap = readRequestProjectsMap();
     const assetLinksMap = readRequestAssetsMap();
     const metaMap = readRequestMetaMap();
@@ -3054,6 +3088,7 @@ export const dataService = {
       pendingEditorChanges,
       corporateMails,
       chatMessages,
+      calendarEvents,
       permissionMatrix,
     };
 
@@ -3244,6 +3279,11 @@ export const dataService = {
         {
           state_key: SYSTEM_STATE_KEYS.MEET_CALL_CARDS,
           payload: nextState.meetings ?? [],
+          updated_at: now,
+        },
+        {
+          state_key: SYSTEM_STATE_KEYS.CALENDAR_EVENTS,
+          payload: nextState.calendarEvents ?? [],
           updated_at: now,
         },
       ];
@@ -5838,6 +5878,63 @@ export const dataService = {
         void dataService.auditLogs.append(auditEntry).catch((auditErr) => {
           console.warn(
             '[NexOps Audit] Non-blocking Meet audit log skipped:',
+            extractSupabaseErrorMessage(auditErr),
+          );
+        });
+      }
+
+      return synced;
+    },
+  },
+
+  calendar: {
+    async saveEvents(
+      events: CalendarEvent[],
+      updatedBy?: string,
+      auditEntry?: AuditEvent,
+      deletedIds?: string[],
+    ): Promise<CalendarEvent[]> {
+      const local = readWorkspaceState();
+      const localMerged = mergeCalendarEvents(local.calendarEvents, events, deletedIds);
+      writeWorkspaceState({
+        ...local,
+        calendarEvents: localMerged,
+      });
+
+      if (!supabase) return localMerged;
+
+      const synced = await retrySupabaseWrite(
+        'nexops_system_state[nexops_calendar_events]',
+        async () => {
+          const cloudEvents = await dataService.systemState.getKey<CalendarEvent[]>(
+            SYSTEM_STATE_KEYS.CALENDAR_EVENTS,
+          );
+          const merged = mergeCalendarEvents(
+            Array.isArray(cloudEvents) ? cloudEvents : [],
+            events,
+            deletedIds,
+          );
+          await dataService.systemState.upsertKey(
+            SYSTEM_STATE_KEYS.CALENDAR_EVENTS,
+            merged,
+            updatedBy,
+          );
+          return merged;
+        },
+        2,
+        1500,
+      );
+
+      const refreshedLocal = readWorkspaceState();
+      writeWorkspaceState({
+        ...refreshedLocal,
+        calendarEvents: synced,
+      });
+
+      if (auditEntry) {
+        void dataService.auditLogs.append(auditEntry).catch((auditErr) => {
+          console.warn(
+            '[NexOps Audit] Non-blocking Calendar audit log skipped:',
             extractSupabaseErrorMessage(auditErr),
           );
         });

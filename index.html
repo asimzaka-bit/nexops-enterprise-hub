@@ -29,9 +29,12 @@
     <script>
       (function () {
         try {
-          if (localStorage.getItem('nexops_theme_v1') === 'dark') {
-            document.documentElement.classList.add('dark');
-          }
+          var pref = localStorage.getItem('nexops_theme_preference_v1');
+          var prefersDark =
+            typeof window.matchMedia === 'function' &&
+            window.matchMedia('(prefers-color-scheme: dark)').matches;
+          var shouldUseDark = pref === 'dark' || (pref !== 'light' && prefersDark);
+          document.documentElement.classList.toggle('dark', shouldUseDark);
         } catch (e) {}
       })();
     </script>

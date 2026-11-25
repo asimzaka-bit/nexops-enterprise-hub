@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnnouncementBanner } from './components/AnnouncementBanner';
 import { AssetsInventoryView } from './components/AssetsInventoryView';
 import { AuditLogsView } from './components/AuditLogsView';
+import { CalendarView } from './components/CalendarView';
 import { CreateRequestModal, CreateRequestPayload } from './components/CreateRequestModal';
 import { DashboardView } from './components/DashboardView';
 import { ImportedRequestRow, ImportRequestsModal } from './components/ImportRequestsModal';
@@ -43,6 +44,7 @@ import {
   AuditActionType,
   AuditEvent,
   AuthSession,
+  CalendarEvent,
   CompanyAnnouncement,
   CompanyAsset,
   CompanyBrandingConfig,
@@ -73,6 +75,7 @@ import {
   TaskSubtask,
   TeamChatMessage,
   TeamMember,
+  ThemePreference,
   ToastMessage,
   WorkspaceEmailLog,
   WorkspaceSavedLink,
@@ -82,6 +85,7 @@ import {
   buildMemberFromSupabaseUser,
   dataService,
   extractSupabaseErrorMessage,
+  mergeCalendarEvents,
   mergeChatMessages,
   mergeCorporateMails,
   mergeMeetings,
@@ -127,22 +131,53 @@ export default function App() {
     }
   });
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
+  const [themePreference, setThemePreference] = useState<ThemePreference>(() => {
     try {
-      return localStorage.getItem('nexops_theme_v1') === 'dark';
+      const saved = localStorage.getItem('nexops_theme_preference_v1');
+      if (saved === 'light' || saved === 'dark') return saved;
+      return 'system';
+    } catch {
+      return 'system';
+    }
+  });
+  const [systemPrefersDark, setSystemPrefersDark] = useState<boolean>(() => {
+    try {
+      return (
+        typeof window !== 'undefined' &&
+        typeof window.matchMedia === 'function' &&
+        window.matchMedia('(prefers-color-scheme: dark)').matches
+      );
     } catch {
       return false;
     }
   });
 
   useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const handleChange = (e: MediaQueryListEvent) => {
+      setSystemPrefersDark(e.matches);
+    };
+    setSystemPrefersDark(mediaQuery.matches);
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', handleChange);
+      return () => mediaQuery.removeEventListener('change', handleChange);
+    }
+    mediaQuery.addListener(handleChange);
+    return () => mediaQuery.removeListener(handleChange);
+  }, []);
+
+  const isDarkMode = themePreference === 'system' ? systemPrefersDark : themePreference === 'dark';
+
+  useEffect(() => {
     try {
       document.documentElement.classList.toggle('dark', isDarkMode);
+      localStorage.setItem('nexops_theme_preference_v1', themePreference);
       localStorage.setItem('nexops_theme_v1', isDarkMode ? 'dark' : 'light');
     } catch {
       // Ignore storage restrictions
     }
-  }, [isDarkMode]);
+  }, [isDarkMode, themePreference]);
 
   // Queue filters & search
   const [searchQuery, setSearchQuery] = useState('');
@@ -185,6 +220,7 @@ export default function App() {
   const presenceChannelRef = useRef<ReturnType<NonNullable<typeof supabase>['channel']> | null>(null);
   const commsChannelRef = useRef<ReturnType<NonNullable<typeof supabase>['channel']> | null>(null);
   const deletedMailIdsRef = useRef<Set<string>>(new Set());
+  const deletedCalendarIdsRef = useRef<Set<string>>(new Set());
   const recentlyOfflineTimersRef = useRef<Map<string, number>>(new Map());
 
   // Unified Google Workspace OAuth session state shared across Gmail, Docs, Sheets & Forms
@@ -450,6 +486,11 @@ export default function App() {
           ),
           chatMessages: mergeChatMessages(remote.state.chatMessages, prev.chatMessages),
           meetings: mergeMeetings(remote.state.meetings, prev.meetings),
+          calendarEvents: mergeCalendarEvents(
+            remote.state.calendarEvents,
+            prev.calendarEvents,
+            deletedCalendarIdsRef.current,
+          ),
         }));
         setBranding(remote.branding);
         setTableDiagnostics(remote.diagnostics);
@@ -1281,6 +1322,28 @@ export default function App() {
           meetings: mergeMeetings(prev.meetings, [incomingMeeting]),
         }));
       })
+      .on('broadcast', { event: 'calendar:upsert' }, ({ payload }) => {
+        const incomingEvent = payload as CalendarEvent | undefined;
+        if (!incomingEvent?.id) return;
+        deletedCalendarIdsRef.current.delete(incomingEvent.id);
+        setState((prev) => ({
+          ...prev,
+          calendarEvents: mergeCalendarEvents(
+            prev.calendarEvents,
+            [incomingEvent],
+            deletedCalendarIdsRef.current,
+          ),
+        }));
+      })
+      .on('broadcast', { event: 'calendar:delete' }, ({ payload }) => {
+        const deletedId = (payload as { id?: string } | undefined)?.id;
+        if (!deletedId) return;
+        deletedCalendarIdsRef.current.add(deletedId);
+        setState((prev) => ({
+          ...prev,
+          calendarEvents: prev.calendarEvents.filter((ev) => ev.id !== deletedId),
+        }));
+      })
       .subscribe();
 
     commsChannelRef.current = commsChannel;
@@ -1364,6 +1427,11 @@ export default function App() {
       ),
     [state.meetings],
   );
+
+  const upcomingCalendarCount = useMemo(() => {
+    const todayIso = new Date().toISOString().slice(0, 10);
+    return state.calendarEvents.filter((ev) => ev.date >= todayIso).length;
+  }, [state.calendarEvents]);
 
   const unreadCommsCount = useMemo(() => {
     const selfEmailLower = currentUser.email.trim().toLowerCase();
@@ -6776,6 +6844,120 @@ export default function App() {
     );
   };
 
+  // Enterprise Calendar Event Handlers
+  const handleSaveCalendarEvent = (event: CalendarEvent) => {
+    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') {
+      pushToast('Permission Required', 'Viewers have read-only access to the Calendar.', 'warning');
+      return;
+    }
+    const isEdit = state.calendarEvents.some((ev) => ev.id === event.id);
+    deletedCalendarIdsRef.current.delete(event.id);
+    const nextEvents = mergeCalendarEvents(
+      state.calendarEvents,
+      [event],
+      deletedCalendarIdsRef.current,
+    );
+    const auditEntry = createAuditEvent(
+      event.id,
+      'Team Updated',
+      `${isEdit ? 'Updated' : 'Scheduled'} ${event.type} calendar event "${event.title}" on ${event.date} at ${event.time} (${event.department}).`,
+    );
+
+    setState((prev) => ({
+      ...prev,
+      calendarEvents: mergeCalendarEvents(
+        prev.calendarEvents,
+        [event],
+        deletedCalendarIdsRef.current,
+      ),
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+    }));
+
+    if (commsChannelRef.current) {
+      void commsChannelRef.current.send({
+        type: 'broadcast',
+        event: 'calendar:upsert',
+        payload: event,
+      });
+    }
+
+    void dataService.calendar
+      .saveEvents(
+        nextEvents,
+        currentUser.name,
+        auditEntry,
+        Array.from(deletedCalendarIdsRef.current),
+      )
+      .then((synced) => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+        setLastSyncError(null);
+        setState((prev) => ({
+          ...prev,
+          calendarEvents: mergeCalendarEvents(
+            synced,
+            prev.calendarEvents,
+            deletedCalendarIdsRef.current,
+          ),
+        }));
+      })
+      .catch(handleCloudWriteError);
+
+    pushToast(
+      isEdit ? 'Calendar Event Updated' : 'Calendar Event Scheduled',
+      `${event.title} · ${event.date} at ${event.time}`,
+      'success',
+    );
+  };
+
+  const handleDeleteCalendarEvent = (eventId: string) => {
+    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') {
+      pushToast('Permission Required', 'Viewers cannot delete calendar events.', 'warning');
+      return;
+    }
+    const target = state.calendarEvents.find((ev) => ev.id === eventId);
+    if (!target) return;
+    deletedCalendarIdsRef.current.add(eventId);
+    const remaining = state.calendarEvents.filter((ev) => ev.id !== eventId);
+    const auditEntry = createAuditEvent(
+      eventId,
+      'Team Updated',
+      `Removed calendar event "${target.title}" (${target.date}).`,
+    );
+
+    setState((prev) => ({
+      ...prev,
+      calendarEvents: prev.calendarEvents.filter((ev) => ev.id !== eventId),
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+    }));
+
+    if (commsChannelRef.current) {
+      void commsChannelRef.current.send({
+        type: 'broadcast',
+        event: 'calendar:delete',
+        payload: { id: eventId },
+      });
+    }
+
+    void dataService.calendar
+      .saveEvents(
+        remaining,
+        currentUser.name,
+        auditEntry,
+        Array.from(deletedCalendarIdsRef.current),
+      )
+      .then((synced) => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+        setLastSyncError(null);
+        setState((prev) => ({
+          ...prev,
+          calendarEvents: synced,
+        }));
+      })
+      .catch(handleCloudWriteError);
+
+    pushToast('Calendar Event Deleted', `${target.title} removed from schedule.`, 'info');
+  };
+
   // Step 1 Guard: unauthenticated users see clean Login screen
   if (!authSession || !authSession.isAuthenticated) {
     return (
@@ -6849,6 +7031,7 @@ export default function App() {
           vaultCount={state.vaultDocuments.length}
           pendingLeavesCount={pendingLeavesCount}
           openActionItemsCount={openActionItemsCount}
+          upcomingCalendarCount={upcomingCalendarCount}
           unreadCommsCount={unreadCommsCount}
           workspaceLinksCount={state.workspaceLinks.length}
           pendingUsersCount={pendingUsersCount}
@@ -6898,7 +7081,9 @@ export default function App() {
             unreadCommsCount={unreadCommsCount}
             slaPolicy={branding.slaPolicy ?? DEFAULT_SLA_POLICY}
             isDarkMode={isDarkMode}
-            onToggleDarkMode={() => setIsDarkMode((prev) => !prev)}
+            themePreference={themePreference}
+            onToggleDarkMode={() => setThemePreference(isDarkMode ? 'light' : 'dark')}
+            onSetThemePreference={setThemePreference}
             onSelectWorkspaceTool={(tool) => {
               setActiveWorkspaceTool(tool);
               setActiveSection('workspace');
@@ -7091,6 +7276,19 @@ export default function App() {
                     onConvertActionToRequest={handleConvertActionToRequest}
                     onCompleteActionItem={handleCompleteMeetingActionItem}
                     onInspectRequest={handleInspectRequestById}
+                  />
+                )}
+
+                {activeSection === 'calendar' && (
+                  <CalendarView
+                    calendarEvents={state.calendarEvents}
+                    meetings={state.meetings}
+                    leaves={state.leaves}
+                    departments={branding.departments}
+                    activeRole={currentUser.role}
+                    currentUser={currentUser}
+                    onSaveEvent={handleSaveCalendarEvent}
+                    onDeleteEvent={handleDeleteCalendarEvent}
                   />
                 )}
 

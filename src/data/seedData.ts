@@ -94,6 +94,7 @@ export function createSeedState(): NexOpsState {
     pendingEditorChanges: [],
     corporateMails: [],
     chatMessages: [],
+    calendarEvents: [],
     permissionMatrix: structuredClone(DEFAULT_PERMISSION_MATRIX),
   };
 }

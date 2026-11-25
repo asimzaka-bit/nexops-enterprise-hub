@@ -18,6 +18,7 @@ import {
   LogOut,
   Menu,
   MessageSquare,
+  Monitor,
   Moon,
   PenTool,
   Plus,
@@ -43,6 +44,7 @@ import {
   Role,
   SlaPolicyConfig,
   TeamMember,
+  ThemePreference,
   WorkspaceToolType,
 } from '../types/nexops';
 import {
@@ -96,7 +98,9 @@ interface TopBarProps {
   slaPolicy?: SlaPolicyConfig;
   pendingEditorChanges?: PendingEditorChange[];
   isDarkMode: boolean;
+  themePreference?: ThemePreference;
   onToggleDarkMode: () => void;
+  onSetThemePreference?: (pref: ThemePreference) => void;
 }
 
 const WORKSPACE_LAUNCHER_ITEMS: {
@@ -164,6 +168,10 @@ const SECTION_TITLES: Record<NavSection, { title: string; subtitle: string }> = 
     title: 'Meetings & Action Items (MoM)',
     subtitle: 'Executive summaries, recorded decisions & 1-click request conversion',
   },
+  calendar: {
+    title: 'Enterprise Calendar',
+    subtitle: 'Monthly & weekly schedule, milestones, MoM sessions & leave visibility',
+  },
   mailchat: {
     title: 'Mail & Chat Hub',
     subtitle: 'Corporate inbox, real-time team chat & instant Google Meet calls',
@@ -223,7 +231,9 @@ export function TopBar({
   slaPolicy = DEFAULT_SLA_POLICY,
   pendingEditorChanges = [],
   isDarkMode,
+  themePreference = 'system',
   onToggleDarkMode,
+  onSetThemePreference,
 }: TopBarProps) {
   const [notifOpen, setNotifOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -1014,12 +1024,16 @@ export function TopBar({
             </button>
           )}
 
-          {/* Global Dark Mode Toggle (Light / Executive Dark Theme) */}
+          {/* Global Dark Mode Toggle (Auto Device Detection + Manual Override) */}
           <button
             type="button"
             onClick={onToggleDarkMode}
             aria-label={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-            title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Executive Dark Mode'}
+            title={
+              themePreference === 'system'
+                ? `Auto Device Theme (${isDarkMode ? 'Dark' : 'Light'}) — Click to override`
+                : `Manual ${isDarkMode ? 'Dark' : 'Light'} Mode — Click to switch`
+            }
             className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-indigo-600 md:h-8 md:w-8 dark:border-slate-700 dark:bg-slate-900 dark:text-amber-300 dark:hover:bg-slate-800 dark:hover:text-amber-200"
           >
             {isDarkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
@@ -1355,6 +1369,46 @@ export function TopBar({
                     </p>
                   )}
                 </div>
+
+                {onSetThemePreference && (
+                  <div className="mt-2.5 border-t border-slate-100 pt-2.5 dark:border-slate-800">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                        Appearance Theme
+                      </p>
+                      <span className="text-[10px] font-semibold text-indigo-600 dark:text-indigo-400">
+                        {themePreference === 'system' ? 'Auto (Device)' : 'Manual Override'}
+                      </span>
+                    </div>
+                    <div className="mt-1.5 grid grid-cols-3 gap-1 rounded-lg border border-slate-200 bg-slate-50 p-0.5 dark:border-slate-700 dark:bg-slate-950">
+                      {(
+                        [
+                          { id: 'system', label: 'System', icon: Monitor },
+                          { id: 'light', label: 'Light', icon: Sun },
+                          { id: 'dark', label: 'Dark', icon: Moon },
+                        ] as const
+                      ).map((opt) => {
+                        const Icon = opt.icon;
+                        const active = themePreference === opt.id;
+                        return (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            onClick={() => onSetThemePreference(opt.id)}
+                            className={`inline-flex items-center justify-center gap-1 rounded-md py-1 text-[11px] font-semibold transition-colors ${
+                              active
+                                ? 'bg-slate-900 text-white dark:bg-indigo-600'
+                                : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'
+                            }`}
+                          >
+                            <Icon className="h-3 w-3" />
+                            <span>{opt.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 <div className="mt-3 space-y-1 border-t border-slate-100 pt-2.5 dark:border-slate-800">
                   <button

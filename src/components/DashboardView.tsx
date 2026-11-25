@@ -67,6 +67,7 @@ import {
   StatusBadge,
 } from './StatusIndicator';
 import { UserAvatar } from './UserAvatar';
+import { WeatherAndMapSection } from './WeatherLocationWidgets';
 
 interface DashboardViewProps {
   companyName: string;
@@ -1744,6 +1745,9 @@ export function DashboardView({
           </div>
         )}
       </section>
+
+      {/* Live Weather & Interactive Operations Map */}
+      <WeatherAndMapSection />
 
       {/* Team Online Presence & Active Directory Strip */}
       <section

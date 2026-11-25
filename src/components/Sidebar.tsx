@@ -3,6 +3,7 @@ import {
   Briefcase,
   CalendarCheck2,
   CalendarClock,
+  CalendarDays,
   ClipboardCheck,
   FileSpreadsheet,
   FolderKanban,
@@ -48,6 +49,7 @@ interface SidebarProps {
   vaultCount?: number;
   pendingLeavesCount?: number;
   openActionItemsCount?: number;
+  upcomingCalendarCount?: number;
   unreadCommsCount?: number;
   workspaceLinksCount?: number;
   pendingUsersCount?: number;
@@ -96,6 +98,7 @@ export function Sidebar({
   vaultCount,
   pendingLeavesCount,
   openActionItemsCount,
+  upcomingCalendarCount,
   unreadCommsCount,
   workspaceLinksCount,
   pendingUsersCount,
@@ -158,6 +161,12 @@ export function Sidebar({
       label: 'Meetings & MoM',
       icon: CalendarClock,
       badge: openActionItemsCount,
+    },
+    {
+      id: 'calendar',
+      label: 'Calendar',
+      icon: CalendarDays,
+      badge: upcomingCalendarCount,
     },
     {
       id: 'mailchat',

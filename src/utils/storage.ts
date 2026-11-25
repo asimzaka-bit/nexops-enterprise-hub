@@ -1207,6 +1207,7 @@ export function parseSystemBackupJson(rawText: string): NexOpsState {
       : [],
     corporateMails: Array.isArray(rawState.corporateMails) ? rawState.corporateMails : [],
     chatMessages: Array.isArray(rawState.chatMessages) ? rawState.chatMessages : [],
+    calendarEvents: Array.isArray(rawState.calendarEvents) ? rawState.calendarEvents : [],
     permissionMatrix: normalizePermissionMatrix(rawState.permissionMatrix),
   };
 }

@@ -493,6 +493,24 @@ export interface FormStudioContent {
   updatedBy?: string;
 }
 
+export type ThemePreference = 'system' | 'light' | 'dark';
+
+export type CalendarEventType = 'Meeting' | 'Deadline' | 'Reminder' | 'Leave';
+
+export interface CalendarEvent {
+  id: string;
+  title: string;
+  date: string; // YYYY-MM-DD
+  time: string; // HH:MM
+  department: Department;
+  type: CalendarEventType;
+  description?: string;
+  createdBy: string;
+  createdByEmail: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type NavSection =
   | 'dashboard'
   | 'requests'
@@ -502,6 +520,7 @@ export type NavSection =
   | 'vault'
   | 'leaves'
   | 'meetings'
+  | 'calendar'
   | 'mailchat'
   | 'workspace'
   | 'audit'
@@ -888,5 +907,6 @@ export interface NexOpsState {
   pendingEditorChanges: PendingEditorChange[];
   corporateMails: CorporateMailMessage[];
   chatMessages: TeamChatMessage[];
+  calendarEvents: CalendarEvent[];
   permissionMatrix: PermissionMatrix;
 }
