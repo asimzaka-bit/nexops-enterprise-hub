@@ -107,10 +107,12 @@ import {
   getTodayDateString,
   isAssetAlert,
   isSuperAdminEmail,
+  isSuperAdminEmployeeId,
   normalizePermissionMatrix,
   normalizeRole,
   requiresTwoTierApproval,
   resolveEffectiveReviewer,
+  SUPER_ADMIN_EMPLOYEE_ID,
 } from './utils/storage';
 
 export default function App() {
@@ -222,6 +224,10 @@ export default function App() {
   const deletedMailIdsRef = useRef<Set<string>>(new Set());
   const deletedCalendarIdsRef = useRef<Set<string>>(new Set());
   const recentlyOfflineTimersRef = useRef<Map<string, number>>(new Map());
+  const [passwordRecoveryState, setPasswordRecoveryState] = useState<{
+    active: boolean;
+    email: string;
+  }>({ active: false, email: '' });
 
   // Unified Google Workspace OAuth session state shared across Gmail, Docs, Sheets & Forms
   const [googleToken, setGoogleToken] = useState<string | null>(() =>
@@ -394,7 +400,9 @@ export default function App() {
         rememberSession: true,
         signedInAt: matchingSaved?.signedInAt ?? new Date().toISOString(),
         authProvider: 'supabase',
-        employeeId: matchingSaved?.employeeId || member.employeeId,
+        employeeId: isSuper
+          ? SUPER_ADMIN_EMPLOYEE_ID
+          : matchingSaved?.employeeId || member.employeeId,
         userName: matchingSaved?.userName || member.name,
         userEmail: member.email,
         userRole: isSuper ? 'Admin' : savedClampedRole || resolvedRole,
@@ -422,6 +430,14 @@ export default function App() {
     });
 
     const { data: authListener } = client.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setPasswordRecoveryState({
+          active: true,
+          email: session?.user?.email ?? '',
+        });
+        setAuthSession(null);
+        return;
+      }
       if (event === 'SIGNED_IN' && session?.user) {
         if (isSigningInRef.current) return;
         applySupabaseUser(session.user, false);
@@ -609,6 +625,7 @@ export default function App() {
         if (isSuperAdminEmail(bySessionId.email)) {
           return {
             ...bySessionId,
+            employeeId: SUPER_ADMIN_EMPLOYEE_ID,
             role: 'Admin',
             approvalStatus: 'approved',
             isSuperAdmin: true,
@@ -629,9 +646,10 @@ export default function App() {
           : 'Viewer';
       return {
         id: authSession.userId,
-        employeeId:
-          authSession.employeeId ||
-          `EMP-${authSession.userId.slice(0, 4).toUpperCase()}`,
+        employeeId: isSuper
+          ? SUPER_ADMIN_EMPLOYEE_ID
+          : authSession.employeeId ||
+            `EMP-${authSession.userId.slice(0, 4).toUpperCase()}`,
         name: authSession.userName || authSession.userEmail || 'Authenticated User',
         email: authSession.userEmail || '',
         role: fallbackRole,
@@ -677,6 +695,13 @@ export default function App() {
       lastActive: new Date().toISOString(),
     };
   }, [authSession, state.teamMembers, branding.departments]);
+
+  const isSuperAdminOperator = Boolean(
+    authSession?.isAuthenticated &&
+      currentUser.role === 'Admin' &&
+      isSuperAdminEmail(currentUser.email) &&
+      isSuperAdminEmployeeId(currentUser.employeeId),
+  );
 
   const isApprovedUser = Boolean(
     authSession?.isAuthenticated &&
@@ -759,17 +784,17 @@ export default function App() {
     }
   }, [authSession?.isAuthenticated, currentUser.role, state.activeRole]);
 
-  // Non-Admins must NEVER remain on Admin-only sections (Settings or Activity Audit Trail)
+  // Non-Super-Admins must NEVER remain on Admin-only sections (Settings or Activity Audit Trail)
   useEffect(() => {
-    if ((activeSection === 'settings' || activeSection === 'audit') && currentUser.role !== 'Admin') {
+    if ((activeSection === 'settings' || activeSection === 'audit') && !isSuperAdminOperator) {
       setActiveSection('dashboard');
     }
-  }, [activeSection, currentUser.role]);
+  }, [activeSection, isSuperAdminOperator]);
 
   useEffect(() => {
     if (
       activeSection === 'settings' &&
-      currentUser.role === 'Admin' &&
+      isSuperAdminOperator &&
       authSession?.isAuthenticated &&
       isApprovedUser &&
       dataService.isSupabaseConfigured()
@@ -1807,12 +1832,26 @@ export default function App() {
   };
 
   const handleResetPassword = async (email: string) => {
-    await dataService.auth.resetPasswordForEmail(email);
+    const res = await dataService.auth.resetPasswordForEmail(email);
     pushToast(
-      'Password Reset Email Sent',
-      `Recovery link sent to ${email.trim()}.`,
+      res.emailSent ? 'Password Reset Email Sent' : 'Password Recovery Ready',
+      res.message,
       'info',
     );
+    return res;
+  };
+
+  const handleCompletePasswordReset = async (email: string, newPassword: string) => {
+    const res = await dataService.auth.completePasswordReset(email, newPassword);
+    setPasswordRecoveryState({ active: false, email: '' });
+    pushToast(
+      'Password Updated',
+      res.cloudUpdated
+        ? `Supabase password updated for ${email.trim().toLowerCase()}.`
+        : `New password saved for ${email.trim().toLowerCase()}.`,
+      'success',
+    );
+    return res;
   };
 
   const handleRegisterInitialAdmin = async (
@@ -3869,8 +3908,8 @@ export default function App() {
 
   // Admin-Only Team, Approval & Master Key Management Handlers (Zero-Lag Optimistic UI + Rollback)
   const handleUpdateMemberRole = (memberId: string, role: Role) => {
-    if (currentUser.role !== 'Admin') {
-      pushToast('Admin Access Required', 'Only verified Admins can modify user roles.', 'error');
+    if (!isSuperAdminOperator) {
+      pushToast('Super Admin Required', 'Only the verified Super Admin can modify user roles.', 'error');
       return;
     }
     const target = state.teamMembers.find((m) => m.id === memberId);
@@ -3968,8 +4007,8 @@ export default function App() {
   };
 
   const handleToggleMemberActive = (memberId: string) => {
-    if (currentUser.role !== 'Admin') {
-      pushToast('Admin Access Required', 'Only verified Admins can change account status.', 'error');
+    if (!isSuperAdminOperator) {
+      pushToast('Super Admin Required', 'Only the verified Super Admin can change account status.', 'error');
       return;
     }
     const target = state.teamMembers.find((m) => m.id === memberId);
@@ -4034,7 +4073,7 @@ export default function App() {
   };
 
   const handleRefreshUsersFromCloud = async (silent = false) => {
-    if (currentUser.role !== 'Admin') return;
+    if (!isSuperAdminOperator) return;
     try {
       const freshMembers = await dataService.team.fetchProfilesFromCloud(state.teamMembers);
       setState((prev) => ({
@@ -4066,8 +4105,8 @@ export default function App() {
     department: Department;
     role: Role;
   }) => {
-    if (currentUser.role !== 'Admin') {
-      throw new Error('Only verified Admins can pre-approve or add users.');
+    if (!isSuperAdminOperator) {
+      throw new Error('Only the verified Super Admin can pre-approve or add users.');
     }
     const cleanEmail = payload.email.trim().toLowerCase();
     if (!cleanEmail || !cleanEmail.includes('@')) {
@@ -4179,8 +4218,8 @@ export default function App() {
   };
 
   const handleApproveUser = (memberId: string, assignedRole: Role) => {
-    if (currentUser.role !== 'Admin') {
-      pushToast('Admin Access Required', 'Only verified Admins can approve pending accounts.', 'error');
+    if (!isSuperAdminOperator) {
+      pushToast('Super Admin Required', 'Only the verified Super Admin can approve pending accounts.', 'error');
       return;
     }
     const target = state.teamMembers.find((m) => m.id === memberId);
@@ -4253,8 +4292,8 @@ export default function App() {
   };
 
   const handleRejectUser = (memberId: string) => {
-    if (currentUser.role !== 'Admin') {
-      pushToast('Admin Access Required', 'Only verified Admins can decline pending accounts.', 'error');
+    if (!isSuperAdminOperator) {
+      pushToast('Super Admin Required', 'Only the verified Super Admin can decline pending accounts.', 'error');
       return;
     }
     const target = state.teamMembers.find((m) => m.id === memberId);
@@ -4319,8 +4358,8 @@ export default function App() {
   };
 
   const handleDeleteMember = (memberId: string) => {
-    if (currentUser.role !== 'Admin') {
-      pushToast('Admin Access Required', 'Only verified Admins can delete user records.', 'error');
+    if (!isSuperAdminOperator) {
+      pushToast('Super Admin Required', 'Only the verified Super Admin can delete user records.', 'error');
       return;
     }
     const target = state.teamMembers.find((m) => m.id === memberId);
@@ -4373,8 +4412,8 @@ export default function App() {
   };
 
   const handleProvisionEmployee = async (payload: ProvisionEmployeePayload) => {
-    if (currentUser.role !== 'Admin') {
-      throw new Error('Only an authorized System Administrator can create employee accounts.');
+    if (!isSuperAdminOperator) {
+      throw new Error('Only the authorized Super Admin can create employee accounts.');
     }
 
     const { member, emailConfirmationPending } =
@@ -6116,8 +6155,8 @@ export default function App() {
 
   // Super Admin Maker-Checker Approval & Rejection Handlers
   const handleApproveEditorChange = (changeId: string) => {
-    if (currentUser.role !== 'Admin') {
-      pushToast('Super Admin Required', 'Only Administrators can approve Editor changes.', 'error');
+    if (!isSuperAdminOperator) {
+      pushToast('Super Admin Required', 'Only the Super Admin can approve Editor changes.', 'error');
       return;
     }
     const chg = state.pendingEditorChanges.find((c) => c.id === changeId);
@@ -6628,8 +6667,8 @@ export default function App() {
   };
 
   const handleRejectEditorChange = (changeId: string, reason?: string) => {
-    if (currentUser.role !== 'Admin') {
-      pushToast('Super Admin Required', 'Only Administrators can reject Editor changes.', 'error');
+    if (!isSuperAdminOperator) {
+      pushToast('Super Admin Required', 'Only the Super Admin can reject Editor changes.', 'error');
       return;
     }
     const chg = state.pendingEditorChanges.find((c) => c.id === changeId);
@@ -6709,15 +6748,15 @@ export default function App() {
     const matchedRequest = state.requests.find((r) => r.id === audit.requestId);
     if (matchedRequest) {
       setSelectedRequestId(matchedRequest.id);
-    } else if (currentUser.role === 'Admin') {
+    } else if (isSuperAdminOperator) {
       setActiveSection('audit');
       pushToast('Opened Audit Ledger', `${audit.actionType} · ${audit.actorName}`, 'info');
     }
   };
 
-  // System Backup Export / Restore (Admin Only)
+  // System Backup Export / Restore (Super Admin Only)
   const handleDownloadBackup = () => {
-    if (currentUser.role !== 'Admin') return;
+    if (!isSuperAdminOperator) return;
     downloadSystemBackupJson(state, `${currentUser.name} (${currentUser.employeeId})`);
     const auditEntry = createAuditEvent(
       'SYS-BACKUP',
@@ -6958,16 +6997,22 @@ export default function App() {
     pushToast('Calendar Event Deleted', `${target.title} removed from schedule.`, 'info');
   };
 
-  // Step 1 Guard: unauthenticated users see clean Login screen
-  if (!authSession || !authSession.isAuthenticated) {
+  // Step 1 Guard: unauthenticated users (or active password recovery redirect) see Login / Recovery screen
+  if (!authSession || !authSession.isAuthenticated || passwordRecoveryState.active) {
     return (
       <>
         <LoginScreen
           branding={branding}
           allowInitialAdminSetup={!isAdminInitialized}
+          initialRecoveryMode={passwordRecoveryState.active}
+          initialRecoveryEmail={passwordRecoveryState.email}
+          onClearRecoveryMode={() =>
+            setPasswordRecoveryState({ active: false, email: '' })
+          }
           onEmailSignIn={handleEmailSignIn}
           onRegisterUser={handleRegisterUser}
           onResetPassword={handleResetPassword}
+          onCompletePasswordReset={handleCompletePasswordReset}
           onRegisterInitialAdmin={handleRegisterInitialAdmin}
         />
         <ToastContainer toasts={toasts} onDismiss={dismissToast} />
@@ -7292,7 +7337,7 @@ export default function App() {
                   />
                 )}
 
-                {activeSection === 'audit' && currentUser.role === 'Admin' && (
+                {activeSection === 'audit' && isSuperAdminOperator && (
                   <AuditLogsView
                     logs={state.globalAuditLogs}
                     onInspectRequest={handleInspectRequestById}
@@ -7355,7 +7400,7 @@ export default function App() {
                   />
                 )}
 
-                {activeSection === 'settings' && currentUser.role === 'Admin' && (
+                {activeSection === 'settings' && isSuperAdminOperator && (
                   <TeamSettingsView
                     activeRole={currentUser.role}
                     currentUserEmail={currentUser.email}

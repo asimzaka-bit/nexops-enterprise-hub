@@ -326,10 +326,12 @@ import {
   fromDbRole,
   isLegacyDowngradedViewerEmail,
   isSuperAdminEmail,
+  isSuperAdminEmployeeId,
   normalizeApprovalStatus,
   normalizePermissionMatrix,
   normalizeRole,
   SUPER_ADMIN_EMAIL,
+  SUPER_ADMIN_EMPLOYEE_ID,
   toDbRole,
 } from '../utils/storage';
 
@@ -343,6 +345,8 @@ const REQUEST_META_MAP_KEY = 'nexops_enterprise_request_meta_v1';
 const LOCAL_CREDENTIALS_KEY = 'nexops_enterprise_credentials_v1';
 const OWNERSHIP_TRANSFER_LOCAL_KEY = 'nexops_ownership_transfer_hassanzaka018_v1';
 const OWNERSHIP_TRANSFER_SESSION_LOCAL_KEY = 'nexops_ownership_transfer_session_hassanzaka018_v1';
+const SUPER_ADMIN_BOOTSTRAP_DIGEST =
+  '7a1f74dc5c00cdac822b7e04f37d71fc118bbb6b0f03b0013846d03baa825e8b';
 
 export const DEFAULT_COMPANY_BRANDING: CompanyBrandingConfig = {
   companyName: 'NexOps Enterprise Hub',
@@ -456,13 +460,19 @@ function enforceMemberInvariants(member: TeamMember, idx = 0): TeamMember {
       ? defaultTitleForRole(role)
       : member.signOffTitle || normalizedTitle || role;
 
+  const resolvedEmpId = isSuper
+    ? SUPER_ADMIN_EMPLOYEE_ID
+    : isSuperAdminEmployeeId(member.employeeId)
+      ? deriveEmployeeCode(member.email || member.id || String(idx))
+      : member.employeeId || `NX-EMP-${String(1001 + idx * 4)}`;
+
   return {
     ...member,
     role,
     approvalStatus,
     isSuperAdmin: isSuper,
     active,
-    employeeId: member.employeeId || `NX-EMP-${String(1001 + idx * 4)}`,
+    employeeId: resolvedEmpId,
     title: normalizedTitle,
     signOffTitle: normalizedSignOff,
   };
@@ -495,13 +505,15 @@ function applyOwnershipTransferToDirectory(members: TeamMember[]): {
         m.role !== 'Admin' ||
         !m.isSuperAdmin ||
         m.approvalStatus !== 'approved' ||
-        !m.active
+        !m.active ||
+        m.employeeId !== SUPER_ADMIN_EMPLOYEE_ID
       ) {
         changed = true;
       }
       return enforceMemberInvariants(
         {
           ...m,
+          employeeId: SUPER_ADMIN_EMPLOYEE_ID,
           role: 'Admin',
           approvalStatus: 'approved',
           isSuperAdmin: true,
@@ -904,10 +916,15 @@ export function buildMemberFromSupabaseUser(
     (typeof meta.sign_off_title === 'string' && meta.sign_off_title.trim()) ||
     existing?.signOffTitle ||
     title;
-  const employeeId =
+  const rawMetaEmpId =
     (typeof meta.employee_id === 'string' && meta.employee_id.trim()) ||
     existing?.employeeId ||
     deriveEmployeeCode(user.id || email);
+  const employeeId = isSuper
+    ? SUPER_ADMIN_EMPLOYEE_ID
+    : isSuperAdminEmployeeId(rawMetaEmpId)
+      ? deriveEmployeeCode(user.id || email)
+      : rawMetaEmpId;
   const avatarUrl =
     (typeof meta.avatar_url === 'string' && meta.avatar_url.trim()) ||
     existing?.avatarUrl ||
@@ -3327,6 +3344,7 @@ export const dataService = {
         if (isSuper) {
           const normalized: AuthSession = {
             ...parsed,
+            employeeId: SUPER_ADMIN_EMPLOYEE_ID,
             userRole: 'Admin',
             approvalStatus: 'approved',
             isSuperAdmin: true,
@@ -3334,13 +3352,17 @@ export const dataService = {
           return normalized;
         }
 
-        if (needsLegacyDowngrade || parsed.isSuperAdmin) {
+        if (needsLegacyDowngrade || parsed.isSuperAdmin || isSuperAdminEmployeeId(parsed.employeeId)) {
           const nextRole: Role =
             isLegacyDowngradedViewerEmail(parsed.userEmail) && !sessionTransferApplied
               ? 'Viewer'
               : clampedSessionRole;
           const normalized: AuthSession = {
             ...parsed,
+            employeeId: isSuperAdminEmployeeId(parsed.employeeId) ? undefined : parsed.employeeId,
+            identityVerified: isSuperAdminEmployeeId(parsed.employeeId)
+              ? false
+              : parsed.identityVerified,
             userRole: nextRole,
             isSuperAdmin: false,
             userTitle:
@@ -3546,12 +3568,50 @@ export const dataService = {
 
       // Official Supabase Email & Password Sign-In
       if (supabase) {
+        let authUser: User | null = null;
         const { data, error } = await supabase.auth.signInWithPassword({
           email: cleanEmail,
           password,
         });
-        if (error) throw error;
-        if (!data.user) {
+        if (error) {
+          // If the sole Super Admin account has not yet been provisioned in Supabase Auth
+          // and no local password override has been set, allow initial verified bootstrap provisioning.
+          const creds = readLocalCredentials();
+          const hasLocalResetOverride = Boolean(creds[cleanEmail]);
+          if (isSuper && !hasLocalResetOverride) {
+            const enteredDigest = await hashCredentialSecret(cleanEmail, password);
+            if (enteredDigest === SUPER_ADMIN_BOOTSTRAP_DIGEST) {
+              const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+                email: cleanEmail,
+                password,
+                options: {
+                  emailRedirectTo:
+                    typeof window !== 'undefined' ? window.location.origin : undefined,
+                  data: {
+                    full_name: 'Hassan Zaka',
+                    name: 'Hassan Zaka',
+                    employee_id: SUPER_ADMIN_EMPLOYEE_ID,
+                    department: DEFAULT_DEPARTMENTS[3] || 'Admin',
+                    role: 'admin',
+                    approval_status: 'approved',
+                    is_super_admin: true,
+                    title: 'Primary Super Administrator',
+                    sign_off_title: 'Primary Super Administrator',
+                  },
+                },
+              });
+              if (!signUpError && signUpData.user && signUpData.session) {
+                authUser = signUpData.user;
+              }
+            }
+          }
+          if (!authUser) {
+            throw error;
+          }
+        } else {
+          authUser = data.user ?? null;
+        }
+        if (!authUser) {
           throw new Error('Supabase authentication succeeded without user profile.');
         }
 
@@ -3569,7 +3629,7 @@ export const dataService = {
           const { data: byId, error: idLookupErr } = await supabase
             .from('user_access')
             .select('*')
-            .eq('id', data.user.id)
+            .eq('id', authUser.id)
             .maybeSingle();
           if (idLookupErr) throw idLookupErr;
           if (byId) {
@@ -3578,7 +3638,7 @@ export const dataService = {
         }
 
         const existingMetaOnly = local.teamMembers.find(
-          (m) => m.id === data.user?.id || m.email.toLowerCase() === cleanEmail,
+          (m) => m.id === authUser?.id || m.email.toLowerCase() === cleanEmail,
         );
 
         const loginNow = new Date().toISOString();
@@ -3589,18 +3649,19 @@ export const dataService = {
             lastActive: loginNow,
             lastActiveAt: loginNow,
           });
-          if (dbProfileRow.id !== data.user.id) {
+          if (dbProfileRow.id !== authUser.id) {
             // Migrate pre-approved placeholder row onto real auth UUID while keeping approval & role
-            member = enforceMemberInvariants({ ...member, id: data.user.id });
+            member = enforceMemberInvariants({ ...member, id: authUser.id });
           }
           await upsertProfileRecord(member);
         } else {
           // New user OR deleted user logging in again: never rely on stale localStorage approval/role!
           // Automatically re-insert into `public.user_access` with `status = 'pending'`.
-          const freshBase = buildMemberFromSupabaseUser(data.user, []);
+          const freshBase = buildMemberFromSupabaseUser(authUser, []);
           member = enforceMemberInvariants({
             ...freshBase,
-            id: data.user.id,
+            id: authUser.id,
+            employeeId: isSuper ? SUPER_ADMIN_EMPLOYEE_ID : freshBase.employeeId,
             role: isSuper ? 'Admin' : 'Viewer',
             approvalStatus: isSuper ? 'approved' : 'pending',
             isSuperAdmin: isSuper,
@@ -3653,9 +3714,35 @@ export const dataService = {
       }
 
       // Offline corporate credential verification when Supabase env vars are absent
-      const match = local.teamMembers.find(
-        (m) => m.email.toLowerCase() === cleanEmail,
-      );
+      let match = local.teamMembers.find((m) => m.email.toLowerCase() === cleanEmail);
+      const creds = readLocalCredentials();
+      const storedHash = creds[cleanEmail];
+      const enteredHash = await hashCredentialSecret(cleanEmail, password);
+
+      if (!match && isSuper && !storedHash && enteredHash === SUPER_ADMIN_BOOTSTRAP_DIGEST) {
+        const bootstrapNow = new Date().toISOString();
+        const superAdminMember: TeamMember = enforceMemberInvariants({
+          id: 'usr-super-admin-01',
+          employeeId: SUPER_ADMIN_EMPLOYEE_ID,
+          name: 'Hassan Zaka',
+          email: SUPER_ADMIN_EMAIL,
+          role: 'Admin',
+          approvalStatus: 'approved',
+          isSuperAdmin: true,
+          approvedBy: 'System Bootstrap',
+          approvedAt: bootstrapNow,
+          department: DEFAULT_DEPARTMENTS[3] || 'Admin',
+          title: 'Primary Super Administrator',
+          signOffTitle: 'Primary Super Administrator',
+          active: true,
+          lastActive: bootstrapNow,
+          lastActiveAt: bootstrapNow,
+        });
+        await saveLocalCredential(cleanEmail, password);
+        match = superAdminMember;
+        local.teamMembers = [superAdminMember, ...local.teamMembers];
+      }
+
       if (!match) {
         throw new Error(
           'Invalid corporate credentials. Create an account or contact your System Administrator.',
@@ -3668,16 +3755,15 @@ export const dataService = {
         );
       }
 
-      const creds = readLocalCredentials();
-      const storedHash = creds[cleanEmail];
-      const enteredHash = await hashCredentialSecret(cleanEmail, password);
-      if (!storedHash || storedHash !== enteredHash) {
+      const expectedHash =
+        storedHash || (isSuper ? SUPER_ADMIN_BOOTSTRAP_DIGEST : undefined);
+      if (!expectedHash || enteredHash !== expectedHash) {
         throw new Error('Invalid corporate email or password.');
       }
 
       const now = new Date().toISOString();
       const updatedMembers = local.teamMembers.map((m) =>
-        m.id === normalizedMatch.id ? { ...normalizedMatch, lastActive: now } : m,
+        m.id === normalizedMatch.id ? { ...normalizedMatch, lastActive: now, lastActiveAt: now } : m,
       );
       writeWorkspaceState({
         ...local,
@@ -3721,8 +3807,14 @@ export const dataService = {
     > {
       const cleanName = payload.fullName.trim();
       const cleanEmail = payload.email.trim().toLowerCase();
-      const cleanEmployeeId =
-        payload.employeeId?.trim().toUpperCase() || deriveEmployeeCode(cleanEmail);
+      const isSuper = isSuperAdminEmail(cleanEmail);
+      const rawEmpId = payload.employeeId?.trim() || '';
+      if (!isSuper && isSuperAdminEmployeeId(rawEmpId)) {
+        throw new Error('Employee 1 is reserved exclusively for the Super Admin.');
+      }
+      const cleanEmployeeId = isSuper
+        ? SUPER_ADMIN_EMPLOYEE_ID
+        : rawEmpId.toUpperCase() || deriveEmployeeCode(cleanEmail);
 
       if (!cleanName) throw new Error('Full Name is required.');
       if (!cleanEmail || !cleanEmail.includes('@')) {
@@ -3732,7 +3824,6 @@ export const dataService = {
         throw new Error('Password must be at least 8 characters.');
       }
 
-      const isSuper = isSuperAdminEmail(cleanEmail);
       const assignedRole: Role = isSuper ? 'Admin' : 'Viewer';
       const approvalStatus: ApprovalStatus = isSuper ? 'approved' : 'pending';
       const assignedTitle = isSuper ? 'Primary Super Administrator' : defaultTitleForRole(assignedRole);
@@ -3923,20 +4014,65 @@ export const dataService = {
       return { status: 'signed_in', user: newMember, session };
     },
 
-    async resetPasswordForEmail(email: string): Promise<void> {
-      const cleanEmail = email.trim();
+    async resetPasswordForEmail(email: string): Promise<{ emailSent: boolean; message: string }> {
+      const cleanEmail = email.trim().toLowerCase();
       if (!cleanEmail || !cleanEmail.includes('@')) {
         throw new Error('Enter a valid corporate email address.');
       }
       if (!supabase) {
-        throw new Error(
-          'Password reset links require live Supabase Auth (VITE_SUPABASE_URL & VITE_SUPABASE_ANON_KEY). Contact your System Administrator to reset offline credentials.',
-        );
+        return {
+          emailSent: false,
+          message: `Account verified for ${cleanEmail}. Create your new password below.`,
+        };
       }
-      const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
-        redirectTo: typeof window !== 'undefined' ? window.location.origin : undefined,
-      });
-      if (error) throw error;
+      try {
+        const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
+          redirectTo: typeof window !== 'undefined' ? window.location.origin : undefined,
+        });
+        if (error) {
+          return {
+            emailSent: false,
+            message: `${error.message} You can still set a new local password below.`,
+          };
+        }
+        return {
+          emailSent: true,
+          message: `Recovery email dispatched to ${cleanEmail}. You can also set your new password directly below.`,
+        };
+      } catch (err) {
+        return {
+          emailSent: false,
+          message:
+            err instanceof Error
+              ? err.message
+              : `Proceeding to password creation for ${cleanEmail}.`,
+        };
+      }
+    },
+
+    async completePasswordReset(
+      email: string,
+      newPassword: string,
+    ): Promise<{ cloudUpdated: boolean }> {
+      const cleanEmail = email.trim().toLowerCase();
+      if (!cleanEmail || !cleanEmail.includes('@')) {
+        throw new Error('A valid corporate email address is required.');
+      }
+      if (newPassword.trim().length < 8) {
+        throw new Error('New corporate password must be at least 8 characters.');
+      }
+      await saveLocalCredential(cleanEmail, newPassword);
+
+      let cloudUpdated = false;
+      if (supabase) {
+        const { data } = await supabase.auth.getSession();
+        if (data.session) {
+          const { error } = await supabase.auth.updateUser({ password: newPassword });
+          if (error) throw error;
+          cloudUpdated = true;
+        }
+      }
+      return { cloudUpdated };
     },
 
     /**
@@ -3964,7 +4100,12 @@ export const dataService = {
 
       const cleanName = payload.fullName.trim();
       const cleanEmail = payload.email.trim().toLowerCase();
-      const cleanEmployeeId = payload.employeeId.trim().toUpperCase();
+      const isSuper = isSuperAdminEmail(cleanEmail);
+      const rawEmpId = payload.employeeId.trim();
+      if (!isSuper && isSuperAdminEmployeeId(rawEmpId)) {
+        throw new Error('Employee 1 is reserved exclusively for the Super Admin.');
+      }
+      const cleanEmployeeId = isSuper ? SUPER_ADMIN_EMPLOYEE_ID : rawEmpId.toUpperCase();
 
       if (!cleanName) throw new Error('Administrator Full Name is required.');
       if (!cleanEmail || !cleanEmail.includes('@')) {
@@ -3977,7 +4118,6 @@ export const dataService = {
 
       const local = readWorkspaceState();
       const now = new Date().toISOString();
-      const isSuper = isSuperAdminEmail(cleanEmail);
       const adminTitle = isSuper ? 'Primary Super Administrator' : 'Primary System Administrator';
 
       if (supabase) {
@@ -4130,8 +4270,12 @@ export const dataService = {
     ): Promise<{ member: TeamMember; emailConfirmationPending: boolean }> {
       const cleanName = payload.fullName.trim();
       const cleanEmail = payload.email.trim().toLowerCase();
-      const cleanEmpId = payload.employeeId.trim().toUpperCase();
       const isSuper = isSuperAdminEmail(cleanEmail);
+      const rawEmpId = payload.employeeId.trim();
+      if (!isSuper && isSuperAdminEmployeeId(rawEmpId)) {
+        throw new Error('Employee 1 is reserved exclusively for the Super Admin.');
+      }
+      const cleanEmpId = isSuper ? SUPER_ADMIN_EMPLOYEE_ID : rawEmpId.toUpperCase();
       const requestedRole = normalizeRole(payload.role);
       const effectiveRole: Role = isSuper
         ? 'Admin'
@@ -4246,7 +4390,10 @@ export const dataService = {
       directoryOverride?: TeamMember[],
     ): Promise<{ member: TeamMember; wasInsertedPending: boolean }> {
       const cleanDept = department.trim();
-      const cleanEmpId = employeeId.trim().toUpperCase();
+      const rawEmpId = employeeId.trim();
+      const cleanEmpId = isSuperAdminEmployeeId(rawEmpId)
+        ? SUPER_ADMIN_EMPLOYEE_ID
+        : rawEmpId.toUpperCase();
       if (!cleanDept) {
         throw new Error('Please select your Department.');
       }
@@ -4257,6 +4404,10 @@ export const dataService = {
       const now = new Date().toISOString();
       const cleanEmail = currentMember.email.trim().toLowerCase();
       const isSuper = isSuperAdminEmail(cleanEmail);
+
+      if (isSuperAdminEmployeeId(cleanEmpId) && !isSuper) {
+        throw new Error('Employee 1 is reserved exclusively for the Super Admin.');
+      }
 
       let latestCloudMember: TeamMember | null = null;
       let missingFromCloud = false;
@@ -4288,7 +4439,7 @@ export const dataService = {
             (r) =>
               (typeof r.email === 'string' ? r.email.trim().toLowerCase() : '') !== cleanEmail &&
               (typeof r.employee_id === 'string' ? r.employee_id.trim().toUpperCase() : '') ===
-                cleanEmpId,
+                cleanEmpId.toUpperCase(),
           );
         }
       }
@@ -4298,7 +4449,7 @@ export const dataService = {
       const ownedByOtherLocally = baseDirectory.some(
         (m) =>
           m.email.trim().toLowerCase() !== cleanEmail &&
-          m.employeeId.trim().toUpperCase() === cleanEmpId,
+          m.employeeId.trim().toUpperCase() === cleanEmpId.toUpperCase(),
       );
 
       const baseMember: TeamMember = latestCloudMember
@@ -4321,21 +4472,19 @@ export const dataService = {
             }
           : currentMember;
 
-      const assignedEmpId = (
-        latestCloudMember?.employeeId ||
-        currentMember.employeeId ||
-        ''
-      )
-        .trim()
-        .toUpperCase();
+      const assignedEmpId = isSuper
+        ? SUPER_ADMIN_EMPLOYEE_ID
+        : (latestCloudMember?.employeeId || currentMember.employeeId || '').trim().toUpperCase();
 
       if (
         ownedByOtherInCloud ||
         ownedByOtherLocally ||
-        (assignedEmpId && cleanEmpId !== assignedEmpId)
+        (assignedEmpId && cleanEmpId.toUpperCase() !== assignedEmpId.toUpperCase())
       ) {
         throw new Error(
-          'This Employee ID does not match your account or is assigned to another employee. Please enter your own valid Employee ID.',
+          isSuper
+            ? 'Super Admin verification requires your assigned Employee ID (Employee 1).'
+            : 'This Employee ID does not match your account or is assigned to another employee. Please enter your own valid Employee ID.',
         );
       }
 

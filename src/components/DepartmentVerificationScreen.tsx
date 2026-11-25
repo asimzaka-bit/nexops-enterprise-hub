@@ -1,7 +1,7 @@
 import { AlertCircle, ArrowLeft, BadgeCheck, Building2, Lock } from 'lucide-react';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { CompanyBrandingConfig, Department, TeamMember } from '../types/nexops';
-import { isSuperAdminEmail } from '../utils/storage';
+import { isSuperAdminEmail, isSuperAdminEmployeeId } from '../utils/storage';
 import { NexOpsLogo } from './NexOpsLogo';
 
 interface DepartmentVerificationScreenProps {
@@ -60,13 +60,21 @@ export function DepartmentVerificationScreen({
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     const cleanDept = isSuperAdmin ? department.trim() : assignedDepartment;
-    const cleanEmpId = employeeId.trim().toUpperCase();
+    const rawEmpId = employeeId.trim();
+    const cleanEmpId = isSuperAdminEmployeeId(rawEmpId)
+      ? 'Employee 1'
+      : rawEmpId.toUpperCase();
     if (!cleanDept) {
       setError('Please select your Department.');
       return;
     }
-    if (!cleanEmpId) {
+    if (!rawEmpId) {
       setError('Please enter your Employee ID (e.g., EMP-001).');
+      return;
+    }
+
+    if (isSuperAdminEmployeeId(cleanEmpId) && !isSuperAdmin) {
+      setError('Employee 1 is reserved exclusively for the Super Admin.');
       return;
     }
 
@@ -74,12 +82,16 @@ export function DepartmentVerificationScreen({
     const ownedByOther = teamMembers.some(
       (m) =>
         m.email.trim().toLowerCase() !== cleanUserEmail &&
-        m.employeeId.trim().toUpperCase() === cleanEmpId,
+        m.employeeId.trim().toUpperCase() === cleanEmpId.toUpperCase(),
     );
-    const expectedEmpId = (assignedEmployeeId ?? '').trim().toUpperCase();
-    if (ownedByOther || (expectedEmpId && cleanEmpId !== expectedEmpId)) {
+    const expectedEmpId = isSuperAdmin
+      ? 'EMPLOYEE 1'
+      : (assignedEmployeeId ?? '').trim().toUpperCase();
+    if (ownedByOther || (expectedEmpId && cleanEmpId.toUpperCase() !== expectedEmpId)) {
       setError(
-        'This Employee ID does not match your account or is assigned to another employee. Please enter your own valid Employee ID.',
+        isSuperAdmin
+          ? 'Super Admin verification requires your assigned Employee ID (Employee 1).'
+          : 'This Employee ID does not match your account or is assigned to another employee. Please enter your own valid Employee ID.',
       );
       return;
     }

@@ -20,6 +20,7 @@ import {
 } from '../types/nexops';
 
 export const SUPER_ADMIN_EMAIL = 'hassanzaka018@gmail.com';
+export const SUPER_ADMIN_EMPLOYEE_ID = 'Employee 1';
 export const LEGACY_DOWNGRADED_VIEWER_EMAILS = [
   'ghangster777@gmail.com',
   'asim.zaka@mmpakistan.com',
@@ -27,6 +28,10 @@ export const LEGACY_DOWNGRADED_VIEWER_EMAILS = [
 
 export function isSuperAdminEmail(email?: string | null): boolean {
   return (email ?? '').trim().toLowerCase() === SUPER_ADMIN_EMAIL;
+}
+
+export function isSuperAdminEmployeeId(employeeId?: string | null): boolean {
+  return (employeeId ?? '').trim().toUpperCase() === 'EMPLOYEE 1';
 }
 
 export function isLegacyDowngradedViewerEmail(email?: string | null): boolean {

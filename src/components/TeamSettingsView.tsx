@@ -50,8 +50,10 @@ import {
   formatDateTime,
   formatStorageSize,
   isSuperAdminEmail,
+  isSuperAdminEmployeeId,
   parseSystemBackupJson,
   resolveLivePresenceOverride,
+  SUPER_ADMIN_EMPLOYEE_ID,
 } from '../utils/storage';
 import { PresenceBadge } from './StatusIndicator';
 import { UserAvatar } from './UserAvatar';
@@ -153,7 +155,7 @@ const PERMISSION_LABELS: { key: PermissionKey; label: string; scope: string }[] 
 
 function generateNextEmployeeId(members: TeamMember[]): string {
   const maxNum = members.reduce((max, m) => {
-    const match = m.employeeId.match(/(\d+)$/);
+    const match = m.employeeId.match(/^EMP-(\d+)$/i);
     if (match) {
       const n = parseInt(match[1], 10);
       return n > max && n < 1000 ? n : max;
@@ -422,14 +424,22 @@ export function TeamSettingsView({
       setFormError('Temporary password must be at least 8 characters.');
       return;
     }
+    const cleanTargetEmail = newEmail.trim();
+    const rawEmpId = newEmployeeId.trim();
+    if (isSuperAdminEmployeeId(rawEmpId) && !isSuperAdminEmail(cleanTargetEmail)) {
+      setFormError('Employee 1 is reserved exclusively for the Super Admin.');
+      return;
+    }
 
     setFormError(null);
     setProvisioning(true);
     try {
       await onProvisionEmployee({
         fullName: newName.trim(),
-        email: newEmail.trim(),
-        employeeId: newEmployeeId.trim().toUpperCase(),
+        email: cleanTargetEmail,
+        employeeId: isSuperAdminEmail(cleanTargetEmail)
+          ? SUPER_ADMIN_EMPLOYEE_ID
+          : rawEmpId.toUpperCase(),
         password: newPassword,
         role: newRole,
         department: newDept,
