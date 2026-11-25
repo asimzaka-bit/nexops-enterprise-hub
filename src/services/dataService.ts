@@ -161,10 +161,14 @@
  * ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS approved_by TEXT;
  * ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ;
  *
- * -- Ensure permanent Super Admin profile
+ * -- Ensure sole permanent Super Admin profile & standard Viewer downgrade
  * UPDATE public.profiles
  * SET role = 'admin', approval_status = 'approved', is_super_admin = true, active = true
- * WHERE LOWER(email) = 'asim.zaka@mmpakistan.com';
+ * WHERE LOWER(email) = 'hassanzaka018@gmail.com';
+ *
+ * UPDATE public.profiles
+ * SET role = 'viewer', is_super_admin = false
+ * WHERE LOWER(email) IN ('ghangster777@gmail.com', 'asim.zaka@mmpakistan.com');
  *
  * INSERT INTO storage.buckets (id, name, public)
  * VALUES ('avatars', 'avatars', true)
@@ -319,6 +323,7 @@ import {
 } from '../types/nexops';
 import {
   fromDbRole,
+  isLegacyDowngradedViewerEmail,
   isSuperAdminEmail,
   normalizeApprovalStatus,
   normalizePermissionMatrix,
@@ -335,6 +340,8 @@ const REQUEST_PROJECTS_MAP_KEY = 'nexops_enterprise_request_projects_v1';
 const REQUEST_ASSETS_MAP_KEY = 'nexops_enterprise_request_assets_v1';
 const REQUEST_META_MAP_KEY = 'nexops_enterprise_request_meta_v1';
 const LOCAL_CREDENTIALS_KEY = 'nexops_enterprise_credentials_v1';
+const OWNERSHIP_TRANSFER_LOCAL_KEY = 'nexops_ownership_transfer_hassanzaka018_v1';
+const OWNERSHIP_TRANSFER_SESSION_LOCAL_KEY = 'nexops_ownership_transfer_session_hassanzaka018_v1';
 
 export const DEFAULT_COMPANY_BRANDING: CompanyBrandingConfig = {
   companyName: 'NexOps Enterprise Hub',
@@ -417,8 +424,9 @@ function isLegacyDemoMember(member: TeamMember): boolean {
 }
 
 function enforceMemberInvariants(member: TeamMember, idx = 0): TeamMember {
-  const isSuper = isSuperAdminEmail(member.email) || Boolean(member.isSuperAdmin);
-  const role: Role = isSuper ? 'Admin' : normalizeRole(member.role);
+  const isSuper = isSuperAdminEmail(member.email);
+  const parsedRole = normalizeRole(member.role);
+  const role: Role = isSuper ? 'Admin' : parsedRole === 'Editor' ? 'Editor' : 'Viewer';
   let approvalStatus: ApprovalStatus = isSuper
     ? 'approved'
     : normalizeApprovalStatus(
@@ -438,6 +446,15 @@ function enforceMemberInvariants(member: TeamMember, idx = 0): TeamMember {
       active = true;
     }
   }
+  const normalizedTitle =
+    !isSuper && member.title === 'Primary Super Administrator'
+      ? defaultTitleForRole(role)
+      : member.title || (isSuper ? 'Primary Super Administrator' : defaultTitleForRole(role));
+  const normalizedSignOff =
+    !isSuper && member.signOffTitle === 'Primary Super Administrator'
+      ? defaultTitleForRole(role)
+      : member.signOffTitle || normalizedTitle || role;
+
   return {
     ...member,
     role,
@@ -445,8 +462,79 @@ function enforceMemberInvariants(member: TeamMember, idx = 0): TeamMember {
     isSuperAdmin: isSuper,
     active,
     employeeId: member.employeeId || `NX-EMP-${String(1001 + idx * 4)}`,
-    signOffTitle: member.signOffTitle || member.title || role,
+    title: normalizedTitle,
+    signOffTitle: normalizedSignOff,
   };
+}
+
+function hasLocalOwnershipTransferApplied(): boolean {
+  try {
+    return Boolean(localStorage.getItem(OWNERSHIP_TRANSFER_LOCAL_KEY));
+  } catch {
+    return false;
+  }
+}
+
+function markLocalOwnershipTransferApplied(): void {
+  try {
+    localStorage.setItem(OWNERSHIP_TRANSFER_LOCAL_KEY, new Date().toISOString());
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
+function applyOwnershipTransferToDirectory(members: TeamMember[]): {
+  members: TeamMember[];
+  changed: boolean;
+} {
+  let changed = false;
+  const next = members.map((m, idx) => {
+    if (isSuperAdminEmail(m.email)) {
+      if (
+        m.role !== 'Admin' ||
+        !m.isSuperAdmin ||
+        m.approvalStatus !== 'approved' ||
+        !m.active
+      ) {
+        changed = true;
+      }
+      return enforceMemberInvariants(
+        {
+          ...m,
+          role: 'Admin',
+          approvalStatus: 'approved',
+          isSuperAdmin: true,
+          active: true,
+          title: 'Primary Super Administrator',
+          signOffTitle:
+            m.signOffTitle && m.signOffTitle !== 'Workspace Viewer'
+              ? m.signOffTitle
+              : 'Primary Super Administrator',
+        },
+        idx,
+      );
+    }
+    if (isLegacyDowngradedViewerEmail(m.email) || normalizeRole(m.role) === 'Admin') {
+      if (m.role !== 'Viewer' || m.isSuperAdmin) {
+        changed = true;
+      }
+      return enforceMemberInvariants(
+        {
+          ...m,
+          role: 'Viewer',
+          isSuperAdmin: false,
+          title: 'Workspace Viewer',
+          signOffTitle: 'Workspace Viewer',
+        },
+        idx,
+      );
+    }
+    if (m.isSuperAdmin) {
+      changed = true;
+    }
+    return enforceMemberInvariants(m, idx);
+  });
+  return { members: next, changed };
 }
 
 function readWorkspaceState(): NexOpsState {
@@ -463,9 +551,14 @@ function readWorkspaceState(): NexOpsState {
       writeWorkspaceState(seed);
       return seed;
     }
-    const normalizedMembers = parsed.teamMembers
+    const baseMembers = parsed.teamMembers
       .filter((m) => !isLegacyDemoMember(m))
       .map((m, idx) => enforceMemberInvariants(m, idx));
+
+    const transferNeededLocally = !hasLocalOwnershipTransferApplied();
+    const { members: normalizedMembers, changed: membersChanged } = transferNeededLocally
+      ? applyOwnershipTransferToDirectory(baseMembers)
+      : { members: baseMembers, changed: false };
 
     const normalizedProjects: CompanyProject[] = Array.isArray(parsed.projects)
       ? parsed.projects.map((p) => ({
@@ -502,9 +595,9 @@ function readWorkspaceState(): NexOpsState {
       ? parsed.meetings
       : [];
 
-    return {
+    const resultState: NexOpsState = {
       ...parsed,
-      activeRole: normalizeRole(parsed.activeRole),
+      activeRole: transferNeededLocally ? 'Viewer' : normalizeRole(parsed.activeRole),
       requests: parsed.requests.map((r) => ({
         ...r,
         auditTrail: Array.isArray(r.auditTrail)
@@ -535,6 +628,15 @@ function readWorkspaceState(): NexOpsState {
       chatMessages: Array.isArray(parsed.chatMessages) ? parsed.chatMessages : [],
       permissionMatrix: normalizePermissionMatrix(parsed.permissionMatrix),
     };
+
+    if (transferNeededLocally) {
+      if (membersChanged) {
+        writeWorkspaceState(resultState);
+      }
+      markLocalOwnershipTransferApplied();
+    }
+
+    return resultState;
   } catch {
     return createSeedState();
   }
@@ -777,13 +879,14 @@ export function buildMemberFromSupabaseUser(
       .split('@')[0]
       .replace(/[._-]+/g, ' ')
       .replace(/\b\w/g, (ch) => ch.toUpperCase());
+  const resolvedExistingRole = existing?.role ? resolveRole(existing.role) : null;
+  const resolvedMetaRole = meta.role ? resolveRole(meta.role) : null;
+  const candidateRole = resolvedExistingRole ?? resolvedMetaRole ?? 'Viewer';
   const role: Role = isSuper
     ? 'Admin'
-    : existing?.role
-      ? resolveRole(existing.role)
-      : meta.role
-        ? resolveRole(meta.role)
-        : 'Viewer';
+    : candidateRole === 'Editor'
+      ? 'Editor'
+      : 'Viewer';
   const approvalStatus: ApprovalStatus = isSuper
     ? 'approved'
     : existing?.approvalStatus ?? normalizeApprovalStatus(meta.approval_status, email);
@@ -815,7 +918,7 @@ export function buildMemberFromSupabaseUser(
     email,
     role,
     approvalStatus,
-    isSuperAdmin: isSuper || Boolean(existing?.isSuperAdmin),
+    isSuperAdmin: isSuper,
     approvedBy: existing?.approvedBy,
     approvedAt: existing?.approvedAt,
     department,
@@ -1863,9 +1966,189 @@ export const SYSTEM_STATE_KEYS = {
   MASTER_KEY: 'master_key_config',
   DOCUMENT_VAULT: 'document_vault_items',
   PENDING_EDITOR_CHANGES: 'pending_editor_changes',
+  CORPORATE_MAILS: 'nexops_mails',
+  CHAT_MESSAGES: 'nexops_chats',
+  MEET_CALL_CARDS: 'nexops_meet_cards',
+  OWNERSHIP_TRANSFER_V1: 'ownership_transfer_hassanzaka018_v1',
+} as const;
+
+const LEGACY_COMMS_STATE_KEYS = {
   CORPORATE_MAILS: 'corporate_mails',
   CHAT_MESSAGES: 'chat_messages',
 } as const;
+
+export function extractSupabaseErrorMessage(err: unknown): string {
+  if (err instanceof Error && err.message) {
+    return err.message;
+  }
+  if (err && typeof err === 'object') {
+    const e = err as {
+      code?: unknown;
+      message?: unknown;
+      details?: unknown;
+      hint?: unknown;
+      error_description?: unknown;
+    };
+    const parts: string[] = [];
+    if (typeof e.code === 'string' && e.code.trim()) {
+      parts.push(`[${e.code.trim()}]`);
+    }
+    if (typeof e.message === 'string' && e.message.trim()) {
+      parts.push(e.message.trim());
+    } else if (typeof e.error_description === 'string' && e.error_description.trim()) {
+      parts.push(e.error_description.trim());
+    }
+    if (typeof e.details === 'string' && e.details.trim()) {
+      parts.push(e.details.trim());
+    }
+    if (typeof e.hint === 'string' && e.hint.trim()) {
+      parts.push(`Hint: ${e.hint.trim()}`);
+    }
+    if (parts.length > 0) {
+      return parts.join(' — ');
+    }
+    try {
+      const json = JSON.stringify(err);
+      if (json && json !== '{}') return json;
+    } catch {
+      // Ignore JSON serialization error
+    }
+  }
+  if (typeof err === 'string' && err.trim()) {
+    return err.trim();
+  }
+  return 'Saved locally; unable to reach Supabase.';
+}
+
+async function retrySupabaseWrite<T>(
+  operationLabel: string,
+  fn: () => Promise<T>,
+  maxRetries = 2,
+  backoffMs = 1500,
+): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err;
+      const msg = extractSupabaseErrorMessage(err);
+      if (attempt < maxRetries) {
+        console.warn(
+          `[NexOps Cloud Sync] ${operationLabel} attempt ${attempt + 1} failed (${msg}). Retrying in ${backoffMs}ms...`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, backoffMs));
+      } else {
+        console.error(
+          `[NexOps Cloud Sync] ${operationLabel} failed after ${maxRetries + 1} attempts: ${msg}`,
+          err,
+        );
+      }
+    }
+  }
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(extractSupabaseErrorMessage(lastError));
+}
+
+function unionEmailsCaseInsensitive(a: string[] = [], b: string[] = []): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of [...a, ...b]) {
+    const clean = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+    if (clean && !seen.has(clean)) {
+      seen.add(clean);
+      out.push(clean);
+    }
+  }
+  return out;
+}
+
+export function mergeCorporateMails(
+  existing: CorporateMailMessage[],
+  incoming: CorporateMailMessage[],
+  deletedIds?: Iterable<string>,
+): CorporateMailMessage[] {
+  const deletedSet = new Set<string>(deletedIds ?? []);
+  const byId = new Map<string, CorporateMailMessage>();
+
+  for (const item of [...existing, ...incoming]) {
+    if (!item || !item.id || deletedSet.has(item.id)) continue;
+    const prev = byId.get(item.id);
+    if (!prev) {
+      byId.set(item.id, {
+        ...item,
+        readBy: unionEmailsCaseInsensitive(item.readBy),
+      });
+      continue;
+    }
+    const prevTs = new Date(prev.updatedAt || prev.createdAt || 0).getTime();
+    const nextTs = new Date(item.updatedAt || item.createdAt || 0).getTime();
+    const winner = nextTs >= prevTs ? item : prev;
+    byId.set(item.id, {
+      ...winner,
+      readBy: unionEmailsCaseInsensitive(prev.readBy, item.readBy),
+    });
+  }
+
+  return Array.from(byId.values())
+    .sort((a, b) => {
+      const tsB = new Date(b.updatedAt || b.createdAt || 0).getTime();
+      const tsA = new Date(a.updatedAt || a.createdAt || 0).getTime();
+      return tsB - tsA;
+    })
+    .slice(0, 300);
+}
+
+export function mergeChatMessages(
+  existing: TeamChatMessage[],
+  incoming: TeamChatMessage[],
+): TeamChatMessage[] {
+  const byId = new Map<string, TeamChatMessage>();
+  for (const msg of [...existing, ...incoming]) {
+    if (!msg || !msg.id) continue;
+    const prev = byId.get(msg.id);
+    if (!prev) {
+      byId.set(msg.id, {
+        ...msg,
+        readBy: unionEmailsCaseInsensitive(msg.readBy),
+      });
+      continue;
+    }
+    byId.set(msg.id, {
+      ...prev,
+      ...msg,
+      readBy: unionEmailsCaseInsensitive(prev.readBy, msg.readBy),
+    });
+  }
+
+  return Array.from(byId.values())
+    .sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime())
+    .slice(-400);
+}
+
+export function mergeMeetings(
+  existing: MeetingMinute[],
+  incoming: MeetingMinute[],
+): MeetingMinute[] {
+  const byId = new Map<string, MeetingMinute>();
+  for (const meeting of [...existing, ...incoming]) {
+    if (!meeting || !meeting.id) continue;
+    const prev = byId.get(meeting.id);
+    if (!prev) {
+      byId.set(meeting.id, meeting);
+      continue;
+    }
+    const prevTs = new Date(prev.updatedAt || prev.createdAt || 0).getTime();
+    const nextTs = new Date(meeting.updatedAt || meeting.createdAt || 0).getTime();
+    byId.set(meeting.id, nextTs >= prevTs ? meeting : prev);
+  }
+  return Array.from(byId.values()).sort((a, b) => {
+    const tsB = new Date(b.createdAt || b.meetingDate || 0).getTime();
+    const tsA = new Date(a.createdAt || a.meetingDate || 0).getTime();
+    return tsB - tsA;
+  });
+}
 
 interface SyncedRequestMetaBundle {
   projectLinks?: Record<string, RequestProjectLink>;
@@ -2083,11 +2366,12 @@ function mapProfileRowToMember(
 ): TeamMember {
   const email = (row.email ?? existing?.email ?? '').trim();
   const isSuper = isSuperAdminEmail(email);
+  const parsedRowRole = row.role ? fromDbRole(row.role) : existing?.role ?? 'Viewer';
   const role: Role = isSuper
     ? 'Admin'
-    : row.role
-      ? fromDbRole(row.role)
-      : existing?.role ?? 'Viewer';
+    : parsedRowRole === 'Editor'
+      ? 'Editor'
+      : 'Viewer';
   const approvalStatus: ApprovalStatus = isSuper
     ? 'approved'
     : normalizeApprovalStatus(row.status ?? existing?.approvalStatus ?? 'pending', email);
@@ -2123,8 +2407,9 @@ function mapProfileRowToMember(
 async function upsertProfileRecord(member: TeamMember): Promise<void> {
   if (!supabase) return;
   const cleanEmail = member.email.trim().toLowerCase();
-  const isSuper = isSuperAdminEmail(cleanEmail) || Boolean(member.isSuperAdmin);
-  const role: Role = isSuper ? 'Admin' : normalizeRole(member.role);
+  const isSuper = isSuperAdminEmail(cleanEmail);
+  const parsedRole = normalizeRole(member.role);
+  const role: Role = isSuper ? 'Admin' : parsedRole === 'Editor' ? 'Editor' : 'Viewer';
   const rawStatus = normalizeApprovalStatus(member.approvalStatus ?? 'pending', cleanEmail);
   const approvalStatus: ApprovalStatus = isSuper
     ? 'approved'
@@ -2399,9 +2684,45 @@ export const dataService = {
         });
       }
     }
-    const teamMembers: TeamMember[] = Array.from(mergedByKey.values()).map((m, idx) =>
+    let teamMembers: TeamMember[] = Array.from(mergedByKey.values()).map((m, idx) =>
       enforceMemberInvariants(m, idx),
     );
+
+    // One-time cloud ownership transfer migration:
+    // Promote hassanzaka018@gmail.com to sole Super Admin and downgrade legacy admins (ghangster777@gmail.com, asim.zaka@mmpakistan.com, etc.) to Viewer.
+    const cloudTransferRow = sysMap.get(SYSTEM_STATE_KEYS.OWNERSHIP_TRANSFER_V1);
+    if (!cloudTransferRow) {
+      const prevTeamMembers = teamMembers;
+      const { members: migratedMembers } = applyOwnershipTransferToDirectory(prevTeamMembers);
+      teamMembers = migratedMembers;
+      const downgradedTargets = migratedMembers.filter((m, idx) => {
+        const prev = prevTeamMembers[idx];
+        return (
+          !isSuperAdminEmail(m.email) &&
+          (isLegacyDowngradedViewerEmail(m.email) || (prev && prev.role !== m.role))
+        );
+      });
+      const migratedSuper = migratedMembers.find((m) => isSuperAdminEmail(m.email));
+      await Promise.allSettled([
+        ...downgradedTargets.map((m) => upsertProfileRecord(m)),
+        migratedSuper ? upsertProfileRecord(migratedSuper) : Promise.resolve(),
+        dataService.systemState.upsertKey(
+          SYSTEM_STATE_KEYS.TEAM_DIRECTORY,
+          teamMembers,
+          'Ownership Transfer Migration',
+        ),
+        dataService.systemState.upsertKey(
+          SYSTEM_STATE_KEYS.OWNERSHIP_TRANSFER_V1,
+          {
+            soleSuperAdmin: SUPER_ADMIN_EMAIL,
+            downgradedToViewer: ['ghangster777@gmail.com', 'asim.zaka@mmpakistan.com'],
+            completedAt: new Date().toISOString(),
+          },
+          'Ownership Transfer Migration',
+        ),
+      ]);
+      markLocalOwnershipTransferApplied();
+    }
 
     const metaBundleRow = sysMap.get(SYSTEM_STATE_KEYS.REQUEST_META);
     if (metaBundleRow && metaBundleRow.payload && typeof metaBundleRow.payload === 'object') {
@@ -2439,9 +2760,18 @@ export const dataService = {
           )
         : localSnapshot.leaves;
 
-    const meetings: MeetingMinute[] = !momRes.error
+    const sysMeetRow = sysMap.get(SYSTEM_STATE_KEYS.MEET_CALL_CARDS);
+    const sysMeetings: MeetingMinute[] =
+      sysMeetRow && Array.isArray(sysMeetRow.payload)
+        ? (sysMeetRow.payload as MeetingMinute[])
+        : [];
+    const dbMeetings: MeetingMinute[] = !momRes.error
       ? ((momRes.data ?? []) as NexOpsMomDbRow[]).map(mapDbMom)
-      : localSnapshot.meetings;
+      : [];
+    const meetings: MeetingMinute[] =
+      !momRes.error || sysMeetRow
+        ? mergeMeetings(dbMeetings, sysMeetings)
+        : localSnapshot.meetings;
 
     const workspaceEmails: WorkspaceEmailLog[] = !emailRes.error
       ? ((emailRes.data ?? []) as NexOpsWorkspaceEmailDbRow[]).map(mapDbWorkspaceEmail)
@@ -2523,16 +2853,32 @@ export const dataService = {
         : localSnapshot.pendingEditorChanges;
 
     const mailsRow = sysMap.get(SYSTEM_STATE_KEYS.CORPORATE_MAILS);
-    const corporateMails: CorporateMailMessage[] =
-      mailsRow && Array.isArray(mailsRow.payload)
-        ? (mailsRow.payload as CorporateMailMessage[])
-        : localSnapshot.corporateMails;
+    const legacyMailsRow = sysMap.get(LEGACY_COMMS_STATE_KEYS.CORPORATE_MAILS);
+    const hasCloudMails = Boolean(mailsRow || legacyMailsRow);
+    const corporateMails: CorporateMailMessage[] = hasCloudMails
+      ? mergeCorporateMails(
+          Array.isArray(legacyMailsRow?.payload)
+            ? (legacyMailsRow.payload as CorporateMailMessage[])
+            : [],
+          Array.isArray(mailsRow?.payload)
+            ? (mailsRow.payload as CorporateMailMessage[])
+            : [],
+        )
+      : localSnapshot.corporateMails;
 
     const chatRow = sysMap.get(SYSTEM_STATE_KEYS.CHAT_MESSAGES);
-    const chatMessages: TeamChatMessage[] =
-      chatRow && Array.isArray(chatRow.payload)
-        ? (chatRow.payload as TeamChatMessage[])
-        : localSnapshot.chatMessages;
+    const legacyChatRow = sysMap.get(LEGACY_COMMS_STATE_KEYS.CHAT_MESSAGES);
+    const hasCloudChats = Boolean(chatRow || legacyChatRow);
+    const chatMessages: TeamChatMessage[] = hasCloudChats
+      ? mergeChatMessages(
+          Array.isArray(legacyChatRow?.payload)
+            ? (legacyChatRow.payload as TeamChatMessage[])
+            : [],
+          Array.isArray(chatRow?.payload)
+            ? (chatRow.payload as TeamChatMessage[])
+            : [],
+        )
+      : localSnapshot.chatMessages;
 
     const projectLinksMap = readRequestProjectsMap();
     const assetLinksMap = readRequestAssetsMap();
@@ -2895,6 +3241,11 @@ export const dataService = {
           payload: nextState.chatMessages ?? [],
           updated_at: now,
         },
+        {
+          state_key: SYSTEM_STATE_KEYS.MEET_CALL_CARDS,
+          payload: nextState.meetings ?? [],
+          updated_at: now,
+        },
       ];
       const { error: sysErr } = await supabase
         .from('nexops_system_state')
@@ -2916,6 +3267,72 @@ export const dataService = {
         if (!raw) return null;
         const parsed = JSON.parse(raw) as AuthSession;
         if (!parsed || !parsed.isAuthenticated || !parsed.userId) return null;
+
+        const isSuper = isSuperAdminEmail(parsed.userEmail);
+        let sessionTransferApplied = false;
+        try {
+          sessionTransferApplied = Boolean(localStorage.getItem(OWNERSHIP_TRANSFER_SESSION_LOCAL_KEY));
+        } catch {
+          sessionTransferApplied = false;
+        }
+        const parsedSessionRole = normalizeRole(parsed.userRole);
+        const clampedSessionRole: Role =
+          parsedSessionRole === 'Editor' ? 'Editor' : 'Viewer';
+        const needsLegacyDowngrade =
+          (isLegacyDowngradedViewerEmail(parsed.userEmail) || parsedSessionRole === 'Admin') &&
+          (!sessionTransferApplied ||
+            parsedSessionRole === 'Admin' ||
+            Boolean(parsed.isSuperAdmin));
+
+        if (isSuper) {
+          const normalized: AuthSession = {
+            ...parsed,
+            userRole: 'Admin',
+            approvalStatus: 'approved',
+            isSuperAdmin: true,
+          };
+          return normalized;
+        }
+
+        if (needsLegacyDowngrade || parsed.isSuperAdmin) {
+          const nextRole: Role =
+            isLegacyDowngradedViewerEmail(parsed.userEmail) && !sessionTransferApplied
+              ? 'Viewer'
+              : clampedSessionRole;
+          const normalized: AuthSession = {
+            ...parsed,
+            userRole: nextRole,
+            isSuperAdmin: false,
+            userTitle:
+              nextRole === 'Viewer' || parsed.userTitle === 'Primary Super Administrator'
+                ? defaultTitleForRole(nextRole)
+                : parsed.userTitle,
+          };
+          dataService.auth.saveSessionSync(normalized);
+          if (!sessionTransferApplied) {
+            try {
+              localStorage.setItem(
+                OWNERSHIP_TRANSFER_SESSION_LOCAL_KEY,
+                new Date().toISOString(),
+              );
+            } catch {
+              // Ignore storage quota errors
+            }
+          }
+          return normalized;
+        }
+
+        if (!sessionTransferApplied) {
+          try {
+            localStorage.setItem(
+              OWNERSHIP_TRANSFER_SESSION_LOCAL_KEY,
+              new Date().toISOString(),
+            );
+          } catch {
+            // Ignore storage quota errors
+          }
+        }
+
         return parsed;
       } catch {
         return null;
@@ -2970,7 +3387,7 @@ export const dataService = {
       const members = membersOverride ?? readWorkspaceState().teamMembers;
       return members.some(
         (m) =>
-          (isSuperAdminEmail(m.email) || m.role === 'Admin') &&
+          isSuperAdminEmail(m.email) &&
           m.active &&
           (m.approvalStatus ?? 'approved') === 'approved' &&
           !isLegacyDemoMember(m),
@@ -2986,17 +3403,9 @@ export const dataService = {
           const { data: profileAdmins, error: profErr } = await supabase
             .from('user_access')
             .select('id,email,role,status')
-            .or(`role.eq.admin,role.eq.Admin,email.ilike.${SUPER_ADMIN_EMAIL}`)
+            .ilike('email', SUPER_ADMIN_EMAIL)
             .limit(1);
           if (!profErr && Array.isArray(profileAdmins) && profileAdmins.length > 0) {
-            return true;
-          }
-          const { data, error } = await supabase
-            .from('nexops_audit_logs')
-            .select('id')
-            .eq('request_id', 'AUTH-PRIMARY-ADMIN')
-            .limit(1);
-          if (!error && Array.isArray(data) && data.length > 0) {
             return true;
           }
         } catch {
@@ -3306,10 +3715,13 @@ export const dataService = {
           // Proceed with standard pending registration if pre-lookup isn't readable before sign-in
         }
 
+        const preApprovedParsedRole = preApprovedRow?.role
+          ? fromDbRole(preApprovedRow.role)
+          : assignedRole;
         const effectiveRole: Role = isSuper
           ? 'Admin'
-          : preApprovedRow?.status === 'approved' && preApprovedRow.role
-            ? fromDbRole(preApprovedRow.role)
+          : preApprovedRow?.status === 'approved' && preApprovedParsedRole === 'Editor'
+            ? 'Editor'
             : assignedRole;
         const effectiveStatus: ApprovalStatus = isSuper
           ? 'approved'
@@ -3680,7 +4092,12 @@ export const dataService = {
       const cleanEmail = payload.email.trim().toLowerCase();
       const cleanEmpId = payload.employeeId.trim().toUpperCase();
       const isSuper = isSuperAdminEmail(cleanEmail);
-      const effectiveRole: Role = isSuper ? 'Admin' : normalizeRole(payload.role);
+      const requestedRole = normalizeRole(payload.role);
+      const effectiveRole: Role = isSuper
+        ? 'Admin'
+        : requestedRole === 'Editor'
+          ? 'Editor'
+          : 'Viewer';
       const cleanTitle = payload.title?.trim() || defaultTitleForRole(effectiveRole);
 
       if (!cleanName) throw new Error('Employee Full Name is required.');
@@ -3799,25 +4216,50 @@ export const dataService = {
 
       const now = new Date().toISOString();
       const cleanEmail = currentMember.email.trim().toLowerCase();
-      const isSuper = isSuperAdminEmail(cleanEmail) || Boolean(currentMember.isSuperAdmin);
+      const isSuper = isSuperAdminEmail(cleanEmail);
 
       let latestCloudMember: TeamMember | null = null;
       let missingFromCloud = false;
+      let ownedByOtherInCloud = false;
 
       if (supabase && cleanEmail) {
         // Always fetch the latest user record directly from `public.user_access` by email (case-insensitive)
-        const { data: row, error } = await supabase
-          .from('user_access')
-          .select('*')
-          .ilike('email', cleanEmail)
-          .maybeSingle();
+        const [{ data: row, error }, { data: matchingEmpRows, error: empCheckErr }] =
+          await Promise.all([
+            supabase
+              .from('user_access')
+              .select('*')
+              .ilike('email', cleanEmail)
+              .maybeSingle(),
+            supabase
+              .from('user_access')
+              .select('id,email,employee_id')
+              .ilike('employee_id', cleanEmpId),
+          ]);
         if (error) throw error;
+        if (empCheckErr) throw empCheckErr;
         if (row) {
           latestCloudMember = mapProfileRowToMember(row as NexOpsProfileDbRow, currentMember);
         } else {
           missingFromCloud = true;
         }
+        if (Array.isArray(matchingEmpRows)) {
+          ownedByOtherInCloud = matchingEmpRows.some(
+            (r) =>
+              (typeof r.email === 'string' ? r.email.trim().toLowerCase() : '') !== cleanEmail &&
+              (typeof r.employee_id === 'string' ? r.employee_id.trim().toUpperCase() : '') ===
+                cleanEmpId,
+          );
+        }
       }
+
+      const local = readWorkspaceState();
+      const baseDirectory = directoryOverride ?? local.teamMembers;
+      const ownedByOtherLocally = baseDirectory.some(
+        (m) =>
+          m.email.trim().toLowerCase() !== cleanEmail &&
+          m.employeeId.trim().toUpperCase() === cleanEmpId,
+      );
 
       const baseMember: TeamMember = latestCloudMember
         ? {
@@ -3839,16 +4281,37 @@ export const dataService = {
             }
           : currentMember;
 
+      const assignedEmpId = (
+        latestCloudMember?.employeeId ||
+        currentMember.employeeId ||
+        ''
+      )
+        .trim()
+        .toUpperCase();
+
+      if (
+        ownedByOtherInCloud ||
+        ownedByOtherLocally ||
+        (assignedEmpId && cleanEmpId !== assignedEmpId)
+      ) {
+        throw new Error(
+          'This Employee ID does not match your account or is assigned to another employee. Please enter your own valid Employee ID.',
+        );
+      }
+
+      // Lock Department to the user's assigned department unless the user is Super Admin
+      const effectiveDepartment = isSuper
+        ? cleanDept
+        : (baseMember.department || '').trim() || cleanDept;
+
       const updatedMember: TeamMember = enforceMemberInvariants({
         ...baseMember,
-        department: cleanDept,
-        employeeId: cleanEmpId,
+        department: effectiveDepartment,
+        employeeId: assignedEmpId || cleanEmpId,
         lastActive: now,
         lastActiveAt: now,
       });
 
-      const local = readWorkspaceState();
-      const baseDirectory = directoryOverride ?? local.teamMembers;
       const exists = baseDirectory.some(
         (m) => m.id === updatedMember.id || (cleanEmail && m.email.trim().toLowerCase() === cleanEmail),
       );
@@ -4506,16 +4969,11 @@ export const dataService = {
   },
 
   // -------------------------------------------------------------------------
-  // 9. Meeting Minutes & Action Items (`nexops_moms`)
+  // 9. Meeting Minutes & Action Items (`nexops_system_state` + `nexops_moms`)
   // -------------------------------------------------------------------------
   meetings: {
     async upsert(meeting: MeetingMinute, auditEntry?: AuditEvent): Promise<void> {
-      if (!supabase) return;
-      const { error } = await supabase
-        .from('nexops_moms')
-        .upsert(toMomDbRow(meeting), { onConflict: 'id' });
-      if (error) throw error;
-      if (auditEntry) await dataService.auditLogs.append(auditEntry);
+      await dataService.comms.saveMeetSession(meeting, meeting.facilitator, auditEntry);
     },
   },
 
@@ -4530,22 +4988,45 @@ export const dataService = {
         .select('payload')
         .eq('state_key', stateKey)
         .maybeSingle();
-      if (error) return null;
+      if (error) {
+        console.warn(
+          `[NexOps Cloud Sync] Failed reading nexops_system_state[${stateKey}]:`,
+          extractSupabaseErrorMessage(error),
+        );
+        return null;
+      }
       return (data?.payload as T) ?? null;
     },
 
     async upsertKey(stateKey: string, payload: unknown, updatedBy?: string): Promise<void> {
       if (!supabase) return;
+      const now = new Date().toISOString();
       const { error } = await supabase.from('nexops_system_state').upsert(
         {
           state_key: stateKey,
           payload,
           updated_by: updatedBy ?? null,
-          updated_at: new Date().toISOString(),
+          updated_at: now,
         },
         { onConflict: 'state_key' },
       );
-      if (error) throw error;
+      if (error) {
+        if (isMissingColumnError(error, 'updated_by')) {
+          const { error: fallbackErr } = await supabase.from('nexops_system_state').upsert(
+            {
+              state_key: stateKey,
+              payload,
+              updated_at: now,
+            },
+            { onConflict: 'state_key' },
+          );
+          if (fallbackErr) {
+            throw new Error(extractSupabaseErrorMessage(fallbackErr));
+          }
+          return;
+        }
+        throw new Error(extractSupabaseErrorMessage(error));
+      }
     },
   },
 
@@ -4908,7 +5389,12 @@ export const dataService = {
       }
 
       const isSuper = isSuperAdminEmail(cleanEmail);
-      const effectiveRole: Role = isSuper ? 'Admin' : normalizeRole(payload.role);
+      const requestedRole = normalizeRole(payload.role);
+      const effectiveRole: Role = isSuper
+        ? 'Admin'
+        : requestedRole === 'Editor'
+          ? 'Editor'
+          : 'Viewer';
       const now = new Date().toISOString();
       const local = readWorkspaceState();
       const directory = existingMembers ?? local.teamMembers;
@@ -5194,39 +5680,170 @@ export const dataService = {
       mails: CorporateMailMessage[],
       updatedBy?: string,
       auditEntry?: AuditEvent,
-    ): Promise<void> {
-      const capped = mails.slice(0, 300);
+      deletedIds?: string[],
+    ): Promise<CorporateMailMessage[]> {
       const local = readWorkspaceState();
+      const localMerged = mergeCorporateMails(local.corporateMails, mails, deletedIds);
       writeWorkspaceState({
         ...local,
-        corporateMails: capped,
+        corporateMails: localMerged,
       });
-      if (!supabase) return;
-      const tasks: Promise<void>[] = [
-        dataService.systemState.upsertKey(SYSTEM_STATE_KEYS.CORPORATE_MAILS, capped, updatedBy),
-      ];
+
+      if (!supabase) return localMerged;
+
+      const synced = await retrySupabaseWrite(
+        'nexops_system_state[nexops_mails]',
+        async () => {
+          const [cloudPrimary, cloudLegacy] = await Promise.all([
+            dataService.systemState.getKey<CorporateMailMessage[]>(SYSTEM_STATE_KEYS.CORPORATE_MAILS),
+            dataService.systemState.getKey<CorporateMailMessage[]>(
+              LEGACY_COMMS_STATE_KEYS.CORPORATE_MAILS,
+            ),
+          ]);
+          const cloudCombined = mergeCorporateMails(
+            Array.isArray(cloudLegacy) ? cloudLegacy : [],
+            Array.isArray(cloudPrimary) ? cloudPrimary : [],
+            deletedIds,
+          );
+          const merged = mergeCorporateMails(cloudCombined, mails, deletedIds);
+          await dataService.systemState.upsertKey(
+            SYSTEM_STATE_KEYS.CORPORATE_MAILS,
+            merged,
+            updatedBy,
+          );
+          return merged;
+        },
+        2,
+        1500,
+      );
+
+      const refreshedLocal = readWorkspaceState();
+      writeWorkspaceState({
+        ...refreshedLocal,
+        corporateMails: synced,
+      });
+
       if (auditEntry) {
-        tasks.push(dataService.auditLogs.append(auditEntry));
+        void dataService.auditLogs.append(auditEntry).catch((auditErr) => {
+          console.warn(
+            '[NexOps Audit] Non-blocking mail audit log skipped:',
+            extractSupabaseErrorMessage(auditErr),
+          );
+        });
       }
-      await Promise.all(tasks);
+
+      return synced;
     },
 
     async saveChatMessages(
       messages: TeamChatMessage[],
       updatedBy?: string,
-    ): Promise<void> {
-      const capped = messages.slice(-400);
+    ): Promise<TeamChatMessage[]> {
       const local = readWorkspaceState();
+      const localMerged = mergeChatMessages(local.chatMessages, messages);
       writeWorkspaceState({
         ...local,
-        chatMessages: capped,
+        chatMessages: localMerged,
       });
-      if (!supabase) return;
-      await dataService.systemState.upsertKey(
-        SYSTEM_STATE_KEYS.CHAT_MESSAGES,
-        capped,
-        updatedBy,
+
+      if (!supabase) return localMerged;
+
+      const synced = await retrySupabaseWrite(
+        'nexops_system_state[nexops_chats]',
+        async () => {
+          const [cloudPrimary, cloudLegacy] = await Promise.all([
+            dataService.systemState.getKey<TeamChatMessage[]>(SYSTEM_STATE_KEYS.CHAT_MESSAGES),
+            dataService.systemState.getKey<TeamChatMessage[]>(LEGACY_COMMS_STATE_KEYS.CHAT_MESSAGES),
+          ]);
+          const cloudCombined = mergeChatMessages(
+            Array.isArray(cloudLegacy) ? cloudLegacy : [],
+            Array.isArray(cloudPrimary) ? cloudPrimary : [],
+          );
+          const merged = mergeChatMessages(cloudCombined, messages);
+          await dataService.systemState.upsertKey(
+            SYSTEM_STATE_KEYS.CHAT_MESSAGES,
+            merged,
+            updatedBy,
+          );
+          return merged;
+        },
+        2,
+        1500,
       );
+
+      const refreshedLocal = readWorkspaceState();
+      writeWorkspaceState({
+        ...refreshedLocal,
+        chatMessages: synced,
+      });
+
+      return synced;
+    },
+
+    async saveMeetSession(
+      meeting: MeetingMinute,
+      updatedBy?: string,
+      auditEntry?: AuditEvent,
+    ): Promise<MeetingMinute[]> {
+      const local = readWorkspaceState();
+      const localMerged = mergeMeetings(local.meetings, [meeting]);
+      writeWorkspaceState({
+        ...local,
+        meetings: localMerged,
+      });
+
+      if (!supabase) return localMerged;
+
+      const synced = await retrySupabaseWrite(
+        'nexops_system_state[nexops_meet_cards]',
+        async () => {
+          const cloudMeetings = await dataService.systemState.getKey<MeetingMinute[]>(
+            SYSTEM_STATE_KEYS.MEET_CALL_CARDS,
+          );
+          const merged = mergeMeetings(
+            Array.isArray(cloudMeetings) ? cloudMeetings : [],
+            [meeting],
+          );
+          await dataService.systemState.upsertKey(
+            SYSTEM_STATE_KEYS.MEET_CALL_CARDS,
+            merged,
+            updatedBy,
+          );
+          return merged;
+        },
+        2,
+        1500,
+      );
+
+      const refreshedLocal = readWorkspaceState();
+      writeWorkspaceState({
+        ...refreshedLocal,
+        meetings: mergeMeetings(refreshedLocal.meetings, synced),
+      });
+
+      // Mirror non-blockingly to legacy `nexops_moms` and `audit_logs` if present
+      void supabase
+        .from('nexops_moms')
+        .upsert(toMomDbRow(meeting), { onConflict: 'id' })
+        .then(({ error }) => {
+          if (error) {
+            console.warn(
+              '[NexOps Meetings] Non-blocking nexops_moms mirror skipped:',
+              extractSupabaseErrorMessage(error),
+            );
+          }
+        });
+
+      if (auditEntry) {
+        void dataService.auditLogs.append(auditEntry).catch((auditErr) => {
+          console.warn(
+            '[NexOps Audit] Non-blocking Meet audit log skipped:',
+            extractSupabaseErrorMessage(auditErr),
+          );
+        });
+      }
+
+      return synced;
     },
   },
 };

@@ -73,6 +73,7 @@ interface TopBarProps {
   requests: OperationalRequest[];
   auditLogs: AuditEvent[];
   dbConnected: boolean;
+  lastSyncError?: string | null;
   isSyncing: boolean;
   onSyncNow: () => void;
   globalSearch: string;
@@ -199,6 +200,7 @@ export function TopBar({
   requests,
   auditLogs,
   dbConnected,
+  lastSyncError,
   isSyncing,
   onSyncNow,
   globalSearch,
@@ -814,19 +816,34 @@ export function TopBar({
           {/* Live Database Connection Status & Refresh */}
           <div className="hidden shrink-0 items-center gap-1.5 xl:flex">
             <span
+              title={
+                lastSyncError
+                  ? `Supabase Sync Error: ${lastSyncError}`
+                  : dbConnected
+                    ? 'Connected to live Supabase Cloud Sync (nexops_system_state)'
+                    : 'Offline Storage active (unable to reach Supabase)'
+              }
               className={`inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-semibold whitespace-nowrap ${
-                dbConnected
-                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800/70 dark:bg-emerald-950/50 dark:text-emerald-300'
-                  : 'border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                lastSyncError
+                  ? 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800/70 dark:bg-amber-950/50 dark:text-amber-300'
+                  : dbConnected
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800/70 dark:bg-emerald-950/50 dark:text-emerald-300'
+                    : 'border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300'
               }`}
             >
-              {dbConnected ? (
+              {lastSyncError ? (
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+              ) : dbConnected ? (
                 <Cloud className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
               ) : (
                 <HardDrive className="h-3.5 w-3.5 shrink-0 text-slate-500 dark:text-slate-400" />
               )}
               <span>
-                {dbConnected ? 'Cloud Connected: Supabase' : 'Offline Storage'}
+                {lastSyncError
+                  ? 'Sync Warning'
+                  : dbConnected
+                    ? 'Cloud Connected: Supabase'
+                    : 'Offline Storage'}
               </span>
             </span>
 

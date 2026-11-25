@@ -81,6 +81,10 @@ import {
 import {
   buildMemberFromSupabaseUser,
   dataService,
+  extractSupabaseErrorMessage,
+  mergeChatMessages,
+  mergeCorporateMails,
+  mergeMeetings,
   ProvisionEmployeePayload,
   supabase,
   SYSTEM_STATE_KEYS,
@@ -165,6 +169,7 @@ export default function App() {
     () => dataService.isSupabaseConfigured(),
   );
   const [dbConnected, setDbConnected] = useState(false);
+  const [lastSyncError, setLastSyncError] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isCheckingHealth, setIsCheckingHealth] = useState(false);
   const [tableDiagnostics, setTableDiagnostics] = useState<TableSyncStatus[]>(() =>
@@ -179,6 +184,7 @@ export default function App() {
   const [recentlyOfflineKeys, setRecentlyOfflineKeys] = useState<Set<string>>(() => new Set());
   const presenceChannelRef = useRef<ReturnType<NonNullable<typeof supabase>['channel']> | null>(null);
   const commsChannelRef = useRef<ReturnType<NonNullable<typeof supabase>['channel']> | null>(null);
+  const deletedMailIdsRef = useRef<Set<string>>(new Set());
   const recentlyOfflineTimersRef = useRef<Map<string, number>>(new Map());
 
   // Unified Google Workspace OAuth session state shared across Gmail, Docs, Sheets & Forms
@@ -248,11 +254,9 @@ export default function App() {
 
   const handleCloudWriteError = useCallback(
     (err: unknown) => {
-      setDbConnected(false);
-      const message =
-        err instanceof Error
-          ? err.message
-          : 'Saved locally; unable to reach Supabase.';
+      const message = extractSupabaseErrorMessage(err);
+      console.error('[NexOps Cloud Sync Error]', message, err);
+      setLastSyncError(message);
       pushToast('Cloud Sync Warning', message, 'warning');
     },
     [pushToast],
@@ -337,6 +341,17 @@ export default function App() {
           : false
         : matchingSaved?.identityVerified ?? false;
 
+      const isSuper = isSuperAdminEmail(member.email);
+      const resolvedRole: Role = isSuper
+        ? 'Admin'
+        : member.role === 'Editor'
+          ? 'Editor'
+          : 'Viewer';
+      const savedClampedRole: Role | undefined = matchingSaved?.userRole
+        ? matchingSaved.userRole === 'Editor'
+          ? 'Editor'
+          : 'Viewer'
+        : undefined;
       const nextSession: AuthSession = {
         isAuthenticated: true,
         userId: member.id,
@@ -346,11 +361,17 @@ export default function App() {
         employeeId: matchingSaved?.employeeId || member.employeeId,
         userName: matchingSaved?.userName || member.name,
         userEmail: member.email,
-        userRole: matchingSaved?.userRole || member.role,
-        approvalStatus: matchingSaved?.approvalStatus ?? member.approvalStatus,
-        isSuperAdmin: member.isSuperAdmin,
+        userRole: isSuper ? 'Admin' : savedClampedRole || resolvedRole,
+        approvalStatus: isSuper
+          ? 'approved'
+          : matchingSaved?.approvalStatus ?? member.approvalStatus,
+        isSuperAdmin: isSuper,
         userDepartment: matchingSaved?.userDepartment || member.department,
-        userTitle: matchingSaved?.userTitle || member.title,
+        userTitle: isSuper
+          ? 'Primary Super Administrator'
+          : matchingSaved?.userTitle === 'Primary Super Administrator'
+            ? member.title
+            : matchingSaved?.userTitle || member.title,
         avatarUrl: matchingSaved?.avatarUrl || member.avatarUrl,
         identityVerified: preservedIdentityVerified,
       };
@@ -420,10 +441,22 @@ export default function App() {
 
       try {
         const remote = await dataService.fetchFullWorkspaceState();
-        setState(remote.state);
+        setState((prev) => ({
+          ...remote.state,
+          corporateMails: mergeCorporateMails(
+            remote.state.corporateMails,
+            prev.corporateMails,
+            deletedMailIdsRef.current,
+          ),
+          chatMessages: mergeChatMessages(remote.state.chatMessages, prev.chatMessages),
+          meetings: mergeMeetings(remote.state.meetings, prev.meetings),
+        }));
         setBranding(remote.branding);
         setTableDiagnostics(remote.diagnostics);
         setDbConnected(remote.cloudHealthy);
+        if (remote.cloudHealthy) {
+          setLastSyncError(null);
+        }
 
         // Keep active authSession strictly synchronized with authoritative `user_access` cloud state
         const profilesHealthy =
@@ -442,7 +475,8 @@ export default function App() {
               matchedCloudUser.role !== activeSess.userRole ||
               matchedCloudUser.department !== activeSess.userDepartment ||
               matchedCloudUser.employeeId !== activeSess.employeeId ||
-              matchedCloudUser.id !== activeSess.userId
+              matchedCloudUser.id !== activeSess.userId ||
+              Boolean(matchedCloudUser.isSuperAdmin) !== Boolean(activeSess.isSuperAdmin)
             ) {
               const syncedSession: AuthSession = {
                 ...activeSess,
@@ -452,7 +486,8 @@ export default function App() {
                 userDepartment: matchedCloudUser.department,
                 userRole: matchedCloudUser.role,
                 approvalStatus: matchedCloudUser.approvalStatus,
-                isSuperAdmin: matchedCloudUser.isSuperAdmin,
+                isSuperAdmin: isSuperAdminEmail(matchedCloudUser.email),
+                userTitle: matchedCloudUser.title,
               };
               dataService.auth.saveSessionSync(syncedSession);
               setAuthSession(syncedSession);
@@ -479,13 +514,12 @@ export default function App() {
           );
         }
       } catch (err) {
+        const message = extractSupabaseErrorMessage(err);
+        console.error('[NexOps Cloud Sync Error] Full workspace sync failed:', message, err);
         setDbConnected(false);
+        setLastSyncError(message);
         setTableDiagnostics(dataService.getOfflineDiagnostics());
         if (showFeedbackToast) {
-          const message =
-            err instanceof Error
-              ? err.message
-              : 'Could not query Supabase cloud tables.';
           pushToast('Supabase Sync Failed', message, 'warning');
         }
       } finally {
@@ -540,9 +574,18 @@ export default function App() {
             active: true,
           };
         }
-        return bySessionId;
+        return {
+          ...bySessionId,
+          role: bySessionId.role === 'Editor' ? 'Editor' : 'Viewer',
+          isSuperAdmin: false,
+        };
       }
       const isSuper = isSuperAdminEmail(authSession.userEmail || '');
+      const fallbackRole: Role = isSuper
+        ? 'Admin'
+        : authSession.userRole === 'Editor'
+          ? 'Editor'
+          : 'Viewer';
       return {
         id: authSession.userId,
         employeeId:
@@ -550,15 +593,28 @@ export default function App() {
           `EMP-${authSession.userId.slice(0, 4).toUpperCase()}`,
         name: authSession.userName || authSession.userEmail || 'Authenticated User',
         email: authSession.userEmail || '',
-        role: isSuper ? 'Admin' : authSession.userRole || 'Viewer',
+        role: fallbackRole,
         approvalStatus: isSuper
           ? 'approved'
           : authSession.approvalStatus ?? 'pending',
         isSuperAdmin: isSuper,
         department: authSession.userDepartment || branding.departments[0] || 'Operations',
-        title: authSession.userTitle || authSession.userRole || 'Viewer',
+        title:
+          isSuper
+            ? 'Primary Super Administrator'
+            : authSession.userTitle === 'Primary Super Administrator'
+              ? fallbackRole === 'Editor'
+                ? 'Operations Editor'
+                : 'Workspace Viewer'
+              : authSession.userTitle || fallbackRole,
         signOffTitle:
-          authSession.userTitle || authSession.userRole || 'Viewer',
+          isSuper
+            ? 'Primary Super Administrator'
+            : authSession.userTitle === 'Primary Super Administrator'
+              ? fallbackRole === 'Editor'
+                ? 'Operations Editor'
+                : 'Workspace Viewer'
+              : authSession.userTitle || fallbackRole,
         avatarUrl: authSession.avatarUrl,
         active: true,
         lastActive: authSession.signedInAt,
@@ -1185,7 +1241,7 @@ export default function App() {
     };
   }, [authSession, isApprovedUser, currentUser, pushToast, syncFromSupabase]);
 
-  // Sub-second Supabase Realtime Broadcast channel for Live Team Chat & Corporate Mail
+  // Sub-second Supabase Realtime Broadcast channel for Live Team Chat, Corporate Mail & Google Meet
   useEffect(() => {
     const client = supabase;
     if (!client || !authSession?.isAuthenticated || !isApprovedUser) {
@@ -1194,35 +1250,36 @@ export default function App() {
     }
 
     const commsChannel = client
-      .channel('nexops-comms-rt', {
+      .channel('nexops-live-comms', {
         config: { broadcast: { self: false } },
       })
       .on('broadcast', { event: 'chat:message' }, ({ payload }) => {
         const incoming = payload as TeamChatMessage | undefined;
         if (!incoming?.id) return;
-        setState((prev) => {
-          if (prev.chatMessages.some((m) => m.id === incoming.id)) {
-            return prev;
-          }
-          return {
-            ...prev,
-            chatMessages: [...prev.chatMessages, incoming].slice(-400),
-          };
-        });
+        setState((prev) => ({
+          ...prev,
+          chatMessages: mergeChatMessages(prev.chatMessages, [incoming]),
+        }));
       })
       .on('broadcast', { event: 'mail:upsert' }, ({ payload }) => {
         const incoming = payload as CorporateMailMessage | undefined;
         if (!incoming?.id || incoming.status !== 'sent') return;
-        setState((prev) => {
-          const exists = prev.corporateMails.some((m) => m.id === incoming.id);
-          const nextMails = exists
-            ? prev.corporateMails.map((m) => (m.id === incoming.id ? incoming : m))
-            : [incoming, ...prev.corporateMails].slice(0, 300);
-          return {
-            ...prev,
-            corporateMails: nextMails,
-          };
-        });
+        setState((prev) => ({
+          ...prev,
+          corporateMails: mergeCorporateMails(
+            prev.corporateMails,
+            [incoming],
+            deletedMailIdsRef.current,
+          ),
+        }));
+      })
+      .on('broadcast', { event: 'meet:invite' }, ({ payload }) => {
+        const incomingMeeting = payload as MeetingMinute | undefined;
+        if (!incomingMeeting?.id) return;
+        setState((prev) => ({
+          ...prev,
+          meetings: mergeMeetings(prev.meetings, [incomingMeeting]),
+        }));
       })
       .subscribe();
 
@@ -3754,25 +3811,26 @@ export default function App() {
       pushToast('Permanent Super Admin', `${target.email} is permanently locked as Admin.`, 'warning');
       return;
     }
+    const effectiveRole: Role = role === 'Editor' ? 'Editor' : 'Viewer';
     const prevMembers = state.teamMembers;
     const prevAudits = state.globalAuditLogs;
     const auditEntry = createAuditEvent(
       'TEAM-RBAC',
       'Role Changed',
-      `Updated ${target.name} (${target.email}) role from ${target.role} to ${role}.`,
+      `Updated ${target.name} (${target.email}) role from ${target.role} to ${effectiveRole}.`,
       state.activeRole,
     );
     const nextMembers = prevMembers.map((m) =>
-      m.id === memberId ? { ...m, role } : m,
+      m.id === memberId ? { ...m, role: effectiveRole } : m,
     );
     setState((prev) => ({
       ...prev,
       teamMembers: nextMembers,
       globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
     }));
-    pushToast('RBAC Role Updated', `Assigned ${role} permissions.`, 'success');
+    pushToast('RBAC Role Updated', `Assigned ${effectiveRole} permissions.`, 'success');
     void dataService.team
-      .updateMember(memberId, { role }, auditEntry, nextMembers)
+      .updateMember(memberId, { role: effectiveRole }, auditEntry, nextMembers)
       .then(() => {
         if (dataService.isSupabaseConfigured()) setDbConnected(true);
       })
@@ -3787,8 +3845,12 @@ export default function App() {
   };
 
   const handleUpdateMemberDepartment = (memberId: string, department: Department) => {
-    if (currentUser.role !== 'Admin') {
-      pushToast('Admin Access Required', 'Only verified Admins can reassign departments.', 'error');
+    if (currentUser.role !== 'Admin' || !isSuperAdminEmail(currentUser.email)) {
+      pushToast(
+        'Super Admin Access Required',
+        'Only the Super Admin can reassign user departments.',
+        'error',
+      );
       return;
     }
     const target = state.teamMembers.find((m) => m.id === memberId);
@@ -3809,6 +3871,18 @@ export default function App() {
       teamMembers: nextMembers,
       globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
     }));
+    if (
+      authSession &&
+      (memberId === authSession.userId ||
+        target.email.trim().toLowerCase() === (authSession.userEmail ?? '').trim().toLowerCase())
+    ) {
+      const updatedSession: AuthSession = {
+        ...authSession,
+        userDepartment: department,
+      };
+      dataService.auth.saveSessionSync(updatedSession);
+      setAuthSession(updatedSession);
+    }
     pushToast('Department Updated', `Reassigned member to ${department}.`, 'success');
     void dataService.team
       .updateMember(memberId, { department }, auditEntry, nextMembers)
@@ -3935,7 +4009,12 @@ export default function App() {
     const prevMembers = state.teamMembers;
     const prevAudits = state.globalAuditLogs;
     const isSuper = isSuperAdminEmail(cleanEmail);
-    const effectiveRole: Role = isSuper ? 'Admin' : normalizeRole(payload.role);
+    const requestedRole = normalizeRole(payload.role);
+    const effectiveRole: Role = isSuper
+      ? 'Admin'
+      : requestedRole === 'Editor'
+        ? 'Editor'
+        : 'Viewer';
     const now = new Date().toISOString();
     const localExisting = prevMembers.find(
       (m) => m.email.trim().toLowerCase() === cleanEmail,
@@ -4040,7 +4119,11 @@ export default function App() {
     if (!target) return;
     const prevMembers = state.teamMembers;
     const prevAudits = state.globalAuditLogs;
-    const effectiveRole: Role = isSuperAdminEmail(target.email) ? 'Admin' : assignedRole;
+    const effectiveRole: Role = isSuperAdminEmail(target.email)
+      ? 'Admin'
+      : assignedRole === 'Editor'
+        ? 'Editor'
+        : 'Viewer';
     const now = new Date().toISOString();
 
     const auditEntry = createAuditEvent(
@@ -5073,14 +5156,15 @@ export default function App() {
       `${currentUser.name} (${currentUser.role}) sent email "${payload.subject}" to ${payload.toEmails.join(', ')} via ${payload.deliveryMethod}.`,
     );
 
-    const nextMails = [
-      newMail,
-      ...state.corporateMails.filter((m) => m.id !== messageId),
-    ].slice(0, 300);
+    const nextMails = mergeCorporateMails(
+      state.corporateMails,
+      [newMail],
+      deletedMailIdsRef.current,
+    );
 
     setState((prev) => ({
       ...prev,
-      corporateMails: nextMails,
+      corporateMails: mergeCorporateMails(prev.corporateMails, [newMail], deletedMailIdsRef.current),
       globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
     }));
 
@@ -5091,9 +5175,20 @@ export default function App() {
     });
 
     void dataService.comms
-      .saveCorporateMails(nextMails, currentUser.name, auditEntry)
-      .then(() => {
-        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      .saveCorporateMails(nextMails, currentUser.name, auditEntry, Array.from(deletedMailIdsRef.current))
+      .then((syncedMails) => {
+        if (dataService.isSupabaseConfigured()) {
+          setDbConnected(true);
+          setLastSyncError(null);
+        }
+        setState((prev) => ({
+          ...prev,
+          corporateMails: mergeCorporateMails(
+            syncedMails,
+            prev.corporateMails,
+            deletedMailIdsRef.current,
+          ),
+        }));
       })
       .catch(handleCloudWriteError);
 
@@ -5125,18 +5220,26 @@ export default function App() {
       createdAt: existing?.createdAt || now,
       updatedAt: now,
     };
-    const nextMails = [
-      draft,
-      ...state.corporateMails.filter((m) => m.id !== draftId),
-    ].slice(0, 300);
+    deletedMailIdsRef.current.delete(draftId);
+    const nextMails = mergeCorporateMails(
+      state.corporateMails,
+      [draft],
+      deletedMailIdsRef.current,
+    );
 
     setState((prev) => ({
       ...prev,
-      corporateMails: nextMails,
+      corporateMails: mergeCorporateMails(prev.corporateMails, [draft], deletedMailIdsRef.current),
     }));
 
     void dataService.comms
-      .saveCorporateMails(nextMails, currentUser.name)
+      .saveCorporateMails(nextMails, currentUser.name, undefined, Array.from(deletedMailIdsRef.current))
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) {
+          setDbConnected(true);
+          setLastSyncError(null);
+        }
+      })
       .catch(handleCloudWriteError);
 
     pushToast('Draft Saved', payload.subject || 'Untitled Draft', 'info');
@@ -5144,13 +5247,20 @@ export default function App() {
 
   const handleDeleteCorporateDraft = (draftId: string) => {
     if (!isApprovedUser) return;
+    deletedMailIdsRef.current.add(draftId);
     const nextMails = state.corporateMails.filter((m) => m.id !== draftId);
     setState((prev) => ({
       ...prev,
-      corporateMails: nextMails,
+      corporateMails: prev.corporateMails.filter((m) => m.id !== draftId),
     }));
     void dataService.comms
-      .saveCorporateMails(nextMails, currentUser.name)
+      .saveCorporateMails(nextMails, currentUser.name, undefined, Array.from(deletedMailIdsRef.current))
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) {
+          setDbConnected(true);
+          setLastSyncError(null);
+        }
+      })
       .catch(handleCloudWriteError);
     pushToast('Draft Deleted', 'Removed draft from Mail & Chat Hub.', 'info');
   };
@@ -5173,7 +5283,12 @@ export default function App() {
       });
       if (changed) {
         void dataService.comms
-          .saveCorporateMails(nextSnapshot, currentUser.name)
+          .saveCorporateMails(
+            nextSnapshot,
+            currentUser.name,
+            undefined,
+            Array.from(deletedMailIdsRef.current),
+          )
           .catch(() => {});
       }
     },
@@ -5200,10 +5315,10 @@ export default function App() {
       createdAt: now,
     };
 
-    const nextMessages = [...state.chatMessages, msg].slice(-400);
+    const nextMessages = mergeChatMessages(state.chatMessages, [msg]);
     setState((prev) => ({
       ...prev,
-      chatMessages: nextMessages,
+      chatMessages: mergeChatMessages(prev.chatMessages, [msg]),
     }));
 
     void commsChannelRef.current?.send({
@@ -5214,8 +5329,15 @@ export default function App() {
 
     void dataService.comms
       .saveChatMessages(nextMessages, currentUser.name)
-      .then(() => {
-        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      .then((syncedMessages) => {
+        if (dataService.isSupabaseConfigured()) {
+          setDbConnected(true);
+          setLastSyncError(null);
+        }
+        setState((prev) => ({
+          ...prev,
+          chatMessages: mergeChatMessages(syncedMessages, prev.chatMessages),
+        }));
       })
       .catch(handleCloudWriteError);
   };
@@ -5254,7 +5376,7 @@ export default function App() {
     }, 0);
     const code = `MOM-2026-${String(maxNum + 1).padStart(3, '0')}`;
     const newMeeting: MeetingMinute = {
-      id: `mom-meet-${Date.now()}`,
+      id: `mom-meet-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       code,
       title: payload.title,
       meetingDate: getTodayDateString(),
@@ -5276,14 +5398,27 @@ export default function App() {
 
     setState((prev) => ({
       ...prev,
-      meetings: [newMeeting, ...prev.meetings],
+      meetings: mergeMeetings(prev.meetings, [newMeeting]),
       globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
     }));
 
-    void dataService.meetings
-      .upsert(newMeeting, auditEntry)
-      .then(() => {
-        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+    void commsChannelRef.current?.send({
+      type: 'broadcast',
+      event: 'meet:invite',
+      payload: newMeeting,
+    });
+
+    void dataService.comms
+      .saveMeetSession(newMeeting, currentUser.name, auditEntry)
+      .then((syncedMeetings) => {
+        if (dataService.isSupabaseConfigured()) {
+          setDbConnected(true);
+          setLastSyncError(null);
+        }
+        setState((prev) => ({
+          ...prev,
+          meetings: mergeMeetings(syncedMeetings, prev.meetings),
+        }));
       })
       .catch(handleCloudWriteError);
 
@@ -6664,8 +6799,10 @@ export default function App() {
       <>
         <DepartmentVerificationScreen
           branding={branding}
+          userEmail={currentUser.email}
           initialDepartment={currentUser.department}
-          initialEmployeeId={currentUser.employeeId}
+          assignedEmployeeId={currentUser.employeeId}
+          teamMembers={state.teamMembers}
           onContinue={handleCompleteIdentityStep}
           onBackToLogin={handleSignOut}
         />
@@ -6740,6 +6877,7 @@ export default function App() {
             auditLogs={state.globalAuditLogs}
             pendingEditorChanges={state.pendingEditorChanges}
             dbConnected={dbConnected}
+            lastSyncError={lastSyncError}
             isSyncing={isSyncing}
             onSyncNow={() => void syncFromSupabase(true, false)}
             globalSearch={searchQuery}
@@ -7022,6 +7160,7 @@ export default function App() {
                 {activeSection === 'settings' && currentUser.role === 'Admin' && (
                   <TeamSettingsView
                     activeRole={currentUser.role}
+                    currentUserEmail={currentUser.email}
                     branding={branding}
                     permissionMatrix={state.permissionMatrix}
                     tableDiagnostics={tableDiagnostics}
@@ -7098,6 +7237,7 @@ export default function App() {
           <UserProfileModal
             user={currentUser}
             teamMembers={state.teamMembers}
+            departments={branding.departments}
             pendingAssignedCount={pendingAssignedCount}
             onlinePresenceKeys={onlinePresenceKeys}
             recentlyOfflineKeys={recentlyOfflineKeys}
@@ -7105,6 +7245,7 @@ export default function App() {
             onUploadAvatar={handleUploadAvatar}
             onRemoveAvatar={handleRemoveAvatar}
             onSaveSignOffTitle={handleSaveSignOffTitle}
+            onUpdateDepartment={handleUpdateMemberDepartment}
             onSaveDelegation={handleSaveDelegation}
             onUpdatePassword={handleUpdatePassword}
           />

@@ -1,23 +1,30 @@
-import { AlertCircle, ArrowLeft, BadgeCheck, Building2 } from 'lucide-react';
-import { FormEvent, useMemo, useState } from 'react';
-import { CompanyBrandingConfig, Department } from '../types/nexops';
+import { AlertCircle, ArrowLeft, BadgeCheck, Building2, Lock } from 'lucide-react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { CompanyBrandingConfig, Department, TeamMember } from '../types/nexops';
+import { isSuperAdminEmail } from '../utils/storage';
 import { NexOpsLogo } from './NexOpsLogo';
 
 interface DepartmentVerificationScreenProps {
   branding: CompanyBrandingConfig;
+  userEmail?: string;
   initialDepartment?: Department;
-  initialEmployeeId?: string;
+  assignedEmployeeId?: string;
+  teamMembers?: TeamMember[];
   onContinue: (payload: { department: Department; employeeId: string }) => Promise<void>;
   onBackToLogin: () => Promise<void> | void;
 }
 
 export function DepartmentVerificationScreen({
   branding,
+  userEmail,
   initialDepartment,
-  initialEmployeeId,
+  assignedEmployeeId,
+  teamMembers = [],
   onContinue,
   onBackToLogin,
 }: DepartmentVerificationScreenProps) {
+  const isSuperAdmin = isSuperAdminEmail(userEmail);
+
   const departmentOptions = useMemo(() => {
     const base =
       branding.departments.length > 0
@@ -30,20 +37,30 @@ export function DepartmentVerificationScreen({
     return base;
   }, [branding.departments, initialDepartment]);
 
-  const [department, setDepartment] = useState<Department>(() => {
+  const assignedDepartment = useMemo(() => {
     const cleanInit = initialDepartment?.trim();
-    if (cleanInit && departmentOptions.includes(cleanInit)) return cleanInit;
-    return departmentOptions[0] ?? '';
-  });
-  const [employeeId, setEmployeeId] = useState<string>(() => initialEmployeeId?.trim() ?? '');
+    if (cleanInit) return cleanInit;
+    return departmentOptions[0] ?? 'Operations';
+  }, [initialDepartment, departmentOptions]);
+
+  const [department, setDepartment] = useState<Department>(assignedDepartment);
+  const [employeeId, setEmployeeId] = useState<string>('');
   const [submitting, setSubmitting] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!isSuperAdmin) {
+      setDepartment(assignedDepartment);
+    } else if (initialDepartment?.trim()) {
+      setDepartment(initialDepartment.trim());
+    }
+  }, [isSuperAdmin, assignedDepartment, initialDepartment]);
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    const cleanDept = department.trim();
-    const cleanEmpId = employeeId.trim();
+    const cleanDept = isSuperAdmin ? department.trim() : assignedDepartment;
+    const cleanEmpId = employeeId.trim().toUpperCase();
     if (!cleanDept) {
       setError('Please select your Department.');
       return;
@@ -53,18 +70,32 @@ export function DepartmentVerificationScreen({
       return;
     }
 
+    const cleanUserEmail = (userEmail ?? '').trim().toLowerCase();
+    const ownedByOther = teamMembers.some(
+      (m) =>
+        m.email.trim().toLowerCase() !== cleanUserEmail &&
+        m.employeeId.trim().toUpperCase() === cleanEmpId,
+    );
+    const expectedEmpId = (assignedEmployeeId ?? '').trim().toUpperCase();
+    if (ownedByOther || (expectedEmpId && cleanEmpId !== expectedEmpId)) {
+      setError(
+        'This Employee ID does not match your account or is assigned to another employee. Please enter your own valid Employee ID.',
+      );
+      return;
+    }
+
     setError(null);
     setSubmitting(true);
     try {
       await onContinue({
         department: cleanDept,
-        employeeId: cleanEmpId.toUpperCase(),
+        employeeId: cleanEmpId,
       });
     } catch (err) {
       setError(
         err instanceof Error
           ? err.message
-          : 'Unable to save Department and Employee ID.',
+          : 'Unable to verify Department and Employee ID.',
       );
     } finally {
       setSubmitting(false);
@@ -92,7 +123,7 @@ export function DepartmentVerificationScreen({
           tagline={branding.tagline}
         />
 
-        {/* Step 2: Clean Department & Employee ID Verification Card */}
+        {/* Step 2: Department & Employee ID Verification Card */}
         <div className="mt-7 rounded-2xl border border-slate-200 bg-white p-6 shadow-xs sm:p-8 dark:border-slate-800 dark:bg-slate-900">
           {error && (
             <div
@@ -106,33 +137,58 @@ export function DepartmentVerificationScreen({
 
           <form onSubmit={handleSubmit} noValidate className="space-y-4">
             <div>
-              <label
-                htmlFor="step2-department"
-                className="block text-xs font-semibold text-slate-700 dark:text-slate-300"
-              >
-                Department
-              </label>
+              <div className="flex items-center justify-between gap-2">
+                <label
+                  htmlFor="step2-department"
+                  className="block text-xs font-semibold text-slate-700 dark:text-slate-300"
+                >
+                  Department
+                </label>
+                {!isSuperAdmin && (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                    <Lock className="h-3 w-3" aria-hidden="true" />
+                    <span>Assigned by Super Admin</span>
+                  </span>
+                )}
+              </div>
               <div className="relative mt-1.5">
                 <Building2
                   className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-slate-500"
                   aria-hidden="true"
                 />
-                <select
-                  id="step2-department"
-                  required
-                  value={department}
-                  onChange={(e) => {
-                    setDepartment(e.target.value);
-                    if (error) setError(null);
-                  }}
-                  className="h-10 w-full rounded-lg border border-slate-200 bg-white pr-3 pl-9 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-                >
-                  {departmentOptions.map((dept) => (
-                    <option key={dept} value={dept}>
-                      {dept}
-                    </option>
-                  ))}
-                </select>
+                {isSuperAdmin ? (
+                  <select
+                    id="step2-department"
+                    required
+                    value={department}
+                    onChange={(e) => {
+                      setDepartment(e.target.value);
+                      if (error) setError(null);
+                    }}
+                    className="h-10 w-full rounded-lg border border-slate-200 bg-white pr-3 pl-9 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                  >
+                    {departmentOptions.map((dept) => (
+                      <option key={dept} value={dept}>
+                        {dept}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    id="step2-department"
+                    type="text"
+                    readOnly
+                    aria-readonly="true"
+                    value={assignedDepartment}
+                    className="h-10 w-full cursor-not-allowed rounded-lg border border-slate-200 bg-slate-100 pr-9 pl-9 text-sm font-medium text-slate-700 focus:outline-none dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-200"
+                  />
+                )}
+                {!isSuperAdmin && (
+                  <Lock
+                    className="pointer-events-none absolute top-1/2 right-3 h-3.5 w-3.5 -translate-y-1/2 text-slate-400 dark:text-slate-500"
+                    aria-hidden="true"
+                  />
+                )}
               </div>
             </div>
 
@@ -152,12 +208,13 @@ export function DepartmentVerificationScreen({
                   id="step2-employee-id"
                   type="text"
                   required
+                  autoComplete="off"
                   value={employeeId}
                   onChange={(e) => {
                     setEmployeeId(e.target.value);
                     if (error) setError(null);
                   }}
-                  placeholder="EMP-001"
+                  placeholder="Enter your assigned Employee ID"
                   className="h-10 w-full rounded-lg border border-slate-200 bg-white pr-3 pl-9 font-mono text-sm text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
                 />
               </div>
@@ -168,7 +225,7 @@ export function DepartmentVerificationScreen({
               disabled={submitting || signingOut}
               className="flex h-10 w-full items-center justify-center rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-indigo-700 disabled:opacity-60"
             >
-              {submitting ? 'Saving...' : 'Continue to Workspace'}
+              {submitting ? 'Verifying...' : 'Continue to Workspace'}
             </button>
           </form>
 

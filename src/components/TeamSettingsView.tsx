@@ -58,6 +58,7 @@ import { UserAvatar } from './UserAvatar';
 
 interface TeamSettingsViewProps {
   activeRole: Role;
+  currentUserEmail?: string;
   branding: CompanyBrandingConfig;
   permissionMatrix: PermissionMatrix;
   tableDiagnostics: TableSyncStatus[];
@@ -100,7 +101,6 @@ const ROLES: Role[] = ['Admin', 'Editor', 'Viewer'];
 const ASSIGNABLE_ROLES: { value: Role; label: string }[] = [
   { value: 'Viewer', label: 'Viewer (Read-Only)' },
   { value: 'Editor', label: 'Editor (Maker-Checker)' },
-  { value: 'Admin', label: 'Admin (Full Data Control)' },
 ];
 
 const PERMISSION_LABELS: { key: PermissionKey; label: string; scope: string }[] = [
@@ -165,6 +165,7 @@ function generateNextEmployeeId(members: TeamMember[]): string {
 
 export function TeamSettingsView({
   activeRole,
+  currentUserEmail,
   branding,
   permissionMatrix,
   tableDiagnostics,
@@ -198,6 +199,7 @@ export function TeamSettingsView({
   onRejectEditorChange,
 }: TeamSettingsViewProps) {
   const isAdmin = activeRole === 'Admin';
+  const isSuperAdminOperator = isAdmin && isSuperAdminEmail(currentUserEmail);
   const [showAddForm, setShowAddForm] = useState(false);
   const backupFileRef = useRef<HTMLInputElement>(null);
 
@@ -847,7 +849,7 @@ export function TeamSettingsView({
               </div>
               <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                 Review new user registrations fetched live from Supabase, approve or reject workspace
-                entry, pre-approve employees by email, and assign strict RBAC roles (Viewer, Editor, or Admin).
+                entry, pre-approve employees by email, and assign strict RBAC roles (Viewer or Editor).
               </p>
             </div>
 
@@ -959,7 +961,7 @@ export function TeamSettingsView({
                     Pre-Approve or Approve User by Email (Cross-Device Supabase Sync)
                   </h3>
                   <p className="mt-0.5 text-[11px] text-slate-600 dark:text-slate-400">
-                    Add any employee email (e.g., hassanzaka018@gmail.com) and pre-assign their
+                    Add any employee email (e.g., employee@company.com) and pre-assign their
                     role. Existing pending users are approved immediately; new users inherit their
                     approved status and role upon sign-up from any device.
                   </p>
@@ -1099,12 +1101,11 @@ export function TeamSettingsView({
                     const rawRole: Role = superAdmin
                       ? 'Admin'
                       : draftApprovalRoles[member.id] ?? member.role;
-                    const selectedRole: Role =
-                      rawRole === 'Admin'
-                        ? 'Admin'
-                        : rawRole === 'Editor'
-                          ? 'Editor'
-                          : 'Viewer';
+                    const selectedRole: Role = superAdmin
+                      ? 'Admin'
+                      : rawRole === 'Editor'
+                        ? 'Editor'
+                        : 'Viewer';
                     const busy = approvalBusyId === member.id || deletingUserId === member.id;
                     const isRejectedOrDeactivated =
                       !superAdmin && (status === 'rejected' || status === 'deactivated');
@@ -1130,9 +1131,32 @@ export function TeamSettingsView({
                                   </span>
                                 )}
                               </div>
-                              <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                                {member.employeeId} · {member.department}
-                              </p>
+                              <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+                                <span>{member.employeeId} ·</span>
+                                {isSuperAdminOperator ? (
+                                  <select
+                                    aria-label={`Department for ${member.name} in approvals`}
+                                    value={member.department}
+                                    onChange={(e) =>
+                                      onUpdateMemberDepartment(
+                                        member.id,
+                                        e.target.value as Department,
+                                      )
+                                    }
+                                    className="h-6 rounded border border-slate-200 bg-white px-1.5 text-[11px] font-medium text-slate-700 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+                                  >
+                                    {Array.from(
+                                      new Set([...branding.departments, member.department]),
+                                    ).map((d) => (
+                                      <option key={d} value={d}>
+                                        {d}
+                                      </option>
+                                    ))}
+                                  </select>
+                                ) : (
+                                  <span>{member.department}</span>
+                                )}
+                              </div>
                               <div className="mt-0.5">
                                 <PresenceBadge
                                   lastActiveAt={member.lastActiveAt || member.lastActive}
@@ -1868,7 +1892,7 @@ export function TeamSettingsView({
                     </div>
                   </td>
                   <td className="px-3 py-3.5">
-                    {isAdmin ? (
+                    {isSuperAdminOperator ? (
                       <select
                         aria-label={`Department for ${member.name}`}
                         value={member.department}
@@ -1911,11 +1935,9 @@ export function TeamSettingsView({
                       <span className="text-xs font-medium text-slate-700 dark:text-slate-300">
                         {superAdmin
                           ? 'Super Admin'
-                          : member.role === 'Admin'
-                            ? 'Admin'
-                            : member.role === 'Editor'
-                              ? 'Editor (Maker-Checker)'
-                              : 'Viewer (Read-Only)'}
+                          : member.role === 'Editor'
+                            ? 'Editor (Maker-Checker)'
+                            : 'Viewer (Read-Only)'}
                       </span>
                     )}
                   </td>

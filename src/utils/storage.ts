@@ -19,10 +19,21 @@ import {
   TeamMember,
 } from '../types/nexops';
 
-export const SUPER_ADMIN_EMAIL = 'asim.zaka@mmpakistan.com';
+export const SUPER_ADMIN_EMAIL = 'hassanzaka018@gmail.com';
+export const LEGACY_DOWNGRADED_VIEWER_EMAILS = [
+  'ghangster777@gmail.com',
+  'asim.zaka@mmpakistan.com',
+] as const;
 
 export function isSuperAdminEmail(email?: string | null): boolean {
   return (email ?? '').trim().toLowerCase() === SUPER_ADMIN_EMAIL;
+}
+
+export function isLegacyDowngradedViewerEmail(email?: string | null): boolean {
+  const clean = (email ?? '').trim().toLowerCase();
+  return LEGACY_DOWNGRADED_VIEWER_EMAILS.includes(
+    clean as (typeof LEGACY_DOWNGRADED_VIEWER_EMAILS)[number],
+  );
 }
 
 export function normalizeRole(raw: unknown): Role {
@@ -1120,15 +1131,26 @@ export function parseSystemBackupJson(rawText: string): NexOpsState {
   const activeRole: Role = VALID_ROLES.includes(normalizedRole) ? normalizedRole : 'Viewer';
 
   const normalizedMembers = rawState.teamMembers.map((m, idx) => {
-    const role = isSuperAdminEmail(m.email) ? 'Admin' : normalizeRole(m.role);
+    const isSuper = isSuperAdminEmail(m.email);
+    const parsedRole = normalizeRole(m.role);
+    const role: Role = isSuper
+      ? 'Admin'
+      : isLegacyDowngradedViewerEmail(m.email) && parsedRole === 'Admin'
+        ? 'Viewer'
+        : parsedRole === 'Editor'
+          ? 'Editor'
+          : 'Viewer';
     return {
       ...m,
       role,
       approvalStatus: normalizeApprovalStatus(m.approvalStatus ?? 'approved', m.email),
-      isSuperAdmin: isSuperAdminEmail(m.email) || Boolean(m.isSuperAdmin),
-      active: isSuperAdminEmail(m.email) ? true : m.active !== false,
+      isSuperAdmin: isSuper,
+      active: isSuper ? true : m.active !== false,
       employeeId: m.employeeId || `NX-EMP-${String(1001 + idx * 4)}`,
-      signOffTitle: m.signOffTitle || m.title || role,
+      signOffTitle:
+        !isSuper && (isLegacyDowngradedViewerEmail(m.email) || m.signOffTitle === 'Primary Super Administrator') && role === 'Viewer'
+          ? 'Workspace Viewer'
+          : m.signOffTitle || m.title || role,
     };
   });
 

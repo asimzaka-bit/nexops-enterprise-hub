@@ -14,7 +14,7 @@ import {
   X,
 } from 'lucide-react';
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { TeamMember } from '../types/nexops';
+import { Department, TeamMember } from '../types/nexops';
 import { isSuperAdminEmail, resolveLivePresenceOverride } from '../utils/storage';
 import { PresenceBadge, RoleBadge } from './StatusIndicator';
 import { UserAvatar } from './UserAvatar';
@@ -22,6 +22,7 @@ import { UserAvatar } from './UserAvatar';
 interface UserProfileModalProps {
   user: TeamMember;
   teamMembers: TeamMember[];
+  departments?: Department[];
   pendingAssignedCount: number;
   onlinePresenceKeys?: Set<string>;
   recentlyOfflineKeys?: Set<string>;
@@ -29,6 +30,7 @@ interface UserProfileModalProps {
   onUploadAvatar: (file: File) => Promise<void>;
   onRemoveAvatar: () => Promise<void>;
   onSaveSignOffTitle: (userId: string, signOffTitle: string) => void;
+  onUpdateDepartment?: (userId: string, department: Department) => void;
   onSaveDelegation: (
     userId: string,
     outOfOffice: boolean,
@@ -40,6 +42,7 @@ interface UserProfileModalProps {
 export function UserProfileModal({
   user,
   teamMembers,
+  departments = [],
   pendingAssignedCount,
   onlinePresenceKeys,
   recentlyOfflineKeys,
@@ -47,9 +50,25 @@ export function UserProfileModal({
   onUploadAvatar,
   onRemoveAvatar,
   onSaveSignOffTitle,
+  onUpdateDepartment,
   onSaveDelegation,
   onUpdatePassword,
 }: UserProfileModalProps) {
+  const isSuperAdmin = isSuperAdminEmail(user.email);
+  const departmentOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          [
+            ...(departments.length > 0
+              ? departments
+              : ['Engineering', 'Operations', 'QA', 'Admin', 'Finance']),
+            user.department,
+          ].filter(Boolean),
+        ),
+      ),
+    [departments, user.department],
+  );
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const [avatarBusy, setAvatarBusy] = useState(false);
   const [avatarError, setAvatarError] = useState<string | null>(null);
@@ -304,10 +323,28 @@ export function UserProfileModal({
               </div>
               <div>
                 <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">Department</p>
-                <p className="mt-0.5 inline-flex items-center gap-1.5 text-xs font-semibold text-slate-900 dark:text-slate-100">
-                  <Building2 className="h-3.5 w-3.5 text-slate-500 dark:text-slate-400" />
-                  <span>{user.department}</span>
-                </p>
+                {isSuperAdmin && onUpdateDepartment ? (
+                  <div className="relative mt-1">
+                    <Building2 className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-slate-500 dark:text-slate-400" />
+                    <select
+                      aria-label="Update Department"
+                      value={user.department}
+                      onChange={(e) => onUpdateDepartment(user.id, e.target.value as Department)}
+                      className="h-8 w-full rounded-lg border border-slate-200 bg-white pr-2.5 pl-8 text-xs font-semibold text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                    >
+                      {departmentOptions.map((dept) => (
+                        <option key={dept} value={dept}>
+                          {dept}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <p className="mt-0.5 inline-flex items-center gap-1.5 text-xs font-semibold text-slate-900 dark:text-slate-100">
+                    <Building2 className="h-3.5 w-3.5 text-slate-500 dark:text-slate-400" />
+                    <span>{user.department}</span>
+                  </p>
+                )}
               </div>
               <div>
                 <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">Assigned RBAC Role</p>
