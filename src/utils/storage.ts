@@ -1183,6 +1183,8 @@ export function parseSystemBackupJson(rawText: string): NexOpsState {
     pendingEditorChanges: Array.isArray(rawState.pendingEditorChanges)
       ? rawState.pendingEditorChanges
       : [],
+    corporateMails: Array.isArray(rawState.corporateMails) ? rawState.corporateMails : [],
+    chatMessages: Array.isArray(rawState.chatMessages) ? rawState.chatMessages : [],
     permissionMatrix: normalizePermissionMatrix(rawState.permissionMatrix),
   };
 }
@@ -1376,4 +1378,15 @@ export function calculateVaultStorageStats(documents: DocumentVaultItem[]): Vaul
     fileCount,
     linkCount,
   };
+}
+
+export function buildDmRoomId(emailA: string, emailB: string): string {
+  const cleanA = emailA.trim().toLowerCase();
+  const cleanB = emailB.trim().toLowerCase();
+  const pair = [cleanA, cleanB].sort();
+  return `dm:${pair[0]}|${pair[1]}`;
+}
+
+export function buildChannelRoomId(channelName: string): string {
+  return `channel:${channelName.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
 }

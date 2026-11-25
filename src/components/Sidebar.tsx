@@ -8,6 +8,7 @@ import {
   FolderKanban,
   FolderLock,
   LayoutDashboard,
+  MessageSquare,
   Package,
   PanelLeftClose,
   PanelLeftOpen,
@@ -47,6 +48,7 @@ interface SidebarProps {
   vaultCount?: number;
   pendingLeavesCount?: number;
   openActionItemsCount?: number;
+  unreadCommsCount?: number;
   workspaceLinksCount?: number;
   pendingUsersCount?: number;
   pendingEditorChangesCount?: number;
@@ -94,6 +96,7 @@ export function Sidebar({
   vaultCount,
   pendingLeavesCount,
   openActionItemsCount,
+  unreadCommsCount,
   workspaceLinksCount,
   pendingUsersCount,
   pendingEditorChangesCount,
@@ -155,6 +158,12 @@ export function Sidebar({
       label: 'Meetings & MoM',
       icon: CalendarClock,
       badge: openActionItemsCount,
+    },
+    {
+      id: 'mailchat',
+      label: 'Mail & Chat',
+      icon: MessageSquare,
+      badge: unreadCommsCount,
     },
     ...(activeRole === 'Admin'
       ? [

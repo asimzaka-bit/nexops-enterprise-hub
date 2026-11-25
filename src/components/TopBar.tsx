@@ -17,6 +17,7 @@ import {
   LayoutGrid,
   LogOut,
   Menu,
+  MessageSquare,
   Moon,
   PenTool,
   Plus,
@@ -55,6 +56,7 @@ import {
   GmailColorIcon,
   GoogleDocsColorIcon,
   GoogleFormsColorIcon,
+  GoogleMeetColorIcon,
   GoogleSheetsColorIcon,
 } from './GoogleWorkspaceIcons';
 import { PresenceBadge } from './StatusIndicator';
@@ -89,6 +91,7 @@ interface TopBarProps {
   onSignOut: () => void;
   activeWorkspaceTool?: WorkspaceToolType;
   onSelectWorkspaceTool?: (tool: WorkspaceToolType) => void;
+  unreadCommsCount?: number;
   slaPolicy?: SlaPolicyConfig;
   pendingEditorChanges?: PendingEditorChange[];
   isDarkMode: boolean;
@@ -160,6 +163,10 @@ const SECTION_TITLES: Record<NavSection, { title: string; subtitle: string }> = 
     title: 'Meetings & Action Items (MoM)',
     subtitle: 'Executive summaries, recorded decisions & 1-click request conversion',
   },
+  mailchat: {
+    title: 'Mail & Chat Hub',
+    subtitle: 'Corporate inbox, real-time team chat & instant Google Meet calls',
+  },
   workspace: {
     title: 'Workspace Tools',
     subtitle: 'Integrated Gmail corporate client, Google Docs, Google Sheets & Google Forms',
@@ -210,6 +217,7 @@ export function TopBar({
   onSignOut,
   activeWorkspaceTool = 'gmail',
   onSelectWorkspaceTool,
+  unreadCommsCount = 0,
   slaPolicy = DEFAULT_SLA_POLICY,
   pendingEditorChanges = [],
   isDarkMode,
@@ -858,7 +866,7 @@ export function TopBar({
                 aria-expanded={workspaceMenuOpen}
                 aria-label="Open Workspace Suite (Gmail, Docs, Sheets, Forms)"
                 className={`inline-flex h-9 shrink-0 items-center gap-1 rounded-lg border px-2 text-xs font-semibold whitespace-nowrap transition-colors sm:gap-1.5 sm:px-2.5 md:h-auto md:py-1.5 ${
-                  activeSection === 'workspace' || workspaceMenuOpen
+                  activeSection === 'workspace' || activeSection === 'mailchat' || workspaceMenuOpen
                     ? 'border-indigo-300 bg-indigo-50 text-indigo-700 dark:border-indigo-500/70 dark:bg-indigo-950/60 dark:text-indigo-300'
                     : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white'
                 }`}
@@ -879,6 +887,41 @@ export function TopBar({
                     </p>
                   </div>
                   <div className="mt-1.5 space-y-1">
+                    {onSelectSection && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setWorkspaceMenuOpen(false);
+                          onSelectSection('mailchat');
+                        }}
+                        className={`flex w-full items-center gap-3 rounded-lg border px-2.5 py-2 text-left transition-colors ${
+                          activeSection === 'mailchat'
+                            ? 'border-indigo-200 bg-indigo-50 text-indigo-900 dark:border-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-100'
+                            : 'border-slate-200/80 bg-slate-50/70 text-slate-800 hover:bg-indigo-50/60 dark:border-slate-800 dark:bg-slate-800/70 dark:text-slate-100 dark:hover:bg-slate-800'
+                        }`}
+                      >
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-indigo-200 bg-white dark:border-indigo-800 dark:bg-slate-900">
+                          <MessageSquare className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                              Mail &amp; Chat Hub
+                            </span>
+                            {unreadCommsCount > 0 ? (
+                              <span className="rounded-full bg-rose-600 px-1.5 py-0.5 font-mono text-[10px] font-bold text-white tabular-nums">
+                                {unreadCommsCount}
+                              </span>
+                            ) : (
+                              <GoogleMeetColorIcon className="h-3.5 w-3.5 shrink-0" />
+                            )}
+                          </span>
+                          <span className="block truncate text-[11px] text-slate-500 dark:text-slate-400">
+                            Mail compose, live chat &amp; Google Meet
+                          </span>
+                        </span>
+                      </button>
+                    )}
                     {WORKSPACE_LAUNCHER_ITEMS.map((item) => {
                       const isToolSelected =
                         activeSection === 'workspace' && activeWorkspaceTool === item.id;

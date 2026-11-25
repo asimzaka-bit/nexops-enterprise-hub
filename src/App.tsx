@@ -7,11 +7,19 @@ import { DashboardView } from './components/DashboardView';
 import { ImportedRequestRow, ImportRequestsModal } from './components/ImportRequestsModal';
 import { CreateLeavePayload, LeavesView } from './components/LeavesView';
 import { DepartmentVerificationScreen } from './components/DepartmentVerificationScreen';
-import { InitialAdminPayload, LoginScreen, RegisterUserPayload, SignUpOutcome } from './components/LoginScreen';
+import { LoginScreen, InitialAdminPayload, RegisterUserPayload, SignUpOutcome } from './components/LoginScreen';
+import {
+  MailChatHubView,
+  SaveCorporateDraftPayload,
+  SendChatMessagePayload,
+  SendCorporateMailPayload,
+  StartGoogleMeetPayload,
+} from './components/MailChatHubView';
 import { CreateMeetingPayload, MeetingsMomView } from './components/MeetingsMomView';
 import { OfficialReportModal } from './components/OfficialReportModal';
 import { PendingApprovalScreen } from './components/PendingApprovalScreen';
 import { ProjectsDirectoryView } from './components/ProjectsDirectoryView';
+import { QuickChatDrawer } from './components/QuickChatDrawer';
 import { RequestDetailDrawer } from './components/RequestDetailDrawer';
 import { RequestsQueueView } from './components/RequestsQueueView';
 import { Sidebar } from './components/Sidebar';
@@ -39,6 +47,7 @@ import {
   CompanyAsset,
   CompanyBrandingConfig,
   CompanyProject,
+  CorporateMailMessage,
   DEFAULT_SLA_POLICY,
   Department,
   DocumentVaultItem,
@@ -62,6 +71,7 @@ import {
   TableSyncStatus,
   TaskComment,
   TaskSubtask,
+  TeamChatMessage,
   TeamMember,
   ToastMessage,
   WorkspaceEmailLog,
@@ -168,6 +178,7 @@ export default function App() {
   const [onlinePresenceKeys, setOnlinePresenceKeys] = useState<Set<string>>(() => new Set());
   const [recentlyOfflineKeys, setRecentlyOfflineKeys] = useState<Set<string>>(() => new Set());
   const presenceChannelRef = useRef<ReturnType<NonNullable<typeof supabase>['channel']> | null>(null);
+  const commsChannelRef = useRef<ReturnType<NonNullable<typeof supabase>['channel']> | null>(null);
   const recentlyOfflineTimersRef = useRef<Map<string, number>>(new Map());
 
   // Unified Google Workspace OAuth session state shared across Gmail, Docs, Sheets & Forms
@@ -1174,6 +1185,57 @@ export default function App() {
     };
   }, [authSession, isApprovedUser, currentUser, pushToast, syncFromSupabase]);
 
+  // Sub-second Supabase Realtime Broadcast channel for Live Team Chat & Corporate Mail
+  useEffect(() => {
+    const client = supabase;
+    if (!client || !authSession?.isAuthenticated || !isApprovedUser) {
+      commsChannelRef.current = null;
+      return;
+    }
+
+    const commsChannel = client
+      .channel('nexops-comms-rt', {
+        config: { broadcast: { self: false } },
+      })
+      .on('broadcast', { event: 'chat:message' }, ({ payload }) => {
+        const incoming = payload as TeamChatMessage | undefined;
+        if (!incoming?.id) return;
+        setState((prev) => {
+          if (prev.chatMessages.some((m) => m.id === incoming.id)) {
+            return prev;
+          }
+          return {
+            ...prev,
+            chatMessages: [...prev.chatMessages, incoming].slice(-400),
+          };
+        });
+      })
+      .on('broadcast', { event: 'mail:upsert' }, ({ payload }) => {
+        const incoming = payload as CorporateMailMessage | undefined;
+        if (!incoming?.id || incoming.status !== 'sent') return;
+        setState((prev) => {
+          const exists = prev.corporateMails.some((m) => m.id === incoming.id);
+          const nextMails = exists
+            ? prev.corporateMails.map((m) => (m.id === incoming.id ? incoming : m))
+            : [incoming, ...prev.corporateMails].slice(0, 300);
+          return {
+            ...prev,
+            corporateMails: nextMails,
+          };
+        });
+      })
+      .subscribe();
+
+    commsChannelRef.current = commsChannel;
+
+    return () => {
+      if (commsChannelRef.current === commsChannel) {
+        commsChannelRef.current = null;
+      }
+      void client.removeChannel(commsChannel);
+    };
+  }, [authSession?.isAuthenticated, isApprovedUser]);
+
   const currentActor = currentUser;
 
   const defaultReviewerName = useMemo(() => {
@@ -1245,6 +1307,29 @@ export default function App() {
       ),
     [state.meetings],
   );
+
+  const unreadCommsCount = useMemo(() => {
+    const selfEmailLower = currentUser.email.trim().toLowerCase();
+    const deptAlias = `dept:${currentUser.department.toLowerCase()}@nexops.company`;
+    const unreadMail = state.corporateMails.filter((m) => {
+      if (m.status !== 'sent') return false;
+      const recipients = [...m.toEmails, ...m.ccEmails].map((e) => e.trim().toLowerCase());
+      const addressed =
+        recipients.includes(selfEmailLower) ||
+        recipients.includes('all@nexops.company') ||
+        recipients.includes(deptAlias);
+      if (!addressed) return false;
+      return !m.readBy.some((e) => e.trim().toLowerCase() === selfEmailLower);
+    }).length;
+
+    const unreadChat = state.chatMessages.filter(
+      (msg) =>
+        msg.senderEmail.trim().toLowerCase() !== selfEmailLower &&
+        !msg.readBy.some((e) => e.trim().toLowerCase() === selfEmailLower),
+    ).length;
+
+    return unreadMail + unreadChat;
+  }, [state.corporateMails, state.chatMessages, currentUser.email, currentUser.department]);
 
   const pendingAssignedCount = useMemo(
     () =>
@@ -4929,7 +5014,7 @@ export default function App() {
 
   // Workspace Tools Handlers (Gmail, Google Docs, Google Sheets, Google Forms)
   const handleSaveEmailLog = (emailLog: WorkspaceEmailLog) => {
-    if (currentUser.role !== 'Admin') return;
+    if (!isApprovedUser) return;
     const auditEntry = createAuditEvent(
       'WORKSPACE-GMAIL',
       'Team Updated',
@@ -4952,6 +5037,259 @@ export default function App() {
     pushToast(
       'Corporate Email Recorded',
       `${emailLog.subject} → ${emailLog.toRecipients}`,
+      'success',
+    );
+  };
+
+  // Unified Mail, Live Team Chat & Google Meet Hub Handlers (Available to ALL Signed-In Users)
+  const handleSendCorporateMail = (payload: SendCorporateMailPayload) => {
+    if (!isApprovedUser) return;
+    const now = new Date().toISOString();
+    const selfEmailLower = currentUser.email.trim().toLowerCase();
+    const messageId =
+      payload.draftId || `mail-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const newMail: CorporateMailMessage = {
+      id: messageId,
+      threadId: payload.threadId || `thr-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      parentId: payload.parentId,
+      fromUserId: currentUser.id,
+      fromName: currentUser.name,
+      fromEmail: currentUser.email,
+      toEmails: payload.toEmails,
+      ccEmails: payload.ccEmails,
+      subject: payload.subject,
+      body: payload.body,
+      status: 'sent',
+      readBy: [selfEmailLower],
+      meetInvite: payload.meetInvite,
+      deliveryMethod: payload.deliveryMethod,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const auditEntry = createAuditEvent(
+      'MAIL-HUB',
+      'Mail Sent',
+      `${currentUser.name} (${currentUser.role}) sent email "${payload.subject}" to ${payload.toEmails.join(', ')} via ${payload.deliveryMethod}.`,
+    );
+
+    const nextMails = [
+      newMail,
+      ...state.corporateMails.filter((m) => m.id !== messageId),
+    ].slice(0, 300);
+
+    setState((prev) => ({
+      ...prev,
+      corporateMails: nextMails,
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+    }));
+
+    void commsChannelRef.current?.send({
+      type: 'broadcast',
+      event: 'mail:upsert',
+      payload: newMail,
+    });
+
+    void dataService.comms
+      .saveCorporateMails(nextMails, currentUser.name, auditEntry)
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      })
+      .catch(handleCloudWriteError);
+
+    pushToast('Email Sent', `"${payload.subject}" delivered to ${payload.toEmails.join(', ')}`, 'success');
+  };
+
+  const handleSaveCorporateDraft = (payload: SaveCorporateDraftPayload) => {
+    if (!isApprovedUser) return;
+    const now = new Date().toISOString();
+    const selfEmailLower = currentUser.email.trim().toLowerCase();
+    const draftId =
+      payload.draftId || `draft-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const existing = state.corporateMails.find((m) => m.id === draftId);
+    const draft: CorporateMailMessage = {
+      id: draftId,
+      threadId: payload.threadId || existing?.threadId || `thr-${Date.now()}`,
+      parentId: payload.parentId || existing?.parentId,
+      fromUserId: currentUser.id,
+      fromName: currentUser.name,
+      fromEmail: currentUser.email,
+      toEmails: payload.toEmails,
+      ccEmails: payload.ccEmails,
+      subject: payload.subject,
+      body: payload.body,
+      status: 'draft',
+      readBy: [selfEmailLower],
+      meetInvite: payload.meetInvite,
+      deliveryMethod: 'NexOps Mail',
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+    };
+    const nextMails = [
+      draft,
+      ...state.corporateMails.filter((m) => m.id !== draftId),
+    ].slice(0, 300);
+
+    setState((prev) => ({
+      ...prev,
+      corporateMails: nextMails,
+    }));
+
+    void dataService.comms
+      .saveCorporateMails(nextMails, currentUser.name)
+      .catch(handleCloudWriteError);
+
+    pushToast('Draft Saved', payload.subject || 'Untitled Draft', 'info');
+  };
+
+  const handleDeleteCorporateDraft = (draftId: string) => {
+    if (!isApprovedUser) return;
+    const nextMails = state.corporateMails.filter((m) => m.id !== draftId);
+    setState((prev) => ({
+      ...prev,
+      corporateMails: nextMails,
+    }));
+    void dataService.comms
+      .saveCorporateMails(nextMails, currentUser.name)
+      .catch(handleCloudWriteError);
+    pushToast('Draft Deleted', 'Removed draft from Mail & Chat Hub.', 'info');
+  };
+
+  const handleMarkMailRead = useCallback(
+    (mailId: string) => {
+      const selfEmailLower = currentUser.email.trim().toLowerCase();
+      if (!selfEmailLower) return;
+      let changed = false;
+      let nextSnapshot: CorporateMailMessage[] = [];
+      setState((prev) => {
+        const nextMails = prev.corporateMails.map((m) => {
+          if (m.id !== mailId) return m;
+          if (m.readBy.some((e) => e.trim().toLowerCase() === selfEmailLower)) return m;
+          changed = true;
+          return { ...m, readBy: [...m.readBy, selfEmailLower] };
+        });
+        nextSnapshot = nextMails;
+        return changed ? { ...prev, corporateMails: nextMails } : prev;
+      });
+      if (changed) {
+        void dataService.comms
+          .saveCorporateMails(nextSnapshot, currentUser.name)
+          .catch(() => {});
+      }
+    },
+    [currentUser.email, currentUser.name],
+  );
+
+  const handleSendChatMessage = (payload: SendChatMessagePayload) => {
+    if (!isApprovedUser) return;
+    const now = new Date().toISOString();
+    const selfEmailLower = currentUser.email.trim().toLowerCase();
+    const msg: TeamChatMessage = {
+      id: `chat-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      roomId: payload.roomId,
+      roomType: payload.roomType,
+      roomLabel: payload.roomLabel,
+      senderId: currentUser.id,
+      senderName: currentUser.name,
+      senderEmail: currentUser.email,
+      senderRole: currentUser.role,
+      senderDepartment: currentUser.department,
+      body: payload.body,
+      meetInvite: payload.meetInvite,
+      readBy: [selfEmailLower],
+      createdAt: now,
+    };
+
+    const nextMessages = [...state.chatMessages, msg].slice(-400);
+    setState((prev) => ({
+      ...prev,
+      chatMessages: nextMessages,
+    }));
+
+    void commsChannelRef.current?.send({
+      type: 'broadcast',
+      event: 'chat:message',
+      payload: msg,
+    });
+
+    void dataService.comms
+      .saveChatMessages(nextMessages, currentUser.name)
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      })
+      .catch(handleCloudWriteError);
+  };
+
+  const handleMarkChatRoomRead = useCallback(
+    (roomId: string) => {
+      const selfEmailLower = currentUser.email.trim().toLowerCase();
+      if (!selfEmailLower) return;
+      let changed = false;
+      let nextSnapshot: TeamChatMessage[] = [];
+      setState((prev) => {
+        const nextMessages = prev.chatMessages.map((msg) => {
+          if (msg.roomId !== roomId) return msg;
+          if (msg.readBy.some((e) => e.trim().toLowerCase() === selfEmailLower)) return msg;
+          changed = true;
+          return { ...msg, readBy: [...msg.readBy, selfEmailLower] };
+        });
+        nextSnapshot = nextMessages;
+        return changed ? { ...prev, chatMessages: nextMessages } : prev;
+      });
+      if (changed) {
+        void dataService.comms
+          .saveChatMessages(nextSnapshot, currentUser.name)
+          .catch(() => {});
+      }
+    },
+    [currentUser.email, currentUser.name],
+  );
+
+  const handleStartGoogleMeetSession = (payload: StartGoogleMeetPayload) => {
+    if (!isApprovedUser) return;
+    const now = new Date().toISOString();
+    const maxNum = state.meetings.reduce((max, m) => {
+      const match = m.code.match(/^MOM-\d{4}-(\d+)$/);
+      return match ? Math.max(max, parseInt(match[1], 10)) : max;
+    }, 0);
+    const code = `MOM-2026-${String(maxNum + 1).padStart(3, '0')}`;
+    const newMeeting: MeetingMinute = {
+      id: `mom-meet-${Date.now()}`,
+      code,
+      title: payload.title,
+      meetingDate: getTodayDateString(),
+      department: payload.department || currentUser.department,
+      facilitator: currentUser.name,
+      attendees: payload.attendees.length > 0 ? payload.attendees : [currentUser.name],
+      summary: `Google Meet video call launched from ${payload.sourceLabel}.\nMeet Link: ${payload.meetUrl}`,
+      decisions: [`Google Meet URL: ${payload.meetUrl}`],
+      actionItems: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const auditEntry = createAuditEvent(
+      code,
+      'Meet Session Logged',
+      `${currentUser.name} started Google Meet "${payload.title}" (${payload.meetUrl}) from ${payload.sourceLabel} and logged MoM ${code}.`,
+    );
+
+    setState((prev) => ({
+      ...prev,
+      meetings: [newMeeting, ...prev.meetings],
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+    }));
+
+    void dataService.meetings
+      .upsert(newMeeting, auditEntry)
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      })
+      .catch(handleCloudWriteError);
+
+    pushToast(
+      `Google Meet Logged · ${code}`,
+      `Opened Meet and recorded session in Meetings & MoM.`,
       'success',
     );
   };
@@ -6374,6 +6712,7 @@ export default function App() {
           vaultCount={state.vaultDocuments.length}
           pendingLeavesCount={pendingLeavesCount}
           openActionItemsCount={openActionItemsCount}
+          unreadCommsCount={unreadCommsCount}
           workspaceLinksCount={state.workspaceLinks.length}
           pendingUsersCount={pendingUsersCount}
           pendingEditorChangesCount={pendingEditorChangesCount}
@@ -6418,6 +6757,7 @@ export default function App() {
             onOpenProfile={() => setProfileModalOpen(true)}
             onSignOut={handleSignOut}
             activeWorkspaceTool={activeWorkspaceTool}
+            unreadCommsCount={unreadCommsCount}
             slaPolicy={branding.slaPolicy ?? DEFAULT_SLA_POLICY}
             isDarkMode={isDarkMode}
             onToggleDarkMode={() => setIsDarkMode((prev) => !prev)}
@@ -6630,6 +6970,31 @@ export default function App() {
                   />
                 )}
 
+                {activeSection === 'mailchat' && (
+                  <MailChatHubView
+                    currentUser={currentUser}
+                    activeRole={currentUser.role}
+                    teamMembers={state.teamMembers}
+                    departments={branding.departments}
+                    onlinePresenceKeys={onlinePresenceKeys}
+                    recentlyOfflineKeys={recentlyOfflineKeys}
+                    corporateMails={state.corporateMails}
+                    chatMessages={state.chatMessages}
+                    googleToken={googleToken}
+                    googleEmail={googleEmail}
+                    googleConnecting={googleConnecting}
+                    onGoogleSignIn={handleGoogleWorkspaceSignIn}
+                    onSendMail={handleSendCorporateMail}
+                    onSaveDraft={handleSaveCorporateDraft}
+                    onDeleteDraft={handleDeleteCorporateDraft}
+                    onMarkMailRead={handleMarkMailRead}
+                    onSendChatMessage={handleSendChatMessage}
+                    onMarkChatRoomRead={handleMarkChatRoomRead}
+                    onStartGoogleMeetSession={handleStartGoogleMeetSession}
+                    onNotify={pushToast}
+                  />
+                )}
+
                 {activeSection === 'workspace' && (
                   <WorkspaceToolsView
                     activeTool={activeWorkspaceTool}
@@ -6773,6 +7138,22 @@ export default function App() {
             }
             onDuplicateRequest={handleDuplicateRequest}
             onEscalateRequest={handleEscalateRequest}
+          />
+        )}
+
+        {/* Quick-Access Floating Team Chat & Google Meet Drawer */}
+        {activeSection !== 'mailchat' && (
+          <QuickChatDrawer
+            currentUser={currentUser}
+            teamMembers={state.teamMembers}
+            departments={branding.departments}
+            onlinePresenceKeys={onlinePresenceKeys}
+            recentlyOfflineKeys={recentlyOfflineKeys}
+            chatMessages={state.chatMessages}
+            onSendChatMessage={handleSendChatMessage}
+            onMarkChatRoomRead={handleMarkChatRoomRead}
+            onStartGoogleMeetSession={handleStartGoogleMeetSession}
+            onOpenFullHub={() => setActiveSection('mailchat')}
           />
         )}
 

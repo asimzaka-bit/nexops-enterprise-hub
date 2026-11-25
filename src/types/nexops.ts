@@ -178,7 +178,9 @@ export type AuditActionType =
   | 'Notice Updated'
   | 'Notice Deleted'
   | 'Vault Updated'
-  | 'Subtask Updated';
+  | 'Subtask Updated'
+  | 'Meet Session Logged'
+  | 'Mail Sent';
 
 export type AnnouncementSeverity = 'info' | 'warning' | 'urgent';
 export type AnnouncementPriorityTag = 'Urgent' | 'General' | 'HR';
@@ -500,9 +502,54 @@ export type NavSection =
   | 'vault'
   | 'leaves'
   | 'meetings'
+  | 'mailchat'
   | 'workspace'
   | 'audit'
   | 'settings';
+
+export interface MeetInviteCardData {
+  url: string;
+  hostName: string;
+  hostEmail: string;
+  title: string;
+  createdAt: string;
+}
+
+export interface CorporateMailMessage {
+  id: string;
+  threadId: string;
+  parentId?: string;
+  fromUserId: string;
+  fromName: string;
+  fromEmail: string;
+  toEmails: string[];
+  ccEmails: string[];
+  subject: string;
+  body: string;
+  status: 'sent' | 'draft';
+  readBy: string[];
+  starredBy?: string[];
+  meetInvite?: MeetInviteCardData;
+  deliveryMethod: 'NexOps Mail' | 'Gmail API' | 'Mail Client (mailto)';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TeamChatMessage {
+  id: string;
+  roomId: string;
+  roomType: 'channel' | 'dm';
+  roomLabel: string;
+  senderId: string;
+  senderName: string;
+  senderEmail: string;
+  senderRole: Role;
+  senderDepartment: Department;
+  body: string;
+  meetInvite?: MeetInviteCardData;
+  readBy: string[];
+  createdAt: string;
+}
 
 export interface ChecklistItem {
   id: string;
@@ -839,5 +886,7 @@ export interface NexOpsState {
   taskComments: TaskComment[];
   vaultDocuments: DocumentVaultItem[];
   pendingEditorChanges: PendingEditorChange[];
+  corporateMails: CorporateMailMessage[];
+  chatMessages: TeamChatMessage[];
   permissionMatrix: PermissionMatrix;
 }

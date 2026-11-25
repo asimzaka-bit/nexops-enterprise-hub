@@ -124,3 +124,38 @@ export function GoogleGColorIcon({ className = 'h-4 w-4' }: { className?: string
     </svg>
   );
 }
+
+export function GoogleMeetColorIcon({ className = 'h-4 w-4' }: { className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      className={className}
+      aria-hidden="true"
+    >
+      <path fill="#00832D" d="M14.5 12l2.6 3.05V8.95L14.5 12z" />
+      <path
+        fill="#0066DA"
+        d="M2.5 16.25V19c0 .83.67 1.5 1.5 1.5h2.75v-4.25H2.5z"
+      />
+      <path
+        fill="#EA4335"
+        d="M6.75 3.5H4c-.83 0-1.5.67-1.5 1.5v2.75h4.25V3.5z"
+      />
+      <path fill="#FFBA00" d="M2.5 7.75h4.25v8.5H2.5v-8.5z" />
+      <path
+        fill="#00AC47"
+        d="M17.1 8.95l3.15-2.6c.57-.47 1.25-.07 1.25.67v10c0 .74-.68 1.14-1.25.67l-3.15-2.6v-6.14z"
+      />
+      <path
+        fill="#00AC47"
+        d="M6.75 16.25v4.25h8.75c.83 0 1.5-.67 1.5-1.5v-3.9l-2.5-3.1-7.75 4.25z"
+      />
+      <path
+        fill="#00832D"
+        d="M17 7.75V5c0-.83-.67-1.5-1.5-1.5H6.75v4.25h7.75L17 8.95v-1.2z"
+      />
+      <path fill="#2684FC" d="M6.75 7.75h7.75V12l-7.75 4.25V7.75z" />
+    </svg>
+  );
+}

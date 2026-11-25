@@ -92,6 +92,8 @@ export function createSeedState(): NexOpsState {
     taskComments: [],
     vaultDocuments: [],
     pendingEditorChanges: [],
+    corporateMails: [],
+    chatMessages: [],
     permissionMatrix: structuredClone(DEFAULT_PERMISSION_MATRIX),
   };
 }

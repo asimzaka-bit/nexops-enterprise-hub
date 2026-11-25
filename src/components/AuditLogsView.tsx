@@ -27,6 +27,8 @@ const ACTION_TYPES: (AuditActionType | 'All')[] = [
   'Notice Deleted',
   'Vault Updated',
   'Subtask Updated',
+  'Mail Sent',
+  'Meet Session Logged',
 ];
 
 export function AuditLogsView({

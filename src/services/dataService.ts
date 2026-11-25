@@ -278,6 +278,7 @@ import {
   CompanyAsset,
   CompanyBrandingConfig,
   CompanyProject,
+  CorporateMailMessage,
   CurrencyCode,
   DEFAULT_CATEGORIES,
   DEFAULT_DEPARTMENTS,
@@ -310,6 +311,7 @@ import {
   TableSyncStatus,
   TaskComment,
   TaskSubtask,
+  TeamChatMessage,
   TeamMember,
   WorkspaceDocToolType,
   WorkspaceEmailLog,
@@ -529,6 +531,8 @@ function readWorkspaceState(): NexOpsState {
       pendingEditorChanges: Array.isArray(parsed.pendingEditorChanges)
         ? parsed.pendingEditorChanges
         : [],
+      corporateMails: Array.isArray(parsed.corporateMails) ? parsed.corporateMails : [],
+      chatMessages: Array.isArray(parsed.chatMessages) ? parsed.chatMessages : [],
       permissionMatrix: normalizePermissionMatrix(parsed.permissionMatrix),
     };
   } catch {
@@ -1859,6 +1863,8 @@ export const SYSTEM_STATE_KEYS = {
   MASTER_KEY: 'master_key_config',
   DOCUMENT_VAULT: 'document_vault_items',
   PENDING_EDITOR_CHANGES: 'pending_editor_changes',
+  CORPORATE_MAILS: 'corporate_mails',
+  CHAT_MESSAGES: 'chat_messages',
 } as const;
 
 interface SyncedRequestMetaBundle {
@@ -2516,6 +2522,18 @@ export const dataService = {
         ? (pendingChangesRow.payload as PendingEditorChange[])
         : localSnapshot.pendingEditorChanges;
 
+    const mailsRow = sysMap.get(SYSTEM_STATE_KEYS.CORPORATE_MAILS);
+    const corporateMails: CorporateMailMessage[] =
+      mailsRow && Array.isArray(mailsRow.payload)
+        ? (mailsRow.payload as CorporateMailMessage[])
+        : localSnapshot.corporateMails;
+
+    const chatRow = sysMap.get(SYSTEM_STATE_KEYS.CHAT_MESSAGES);
+    const chatMessages: TeamChatMessage[] =
+      chatRow && Array.isArray(chatRow.payload)
+        ? (chatRow.payload as TeamChatMessage[])
+        : localSnapshot.chatMessages;
+
     const projectLinksMap = readRequestProjectsMap();
     const assetLinksMap = readRequestAssetsMap();
     const metaMap = readRequestMetaMap();
@@ -2688,6 +2706,8 @@ export const dataService = {
       taskComments,
       vaultDocuments,
       pendingEditorChanges,
+      corporateMails,
+      chatMessages,
       permissionMatrix,
     };
 
@@ -2863,6 +2883,16 @@ export const dataService = {
         {
           state_key: SYSTEM_STATE_KEYS.PENDING_EDITOR_CHANGES,
           payload: nextState.pendingEditorChanges ?? [],
+          updated_at: now,
+        },
+        {
+          state_key: SYSTEM_STATE_KEYS.CORPORATE_MAILS,
+          payload: nextState.corporateMails ?? [],
+          updated_at: now,
+        },
+        {
+          state_key: SYSTEM_STATE_KEYS.CHAT_MESSAGES,
+          payload: nextState.chatMessages ?? [],
           updated_at: now,
         },
       ];
@@ -5156,6 +5186,47 @@ export const dataService = {
         tasks.push(dataService.auditLogs.append(auditEntry));
       }
       await Promise.all(tasks);
+    },
+  },
+
+  comms: {
+    async saveCorporateMails(
+      mails: CorporateMailMessage[],
+      updatedBy?: string,
+      auditEntry?: AuditEvent,
+    ): Promise<void> {
+      const capped = mails.slice(0, 300);
+      const local = readWorkspaceState();
+      writeWorkspaceState({
+        ...local,
+        corporateMails: capped,
+      });
+      if (!supabase) return;
+      const tasks: Promise<void>[] = [
+        dataService.systemState.upsertKey(SYSTEM_STATE_KEYS.CORPORATE_MAILS, capped, updatedBy),
+      ];
+      if (auditEntry) {
+        tasks.push(dataService.auditLogs.append(auditEntry));
+      }
+      await Promise.all(tasks);
+    },
+
+    async saveChatMessages(
+      messages: TeamChatMessage[],
+      updatedBy?: string,
+    ): Promise<void> {
+      const capped = messages.slice(-400);
+      const local = readWorkspaceState();
+      writeWorkspaceState({
+        ...local,
+        chatMessages: capped,
+      });
+      if (!supabase) return;
+      await dataService.systemState.upsertKey(
+        SYSTEM_STATE_KEYS.CHAT_MESSAGES,
+        capped,
+        updatedBy,
+      );
     },
   },
 };
