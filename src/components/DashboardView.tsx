@@ -98,6 +98,10 @@ interface DashboardViewProps {
   onEditAnnouncement: (announcement: CompanyAnnouncement) => void;
   onDeleteAnnouncement: (announcementId: string) => void;
   onTogglePinAnnouncement: (announcementId: string) => void;
+  weatherCity?: string;
+  weatherUnit?: 'C' | 'F';
+  timeFormat?: '12h' | '24h';
+  timezone?: string;
 }
 
 const STATUS_ORDER: { status: RequestStatus; barColor: string }[] = [
@@ -132,6 +136,10 @@ export function DashboardView({
   onEditAnnouncement,
   onDeleteAnnouncement,
   onTogglePinAnnouncement,
+  weatherCity,
+  weatherUnit = 'C',
+  timeFormat = '12h',
+  timezone,
 }: DashboardViewProps) {
   const isAdmin = activeRole === 'Admin';
   const todayStr = getTodayDateString();
@@ -1747,7 +1755,12 @@ export function DashboardView({
       </section>
 
       {/* Live Weather & Interactive Operations Map */}
-      <WeatherAndMapSection />
+      <WeatherAndMapSection
+        defaultCity={weatherCity}
+        temperatureUnit={weatherUnit}
+        timeFormat={timeFormat}
+        timezone={timezone}
+      />
 
       {/* Team Online Presence & Active Directory Strip */}
       <section

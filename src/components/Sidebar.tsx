@@ -13,6 +13,7 @@ import {
   Package,
   PanelLeftClose,
   PanelLeftOpen,
+  Settings,
   ShieldAlert,
   Users,
   X,
@@ -178,6 +179,11 @@ export function Sidebar({
       label: 'Mail & Chat',
       icon: MessageSquare,
       badge: unreadCommsCount,
+    },
+    {
+      id: 'user_settings',
+      label: 'Settings',
+      icon: Settings,
     },
     ...(activeRole === 'Admin'
       ? [

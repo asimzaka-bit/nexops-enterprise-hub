@@ -29,6 +29,7 @@ import { TeamSettingsView } from './components/TeamSettingsView';
 import { ToastContainer } from './components/ToastContainer';
 import { TopBar } from './components/TopBar';
 import { UserProfileModal } from './components/UserProfileModal';
+import { UserSettingsView } from './components/UserSettingsView';
 import { DocumentVaultView } from './components/DocumentVaultView';
 import { WorkspaceSkeleton } from './components/WorkspaceSkeleton';
 import { WorkspaceToolsView } from './components/WorkspaceToolsView';
@@ -52,6 +53,7 @@ import {
   CompanyProject,
   CorporateMailMessage,
   DEFAULT_SLA_POLICY,
+  DEFAULT_USER_PREFERENCES,
   Department,
   DocumentVaultItem,
   EditorChangePayload,
@@ -78,6 +80,7 @@ import {
   TeamMember,
   ThemePreference,
   ToastMessage,
+  UserPreferences,
   WorkspaceEmailLog,
   WorkspaceSavedLink,
   WorkspaceToolType,
@@ -102,6 +105,7 @@ import {
   signInWithGoogleWorkspace,
 } from './services/googleWorkspaceService';
 import {
+  applyUserPreferencesToDom,
   downloadSystemBackupJson,
   formatCurrency,
   generateNextRequestId,
@@ -109,10 +113,12 @@ import {
   isAssetAlert,
   isSuperAdminEmail,
   isSuperAdminEmployeeId,
+  loadUserPreferences,
   normalizePermissionMatrix,
   normalizeRole,
   requiresTwoTierApproval,
   resolveEffectiveReviewer,
+  saveUserPreferences,
   SUPER_ADMIN_EMPLOYEE_ID,
 } from './utils/storage';
 
@@ -188,6 +194,24 @@ export default function App() {
       // Ignore storage restrictions
     }
   }, [isDarkMode, themePreference]);
+
+  const [userPreferences, setUserPreferences] = useState<UserPreferences>(() =>
+    loadUserPreferences(authSession?.userEmail),
+  );
+  const userPrefsRef = useRef<UserPreferences>(userPreferences);
+
+  useEffect(() => {
+    userPrefsRef.current = userPreferences;
+    applyUserPreferencesToDom(userPreferences);
+  }, [userPreferences]);
+
+  useEffect(() => {
+    const email = authSession?.userEmail;
+    const loaded = loadUserPreferences(email);
+    setUserPreferences(loaded);
+    userPrefsRef.current = loaded;
+    applyUserPreferencesToDom(loaded);
+  }, [authSession?.userEmail]);
 
   // Queue filters & search
   const [searchQuery, setSearchQuery] = useState('');
@@ -1334,6 +1358,17 @@ export default function App() {
           ...prev,
           chatMessages: mergeChatMessages(prev.chatMessages, [incoming]),
         }));
+        if (
+          userPrefsRef.current.teamChatAlerts &&
+          incoming.senderEmail.trim().toLowerCase() !==
+            (authSession?.userEmail ?? '').trim().toLowerCase()
+        ) {
+          pushToast(
+            `Team Chat · ${incoming.senderName}`,
+            incoming.body.slice(0, 90),
+            'info',
+          );
+        }
       })
       .on('broadcast', { event: 'mail:upsert' }, ({ payload }) => {
         const incoming = payload as CorporateMailMessage | undefined;
@@ -1346,6 +1381,18 @@ export default function App() {
             deletedMailIdsRef.current,
           ),
         }));
+        const selfLower = (authSession?.userEmail ?? '').trim().toLowerCase();
+        const isRecipient =
+          selfLower &&
+          (incoming.toEmails.some((e) => e.trim().toLowerCase() === selfLower) ||
+            incoming.ccEmails.some((e) => e.trim().toLowerCase() === selfLower));
+        if (
+          userPrefsRef.current.mailNotifications &&
+          isRecipient &&
+          incoming.fromEmail.trim().toLowerCase() !== selfLower
+        ) {
+          pushToast(`New Mail · ${incoming.fromName}`, incoming.subject, 'info');
+        }
       })
       .on('broadcast', { event: 'meet:invite' }, ({ payload }) => {
         const incomingMeeting = payload as MeetingMinute | undefined;
@@ -1354,6 +1401,13 @@ export default function App() {
           ...prev,
           meetings: mergeMeetings(prev.meetings, [incomingMeeting]),
         }));
+        if (userPrefsRef.current.calendarReminders) {
+          pushToast(
+            `Google Meet Invite · ${incomingMeeting.facilitator}`,
+            incomingMeeting.title,
+            'info',
+          );
+        }
       })
       .on('broadcast', { event: 'calendar:upsert' }, ({ payload }) => {
         const incomingEvent = payload as CalendarEvent | undefined;
@@ -1367,6 +1421,17 @@ export default function App() {
             deletedCalendarIdsRef.current,
           ),
         }));
+        if (
+          userPrefsRef.current.calendarReminders &&
+          incomingEvent.createdByEmail.trim().toLowerCase() !==
+            (authSession?.userEmail ?? '').trim().toLowerCase()
+        ) {
+          pushToast(
+            `Calendar Update · ${incomingEvent.type}`,
+            `${incomingEvent.title} (${incomingEvent.date})`,
+            'info',
+          );
+        }
       })
       .on('broadcast', { event: 'calendar:delete' }, ({ payload }) => {
         const deletedId = (payload as { id?: string } | undefined)?.id;
@@ -1387,7 +1452,7 @@ export default function App() {
       }
       void client.removeChannel(commsChannel);
     };
-  }, [authSession?.isAuthenticated, isApprovedUser]);
+  }, [authSession?.isAuthenticated, authSession?.userEmail, isApprovedUser, pushToast]);
 
   const currentActor = currentUser;
 
@@ -3907,11 +3972,13 @@ export default function App() {
       })
       .catch(handleCloudWriteError);
 
-    pushToast(
-      `${target.code} ${decision}`,
-      `${target.employeeName} (${target.totalDays}d ${target.leaveType})`,
-      decision === 'Approved' ? 'success' : 'warning',
-    );
+    if (userPrefsRef.current.approvalLeaveAlerts) {
+      pushToast(
+        `${target.code} ${decision}`,
+        `${target.employeeName} (${target.totalDays}d ${target.leaveType})`,
+        decision === 'Approved' ? 'success' : 'warning',
+      );
+    }
   };
 
   // Admin-Only Team, Approval & Master Key Management Handlers (Zero-Lag Optimistic UI + Rollback)
@@ -5108,6 +5175,28 @@ export default function App() {
       .catch(handleCloudWriteError);
     pushToast(`Action Completed · ${meeting.code}`, actionItem.description, 'success');
   };
+
+  const handleUpdateUserPreferences = useCallback(
+    (patch: Partial<UserPreferences>, feedbackLabel?: string) => {
+      setUserPreferences((prev) => {
+        const next = { ...prev, ...patch };
+        saveUserPreferences(currentUser.email, next);
+        return next;
+      });
+      if (feedbackLabel) {
+        pushToast('Settings Saved', feedbackLabel, 'success');
+      }
+    },
+    [currentUser.email, pushToast],
+  );
+
+  const handleResetUserPreferences = useCallback(() => {
+    const defaults = { ...DEFAULT_USER_PREFERENCES };
+    setUserPreferences(defaults);
+    saveUserPreferences(currentUser.email, defaults);
+    setThemePreference('system');
+    pushToast('Preferences Restored', 'Reset personal settings to Calibri & System Auto defaults.', 'info');
+  }, [currentUser.email, pushToast]);
 
   const handleUpdatePassword = async (newPassword: string) => {
     await dataService.auth.updatePassword(newPassword, currentUser.email);
@@ -7194,6 +7283,10 @@ export default function App() {
                     onEditAnnouncement={handleEditAnnouncement}
                     onDeleteAnnouncement={handleDeleteAnnouncement}
                     onTogglePinAnnouncement={handleTogglePinAnnouncement}
+                    weatherCity={userPreferences.weatherCity}
+                    weatherUnit={userPreferences.weatherUnit}
+                    timeFormat={userPreferences.timeFormat}
+                    timezone={userPreferences.timezone}
                   />
                 )}
 
@@ -7407,6 +7500,28 @@ export default function App() {
                     onSaveWorkspaceLink={handleSaveWorkspaceLink}
                     onDeleteWorkspaceLink={handleDeleteWorkspaceLink}
                     onNotify={pushToast}
+                  />
+                )}
+
+                {activeSection === 'user_settings' && (
+                  <UserSettingsView
+                    currentUser={currentUser}
+                    activeRole={currentUser.role}
+                    departments={branding.departments}
+                    vaultDocuments={state.vaultDocuments}
+                    themePreference={themePreference}
+                    isDarkMode={isDarkMode}
+                    onSetThemePreference={setThemePreference}
+                    preferences={userPreferences}
+                    onUpdatePreferences={handleUpdateUserPreferences}
+                    onResetPreferences={handleResetUserPreferences}
+                    onOpenVault={() => setActiveSection('vault')}
+                    onUploadAvatar={handleUploadAvatar}
+                    onRemoveAvatar={handleRemoveAvatar}
+                    onSaveSignOffTitle={handleSaveSignOffTitle}
+                    onUpdateDepartment={handleUpdateMemberDepartment}
+                    onUpdatePassword={handleUpdatePassword}
+                    viewport={viewport}
                   />
                 )}
 

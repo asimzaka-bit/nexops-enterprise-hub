@@ -524,6 +524,7 @@ export type NavSection =
   | 'mailchat'
   | 'workspace'
   | 'audit'
+  | 'user_settings'
   | 'settings';
 
 export interface MeetInviteCardData {
@@ -910,3 +911,37 @@ export interface NexOpsState {
   calendarEvents: CalendarEvent[];
   permissionMatrix: PermissionMatrix;
 }
+
+export type InterfaceDensity = 'compact' | 'standard' | 'comfortable';
+export type FontStyleOption = 'calibri' | 'segoe' | 'inter' | 'system';
+export type TextScaleOption = '95' | '100' | '105';
+export type TemperatureUnit = 'C' | 'F';
+export type TimeFormatOption = '12h' | '24h';
+
+export interface UserPreferences {
+  density: InterfaceDensity;
+  fontStyle: FontStyleOption;
+  textScale: TextScaleOption;
+  teamChatAlerts: boolean;
+  mailNotifications: boolean;
+  approvalLeaveAlerts: boolean;
+  calendarReminders: boolean;
+  weatherCity: string;
+  weatherUnit: TemperatureUnit;
+  timeFormat: TimeFormatOption;
+  timezone: string;
+}
+
+export const DEFAULT_USER_PREFERENCES: UserPreferences = {
+  density: 'standard',
+  fontStyle: 'calibri',
+  textScale: '100',
+  teamChatAlerts: true,
+  mailNotifications: true,
+  approvalLeaveAlerts: true,
+  calendarReminders: true,
+  weatherCity: 'Lahore, Pakistan',
+  weatherUnit: 'C',
+  timeFormat: '12h',
+  timezone: 'Asia/Karachi',
+};

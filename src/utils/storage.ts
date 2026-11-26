@@ -6,8 +6,10 @@ import {
   CompanyAsset,
   CurrencyCode,
   DEFAULT_SLA_POLICY,
+  DEFAULT_USER_PREFERENCES,
   DbAccessRole,
   DocumentVaultItem,
+  FontStyleOption,
   NexOpsState,
   OperationalRequest,
   PermissionKey,
@@ -17,6 +19,9 @@ import {
   Role,
   SlaPolicyConfig,
   TeamMember,
+  TemperatureUnit,
+  TextScaleOption,
+  UserPreferences,
 } from '../types/nexops';
 
 export const SUPER_ADMIN_EMAIL = 'hassanzaka018@gmail.com';
@@ -1417,4 +1422,134 @@ export function buildDmRoomId(emailA: string, emailB: string): string {
 
 export function buildChannelRoomId(channelName: string): string {
   return `channel:${channelName.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+}
+
+const USER_PREFS_STORAGE_PREFIX = 'nexops_user_preferences_v1';
+
+function getUserPreferencesStorageKey(email?: string | null): string {
+  const clean = (email ?? '').trim().toLowerCase();
+  return clean ? `${USER_PREFS_STORAGE_PREFIX}:${clean}` : `${USER_PREFS_STORAGE_PREFIX}:default`;
+}
+
+export function normalizeUserPreferences(raw: unknown): UserPreferences {
+  if (!raw || typeof raw !== 'object') {
+    return { ...DEFAULT_USER_PREFERENCES };
+  }
+  const obj = raw as Partial<UserPreferences>;
+  const density =
+    obj.density === 'compact' || obj.density === 'comfortable' || obj.density === 'standard'
+      ? obj.density
+      : DEFAULT_USER_PREFERENCES.density;
+  const fontStyle =
+    obj.fontStyle === 'calibri' ||
+    obj.fontStyle === 'segoe' ||
+    obj.fontStyle === 'inter' ||
+    obj.fontStyle === 'system'
+      ? obj.fontStyle
+      : DEFAULT_USER_PREFERENCES.fontStyle;
+  const textScale =
+    obj.textScale === '95' || obj.textScale === '100' || obj.textScale === '105'
+      ? obj.textScale
+      : DEFAULT_USER_PREFERENCES.textScale;
+  const weatherUnit =
+    obj.weatherUnit === 'C' || obj.weatherUnit === 'F'
+      ? obj.weatherUnit
+      : DEFAULT_USER_PREFERENCES.weatherUnit;
+  const timeFormat =
+    obj.timeFormat === '12h' || obj.timeFormat === '24h'
+      ? obj.timeFormat
+      : DEFAULT_USER_PREFERENCES.timeFormat;
+
+  return {
+    density,
+    fontStyle,
+    textScale,
+    teamChatAlerts:
+      typeof obj.teamChatAlerts === 'boolean'
+        ? obj.teamChatAlerts
+        : DEFAULT_USER_PREFERENCES.teamChatAlerts,
+    mailNotifications:
+      typeof obj.mailNotifications === 'boolean'
+        ? obj.mailNotifications
+        : DEFAULT_USER_PREFERENCES.mailNotifications,
+    approvalLeaveAlerts:
+      typeof obj.approvalLeaveAlerts === 'boolean'
+        ? obj.approvalLeaveAlerts
+        : DEFAULT_USER_PREFERENCES.approvalLeaveAlerts,
+    calendarReminders:
+      typeof obj.calendarReminders === 'boolean'
+        ? obj.calendarReminders
+        : DEFAULT_USER_PREFERENCES.calendarReminders,
+    weatherCity:
+      typeof obj.weatherCity === 'string' && obj.weatherCity.trim()
+        ? obj.weatherCity.trim()
+        : DEFAULT_USER_PREFERENCES.weatherCity,
+    weatherUnit,
+    timeFormat,
+    timezone:
+      typeof obj.timezone === 'string' && obj.timezone.trim()
+        ? obj.timezone.trim()
+        : DEFAULT_USER_PREFERENCES.timezone,
+  };
+}
+
+export function loadUserPreferences(email?: string | null): UserPreferences {
+  if (typeof window === 'undefined') return { ...DEFAULT_USER_PREFERENCES };
+  try {
+    const raw = localStorage.getItem(getUserPreferencesStorageKey(email));
+    if (!raw) return { ...DEFAULT_USER_PREFERENCES };
+    return normalizeUserPreferences(JSON.parse(raw));
+  } catch {
+    return { ...DEFAULT_USER_PREFERENCES };
+  }
+}
+
+export function saveUserPreferences(email: string | null | undefined, prefs: UserPreferences): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(getUserPreferencesStorageKey(email), JSON.stringify(prefs));
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
+export function resolveFontFamilyCss(fontStyle: FontStyleOption): string {
+  switch (fontStyle) {
+    case 'segoe':
+      return "'Segoe UI', 'Calibri', 'Carlito', sans-serif";
+    case 'inter':
+      return "'Inter', 'Calibri', 'Carlito', 'Segoe UI', sans-serif";
+    case 'system':
+      return "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+    case 'calibri':
+    default:
+      return "'Calibri', 'Carlito', 'Segoe UI', sans-serif";
+  }
+}
+
+export function resolveTextScaleValue(scale: TextScaleOption): string {
+  switch (scale) {
+    case '95':
+      return '0.95';
+    case '105':
+      return '1.05';
+    case '100':
+    default:
+      return '1';
+  }
+}
+
+export function applyUserPreferencesToDom(prefs: UserPreferences): void {
+  if (typeof document === 'undefined') return;
+  const root = document.documentElement;
+  root.style.setProperty('--nexops-font-family', resolveFontFamilyCss(prefs.fontStyle));
+  root.style.setProperty('--nexops-text-scale', resolveTextScaleValue(prefs.textScale));
+  root.dataset.density = prefs.density;
+}
+
+export function formatTemperatureValue(tempC: number, unit: TemperatureUnit): number {
+  if (unit === 'F') {
+    return Math.round((tempC * 9) / 5 + 32);
+  }
+  return Math.round(tempC);
 }

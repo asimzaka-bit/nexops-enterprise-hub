@@ -2,26 +2,28 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
-  --font-sans: 'Calibri', 'Carlito', 'Segoe UI', sans-serif;
-  --font-display: 'Calibri', 'Carlito', 'Segoe UI', sans-serif;
-  --font-mono: 'Calibri', 'Carlito', 'Segoe UI', sans-serif;
+  --font-sans: var(--nexops-font-family, 'Calibri', 'Carlito', 'Segoe UI', sans-serif);
+  --font-display: var(--nexops-font-family, 'Calibri', 'Carlito', 'Segoe UI', sans-serif);
+  --font-mono: var(--nexops-font-family, 'Calibri', 'Carlito', 'Segoe UI', sans-serif);
 }
 
 @layer base {
   :root {
-    --font-display: 'Calibri', 'Carlito', 'Segoe UI', sans-serif;
-    --font-sans: 'Calibri', 'Carlito', 'Segoe UI', sans-serif;
-    --font-mono: 'Calibri', 'Carlito', 'Segoe UI', sans-serif;
-    font-family: 'Calibri', 'Carlito', 'Segoe UI', sans-serif !important;
+    --nexops-font-family: 'Calibri', 'Carlito', 'Segoe UI', sans-serif;
+    --nexops-text-scale: 1;
+    --font-display: var(--nexops-font-family);
+    --font-sans: var(--nexops-font-family);
+    --font-mono: var(--nexops-font-family);
+    font-family: var(--nexops-font-family) !important;
   }
 
   *, *::before, *::after {
-    font-family: 'Calibri', 'Carlito', 'Segoe UI', sans-serif !important;
+    font-family: var(--nexops-font-family, 'Calibri', 'Carlito', 'Segoe UI', sans-serif) !important;
   }
 
   html {
-    font-family: 'Calibri', 'Carlito', 'Segoe UI', sans-serif !important;
-    font-size: 16px;
+    font-family: var(--nexops-font-family, 'Calibri', 'Carlito', 'Segoe UI', sans-serif) !important;
+    font-size: calc(16px * var(--nexops-text-scale, 1));
     line-height: 1.5;
     max-width: 100%;
     overflow-x: clip;
@@ -39,7 +41,7 @@
 
   body,
   #root {
-    font-family: 'Calibri', 'Carlito', 'Segoe UI', sans-serif !important;
+    font-family: var(--nexops-font-family, 'Calibri', 'Carlito', 'Segoe UI', sans-serif) !important;
     font-size: 1rem;
     line-height: 1.5;
     max-width: 100%;
@@ -64,14 +66,35 @@
   code, pre, kbd,
   .font-display, .font-sans, .font-mono,
   .leaflet-container, .leaflet-popup-content, .leaflet-control {
-    font-family: 'Calibri', 'Carlito', 'Segoe UI', sans-serif !important;
+    font-family: var(--nexops-font-family, 'Calibri', 'Carlito', 'Segoe UI', sans-serif) !important;
   }
 }
 
 .font-sans,
 .font-display,
 .font-mono {
-  font-family: 'Calibri', 'Carlito', 'Segoe UI', sans-serif !important;
+  font-family: var(--nexops-font-family, 'Calibri', 'Carlito', 'Segoe UI', sans-serif) !important;
+}
+
+/* Interface Density Modes (set on html[data-density]) */
+html[data-density='compact'] main {
+  line-height: 1.38;
+}
+
+html[data-density='compact'] main table th,
+html[data-density='compact'] main table td {
+  padding-top: 0.45rem;
+  padding-bottom: 0.45rem;
+}
+
+html[data-density='comfortable'] main {
+  line-height: 1.58;
+}
+
+html[data-density='comfortable'] main table th,
+html[data-density='comfortable'] main table td {
+  padding-top: 0.95rem;
+  padding-bottom: 0.95rem;
 }
 
 .tabular-nums {

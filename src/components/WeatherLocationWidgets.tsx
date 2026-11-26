@@ -22,6 +22,8 @@ import {
   Wind,
 } from 'lucide-react';
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { TemperatureUnit, TimeFormatOption } from '../types/nexops';
+import { formatTemperatureValue } from '../utils/storage';
 
 export interface ActiveGeoLocation {
   lat: number;
@@ -216,6 +218,9 @@ interface LiveWeatherCardProps {
   onSelectLocation: (loc: ActiveGeoLocation) => void;
   onDetectGps: () => void;
   detectingGps: boolean;
+  temperatureUnit?: TemperatureUnit;
+  timeFormat?: TimeFormatOption;
+  timezone?: string;
 }
 
 export function LiveWeatherCard({
@@ -223,6 +228,9 @@ export function LiveWeatherCard({
   onSelectLocation,
   onDetectGps,
   detectingGps,
+  temperatureUnit = 'C',
+  timeFormat = '12h',
+  timezone,
 }: LiveWeatherCardProps) {
   const [weather, setWeather] = useState<WeatherSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
@@ -272,14 +280,19 @@ export function LiveWeatherCard({
         lowC: Math.round(data.daily?.temperature_2m_min?.[0] ?? data.current.temperature_2m ?? 0),
         weatherCode: data.current.weather_code ?? 0,
         isDay: data.current.is_day !== 0,
-        fetchedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        fetchedAt: new Date().toLocaleTimeString([], {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: timeFormat === '12h',
+          ...(timezone ? { timeZone: timezone } : {}),
+        }),
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to load live weather.');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [timeFormat, timezone]);
 
   useEffect(() => {
     void fetchWeather(location.lat, location.lng);
@@ -434,7 +447,7 @@ export function LiveWeatherCard({
                 <ConditionIcon className={`h-11 w-11 shrink-0 ${condition.accent}`} />
                 <div>
                   <p className="font-display text-3xl font-bold tracking-tight text-slate-900 tabular-nums dark:text-slate-100">
-                    {weather.temperatureC}°C
+                    {formatTemperatureValue(weather.temperatureC, temperatureUnit)}°{temperatureUnit}
                   </p>
                   <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">
                     {condition.label}
@@ -444,10 +457,12 @@ export function LiveWeatherCard({
 
               <div className="text-right">
                 <p className="font-mono text-xs font-semibold text-slate-700 tabular-nums dark:text-slate-300">
-                  H: {weather.highC}° · L: {weather.lowC}°
+                  H: {formatTemperatureValue(weather.highC, temperatureUnit)}° · L:{' '}
+                  {formatTemperatureValue(weather.lowC, temperatureUnit)}°
                 </p>
                 <p className="mt-1 text-[11px] text-slate-500 tabular-nums dark:text-slate-400">
-                  Feels like {weather.apparentC}°C
+                  Feels like {formatTemperatureValue(weather.apparentC, temperatureUnit)}°
+                  {temperatureUnit}
                 </p>
               </div>
             </div>
@@ -477,7 +492,8 @@ export function LiveWeatherCard({
                   <span className="truncate">Range</span>
                 </p>
                 <p className="mt-0.5 truncate font-mono text-xs font-bold text-slate-900 tabular-nums sm:text-sm dark:text-slate-100">
-                  {weather.lowC}–{weather.highC}°
+                  {formatTemperatureValue(weather.lowC, temperatureUnit)}–
+                  {formatTemperatureValue(weather.highC, temperatureUnit)}°{temperatureUnit}
                 </p>
               </div>
             </div>
@@ -797,7 +813,19 @@ export function InteractiveMapCard({
   );
 }
 
-export function WeatherAndMapSection() {
+interface WeatherAndMapSectionProps {
+  defaultCity?: string;
+  temperatureUnit?: TemperatureUnit;
+  timeFormat?: TimeFormatOption;
+  timezone?: string;
+}
+
+export function WeatherAndMapSection({
+  defaultCity,
+  temperatureUnit = 'C',
+  timeFormat = '12h',
+  timezone,
+}: WeatherAndMapSectionProps) {
   const [activeLocation, setActiveLocation] = useState<ActiveGeoLocation>(DEFAULT_FALLBACK_LOCATION);
   const [detectingGps, setDetectingGps] = useState(false);
 
@@ -829,8 +857,29 @@ export function WeatherAndMapSection() {
   }, []);
 
   useEffect(() => {
+    const cleanCity = defaultCity?.trim();
+    if (cleanCity && cleanCity.toLowerCase() !== 'lahore, pakistan') {
+      const citySearchName = cleanCity.split(',')[0]?.trim() || cleanCity;
+      void searchPlacesByQuery(citySearchName)
+        .then((results) => {
+          const match = results[0];
+          if (match) {
+            setActiveLocation({
+              lat: match.latitude,
+              lng: match.longitude,
+              label: [match.name, match.country].filter(Boolean).join(', '),
+              country: match.country,
+              source: 'search',
+            });
+          } else {
+            detectCurrentLocation();
+          }
+        })
+        .catch(() => detectCurrentLocation());
+      return;
+    }
     detectCurrentLocation();
-  }, [detectCurrentLocation]);
+  }, [defaultCity, detectCurrentLocation]);
 
   const weatherProps = useMemo(
     () => ({
@@ -848,7 +897,12 @@ export function WeatherAndMapSection() {
       className="grid min-w-0 grid-cols-1 items-stretch gap-6 lg:grid-cols-12"
     >
       <div className="min-w-0 lg:col-span-5">
-        <LiveWeatherCard {...weatherProps} />
+        <LiveWeatherCard
+          {...weatherProps}
+          temperatureUnit={temperatureUnit}
+          timeFormat={timeFormat}
+          timezone={timezone}
+        />
       </div>
       <div className="min-w-0 lg:col-span-7">
         <InteractiveMapCard {...weatherProps} />

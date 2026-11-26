@@ -24,6 +24,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Settings,
   Shield,
   ShieldCheck,
   Sun,
@@ -185,6 +186,10 @@ const SECTION_TITLES: Record<NavSection, { title: string; subtitle: string }> = 
   audit: {
     title: 'Activity Audit Trail & Security Logs',
     subtitle: 'Admin-only ledger of user actions, security changes & CSV compliance exports',
+  },
+  user_settings: {
+    title: 'Settings',
+    subtitle: 'Appearance, typography, cloud storage quota, notifications & account security',
   },
   settings: {
     title: 'Team & Department Settings',
@@ -1501,6 +1506,23 @@ export function TopBar({
 
           {/* Profile & Session Actions */}
           <div className="mt-3 space-y-1 border-t border-slate-100 pt-2.5 dark:border-slate-800">
+            {onSelectSection && (
+              <button
+                type="button"
+                onClick={() => {
+                  setProfileOpen(false);
+                  onSelectSection('user_settings');
+                }}
+                className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-semibold transition-colors ${
+                  activeSection === 'user_settings'
+                    ? 'bg-indigo-50 text-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-200'
+                    : 'text-slate-700 hover:bg-slate-50 hover:text-slate-900 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white'
+                }`}
+              >
+                <Settings className="h-3.5 w-3.5 shrink-0 text-indigo-600 dark:text-indigo-400" />
+                <span>Account &amp; App Settings</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={() => {
