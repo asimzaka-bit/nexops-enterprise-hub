@@ -2,20 +2,25 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
-  --font-sans: 'Calibri', 'Carlito', 'Segoe UI', Arial, sans-serif;
-  --font-display: 'Calibri', 'Carlito', 'Segoe UI', Arial, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --font-sans: 'Calibri', 'Carlito', 'Segoe UI', sans-serif;
+  --font-display: 'Calibri', 'Carlito', 'Segoe UI', sans-serif;
+  --font-mono: 'Calibri', 'Carlito', 'Segoe UI', sans-serif;
 }
 
 @layer base {
   :root {
-    --font-display: 'Calibri', 'Carlito', 'Segoe UI', Arial, sans-serif;
-    --font-sans: 'Calibri', 'Carlito', 'Segoe UI', Arial, sans-serif;
-    --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    --font-display: 'Calibri', 'Carlito', 'Segoe UI', sans-serif;
+    --font-sans: 'Calibri', 'Carlito', 'Segoe UI', sans-serif;
+    --font-mono: 'Calibri', 'Carlito', 'Segoe UI', sans-serif;
+    font-family: 'Calibri', 'Carlito', 'Segoe UI', sans-serif !important;
+  }
+
+  *, *::before, *::after {
+    font-family: 'Calibri', 'Carlito', 'Segoe UI', sans-serif !important;
   }
 
   html {
-    font-family: 'Calibri', 'Carlito', 'Segoe UI', Arial, sans-serif;
+    font-family: 'Calibri', 'Carlito', 'Segoe UI', sans-serif !important;
     font-size: 16px;
     line-height: 1.5;
     max-width: 100%;
@@ -34,7 +39,7 @@
 
   body,
   #root {
-    font-family: 'Calibri', 'Carlito', 'Segoe UI', Arial, sans-serif;
+    font-family: 'Calibri', 'Carlito', 'Segoe UI', sans-serif !important;
     font-size: 1rem;
     line-height: 1.5;
     max-width: 100%;
@@ -53,15 +58,20 @@
     color: #f1f5f9;
   }
 
-  h1, h2, h3, h4, h5, h6, .font-display, .font-sans,
+  h1, h2, h3, h4, h5, h6, p, span, a, li, div,
   table, thead, tbody, tr, th, td,
-  form, label, input, select, option, textarea, button {
-    font-family: 'Calibri', 'Carlito', 'Segoe UI', Arial, sans-serif;
+  form, label, input, select, option, textarea, button,
+  code, pre, kbd,
+  .font-display, .font-sans, .font-mono,
+  .leaflet-container, .leaflet-popup-content, .leaflet-control {
+    font-family: 'Calibri', 'Carlito', 'Segoe UI', sans-serif !important;
   }
+}
 
-  .font-mono {
-    font-family: var(--font-mono);
-  }
+.font-sans,
+.font-display,
+.font-mono {
+  font-family: 'Calibri', 'Carlito', 'Segoe UI', sans-serif !important;
 }
 
 .tabular-nums {

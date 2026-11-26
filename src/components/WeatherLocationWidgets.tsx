@@ -199,7 +199,7 @@ function createPinDivIcon(label: string) {
     className: 'nexops-map-pin-wrapper',
     html: `
       <div style="display:flex;flex-direction:column;align-items:center;transform:translate(-50%,-100%);pointer-events:auto;">
-        <div style="background:#0F172A;color:#F8FAFC;font-family:Calibri,Carlito,sans-serif;font-size:11px;font-weight:700;padding:3px 8px;border-radius:6px;border:1px solid rgba(148,163,184,0.35);white-space:nowrap;box-shadow:0 4px 12px rgba(15,23,42,0.28);margin-bottom:4px;">
+        <div style="background:#0F172A;color:#F8FAFC;font-family:'Calibri','Carlito','Segoe UI',sans-serif;font-size:11px;font-weight:700;padding:3px 8px;border-radius:6px;border:1px solid rgba(148,163,184,0.35);white-space:nowrap;box-shadow:0 4px 12px rgba(15,23,42,0.28);margin-bottom:4px;">
           ${escaped}
         </div>
         <div style="width:18px;height:18px;border-radius:9999px;background:#4F46E5;border:3px solid #FFFFFF;box-shadow:0 3px 10px rgba(79,70,229,0.45);"></div>
@@ -541,9 +541,9 @@ export function InteractiveMapCard({
     }).addTo(map);
 
     marker.bindPopup(
-      `<div style="font-family:Calibri,Carlito,sans-serif;font-size:12px;">
+      `<div style="font-family:'Calibri','Carlito','Segoe UI',sans-serif;font-size:12px;">
         <strong>${location.label.replace(/[<>&"]/g, '')}</strong><br/>
-        <span style="font-family:monospace;font-size:11px;">${location.lat.toFixed(4)}, ${location.lng.toFixed(4)}</span>
+        <span style="font-family:'Calibri','Carlito','Segoe UI',sans-serif;font-size:11px;">${location.lat.toFixed(4)}, ${location.lng.toFixed(4)}</span>
       </div>`,
     );
 
@@ -597,9 +597,9 @@ export function InteractiveMapCard({
     marker.setLatLng(nextLatLng);
     marker.setIcon(createPinDivIcon(location.label));
     marker.setPopupContent(
-      `<div style="font-family:Calibri,Carlito,sans-serif;font-size:12px;">
+      `<div style="font-family:'Calibri','Carlito','Segoe UI',sans-serif;font-size:12px;">
         <strong>${location.label.replace(/[<>&"]/g, '')}</strong><br/>
-        <span style="font-family:monospace;font-size:11px;">${location.lat.toFixed(4)}, ${location.lng.toFixed(4)}</span>
+        <span style="font-family:'Calibri','Carlito','Segoe UI',sans-serif;font-size:11px;">${location.lat.toFixed(4)}, ${location.lng.toFixed(4)}</span>
       </div>`,
     );
     map.flyTo(nextLatLng, Math.max(map.getZoom(), 11), { duration: 0.65 });
