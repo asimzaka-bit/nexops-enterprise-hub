@@ -54,6 +54,7 @@ import {
   isSuperAdminEmail,
   resolveLivePresenceOverride,
 } from '../utils/storage';
+import type { ViewportInfo } from '../hooks/useViewport';
 import {
   GmailColorIcon,
   GoogleDocsColorIcon,
@@ -101,6 +102,7 @@ interface TopBarProps {
   themePreference?: ThemePreference;
   onToggleDarkMode: () => void;
   onSetThemePreference?: (pref: ThemePreference) => void;
+  viewport?: ViewportInfo;
 }
 
 const WORKSPACE_LAUNCHER_ITEMS: {
@@ -234,6 +236,7 @@ export function TopBar({
   themePreference = 'system',
   onToggleDarkMode,
   onSetThemePreference,
+  viewport,
 }: TopBarProps) {
   const [notifOpen, setNotifOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -252,8 +255,11 @@ export function TopBar({
   const [highlightedIdx, setHighlightedIdx] = useState(0);
 
   const notifRef = useRef<HTMLDivElement>(null);
+  const notifMenuRef = useRef<HTMLDivElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
+  const profileMenuRef = useRef<HTMLDivElement>(null);
   const workspaceMenuRef = useRef<HTMLDivElement>(null);
+  const workspaceDropdownRef = useRef<HTMLDivElement>(null);
   const paletteInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -277,13 +283,26 @@ export function TopBar({
 
   useEffect(() => {
     const handleOutside = (e: MouseEvent) => {
-      if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (
+        notifRef.current &&
+        !notifRef.current.contains(target) &&
+        (!notifMenuRef.current || !notifMenuRef.current.contains(target))
+      ) {
         setNotifOpen(false);
       }
-      if (profileRef.current && !profileRef.current.contains(e.target as Node)) {
+      if (
+        profileRef.current &&
+        !profileRef.current.contains(target) &&
+        (!profileMenuRef.current || !profileMenuRef.current.contains(target))
+      ) {
         setProfileOpen(false);
       }
-      if (workspaceMenuRef.current && !workspaceMenuRef.current.contains(e.target as Node)) {
+      if (
+        workspaceMenuRef.current &&
+        !workspaceMenuRef.current.contains(target) &&
+        (!workspaceDropdownRef.current || !workspaceDropdownRef.current.contains(target))
+      ) {
         setWorkspaceMenuOpen(false);
       }
     };
@@ -306,6 +325,9 @@ export function TopBar({
         }, 20);
       } else if (e.key === 'Escape') {
         setCommandOpen(false);
+        setNotifOpen(false);
+        setProfileOpen(false);
+        setWorkspaceMenuOpen(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -780,22 +802,24 @@ export function TopBar({
     );
   };
 
+  const isCompactMobile = viewport ? viewport.isMobile : false;
+
   return (
     <>
-    <header className="gpu-accelerated sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur-xs dark:border-slate-800 dark:bg-slate-900/95">
-      <div className="flex h-16 w-full max-w-full items-center justify-between gap-2 px-3 sm:gap-4 sm:px-6 md:gap-2 md:px-4">
-        {/* Left: Mobile Menu + Breadcrumb / Page Title */}
+    <header className="gpu-accelerated sticky top-0 z-30 w-full max-w-full border-b border-slate-200 bg-white/95 backdrop-blur-xs dark:border-slate-800 dark:bg-slate-900/95">
+      <div className="flex h-16 w-full min-w-0 max-w-full items-center justify-between gap-2 overflow-x-clip px-3 sm:gap-3 sm:px-6">
+        {/* Left: Mobile/Tablet Menu + Breadcrumb / Page Title */}
         <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
           <button
             type="button"
             onClick={onOpenMobileMenu}
             aria-label="Open navigation menu"
-            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-slate-900 sm:h-10 sm:w-10 lg:hidden dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-slate-900 sm:h-9 sm:w-9 lg:hidden dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100"
           >
-            <Menu className="h-5 w-5" />
+            <Menu className="h-4 w-4 sm:h-5 sm:w-5" />
           </button>
-          <div className="min-w-0">
-            <h1 className="truncate font-display text-base font-bold text-slate-900 sm:text-lg dark:text-slate-100">
+          <div className="min-w-0 flex-1">
+            <h1 className="truncate font-display text-sm font-bold text-slate-900 sm:text-base lg:text-lg dark:text-slate-100">
               {sectionMeta.title}
             </h1>
             <p className="hidden truncate text-xs text-slate-500 xl:block dark:text-slate-400">
@@ -804,15 +828,15 @@ export function TopBar({
           </div>
         </div>
 
-        {/* Center: Clean Desktop Search Trigger (No Ctrl K badge) */}
-        <div className="hidden shrink-0 md:block md:w-44 xl:w-56">
+        {/* Center: Clean Tablet/Desktop Search Trigger */}
+        <div className="hidden shrink-0 md:block md:w-36 lg:w-44 xl:w-48 2xl:w-56">
           <button
             id="global-request-search"
             type="button"
             onClick={openCommandPalette}
             aria-label="Search workspace"
             aria-expanded={commandOpen}
-            className="flex h-8 w-full items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-left text-xs text-slate-500 transition-colors hover:border-slate-300 hover:bg-white focus-visible:border-indigo-500 focus-visible:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-400 dark:hover:border-slate-600 dark:hover:bg-slate-800"
+            className="flex h-8 w-full min-w-0 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-left text-xs text-slate-500 transition-colors hover:border-slate-300 hover:bg-white focus-visible:border-indigo-500 focus-visible:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-400 dark:hover:border-slate-600 dark:hover:bg-slate-800"
           >
             <Search className="h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-slate-500" aria-hidden="true" />
             <span className="truncate text-xs">
@@ -822,8 +846,8 @@ export function TopBar({
         </div>
 
         {/* Right: DB Connection Pill + Refresh, Mobile Search, Workspace, Role, New Request, Theme Toggle, Bell, Profile */}
-        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2 md:gap-1.5">
-          {/* Live Database Connection Status & Refresh */}
+        <div className="flex min-w-0 shrink-0 items-center gap-1 sm:gap-1.5 xl:gap-2">
+          {/* Live Database Connection Status & Refresh (Desktop xl+ inline; accessible inside Profile on compact screens) */}
           <div className="hidden shrink-0 items-center gap-1.5 xl:flex">
             <span
               title={
@@ -833,7 +857,7 @@ export function TopBar({
                     ? 'Connected to live Supabase Cloud Sync (nexops_system_state)'
                     : 'Offline Storage active (unable to reach Supabase)'
               }
-              className={`inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-semibold whitespace-nowrap ${
+              className={`inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1.5 text-xs font-semibold whitespace-nowrap 2xl:px-2.5 ${
                 lastSyncError
                   ? 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800/70 dark:bg-amber-950/50 dark:text-amber-300'
                   : dbConnected
@@ -848,12 +872,15 @@ export function TopBar({
               ) : (
                 <HardDrive className="h-3.5 w-3.5 shrink-0 text-slate-500 dark:text-slate-400" />
               )}
-              <span>
+              <span className="hidden 2xl:inline">
                 {lastSyncError
                   ? 'Sync Warning'
                   : dbConnected
                     ? 'Cloud Connected: Supabase'
                     : 'Offline Storage'}
+              </span>
+              <span className="2xl:hidden">
+                {lastSyncError ? 'Sync Warn' : dbConnected ? 'Supabase' : 'Offline'}
               </span>
             </span>
 
@@ -861,13 +888,14 @@ export function TopBar({
               type="button"
               onClick={onSyncNow}
               disabled={isSyncing}
+              aria-label="Refresh data from database"
               title="Refresh data from database"
-              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold whitespace-nowrap text-slate-700 transition-colors hover:bg-slate-50 hover:text-slate-900 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white"
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold whitespace-nowrap text-slate-700 transition-colors hover:bg-slate-50 hover:text-slate-900 disabled:opacity-60 2xl:h-auto 2xl:w-auto 2xl:px-2.5 2xl:py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white"
             >
               <RefreshCw
                 className={`h-3.5 w-3.5 shrink-0 text-indigo-600 dark:text-indigo-400 ${isSyncing ? 'animate-spin' : ''}`}
               />
-              <span>{isSyncing ? 'Refreshing' : 'Refresh'}</span>
+              <span className="hidden 2xl:inline">{isSyncing ? 'Refreshing' : 'Refresh'}</span>
             </button>
           </div>
 
@@ -875,14 +903,14 @@ export function TopBar({
             type="button"
             onClick={openCommandPalette}
             aria-label="Open command search"
-            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900 md:hidden dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900 sm:h-9 sm:w-9 md:hidden dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
           >
             <Search className="h-4 w-4" />
           </button>
 
           {/* Unified Workspace Launcher (Gmail, Google Docs, Google Sheets, Google Forms) */}
           {onSelectWorkspaceTool && (
-            <div className="relative shrink-0" ref={workspaceMenuRef}>
+            <div className="shrink-0" ref={workspaceMenuRef}>
               <button
                 type="button"
                 onClick={() => {
@@ -892,104 +920,23 @@ export function TopBar({
                 }}
                 aria-expanded={workspaceMenuOpen}
                 aria-label="Open Workspace Suite (Gmail, Docs, Sheets, Forms)"
-                className={`inline-flex h-9 shrink-0 items-center gap-1 rounded-lg border px-2 text-xs font-semibold whitespace-nowrap transition-colors sm:gap-1.5 sm:px-2.5 md:h-auto md:py-1.5 ${
+                className={`inline-flex h-8 w-8 shrink-0 items-center justify-center gap-1 rounded-lg border text-xs font-semibold whitespace-nowrap transition-colors sm:h-9 sm:w-auto sm:gap-1.5 sm:px-2.5 md:h-8 ${
                   activeSection === 'workspace' || activeSection === 'mailchat' || workspaceMenuOpen
                     ? 'border-indigo-300 bg-indigo-50 text-indigo-700 dark:border-indigo-500/70 dark:bg-indigo-950/60 dark:text-indigo-300'
                     : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white'
                 }`}
               >
                 <Briefcase className="h-3.5 w-3.5 shrink-0 text-indigo-600 dark:text-indigo-400" />
-                <span className="hidden sm:inline">Workspace</span>
-                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                {!isCompactMobile && <span className="hidden sm:inline">Workspace</span>}
+                <ChevronDown className="hidden h-3.5 w-3.5 shrink-0 text-slate-400 sm:inline" />
               </button>
-
-              {workspaceMenuOpen && (
-                <div className="fixed inset-x-4 top-16 z-40 mx-auto max-h-[calc(100vh-5rem)] w-auto max-w-[calc(100vw-2rem)] overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 shadow-xl sm:absolute sm:inset-x-auto sm:top-auto sm:right-0 sm:z-30 sm:mt-2 sm:max-h-none sm:w-72 sm:overflow-hidden dark:border-slate-800 dark:bg-slate-900">
-                  <div className="border-b border-slate-100 px-2.5 py-2 dark:border-slate-800">
-                    <p className="text-xs font-bold text-slate-900 dark:text-slate-100">
-                      Google Workspace Suite
-                    </p>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                      Open directly inside NexOps Enterprise Hub
-                    </p>
-                  </div>
-                  <div className="mt-1.5 space-y-1">
-                    {onSelectSection && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setWorkspaceMenuOpen(false);
-                          onSelectSection('mailchat');
-                        }}
-                        className={`flex w-full items-center gap-3 rounded-lg border px-2.5 py-2 text-left transition-colors ${
-                          activeSection === 'mailchat'
-                            ? 'border-indigo-200 bg-indigo-50 text-indigo-900 dark:border-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-100'
-                            : 'border-slate-200/80 bg-slate-50/70 text-slate-800 hover:bg-indigo-50/60 dark:border-slate-800 dark:bg-slate-800/70 dark:text-slate-100 dark:hover:bg-slate-800'
-                        }`}
-                      >
-                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-indigo-200 bg-white dark:border-indigo-800 dark:bg-slate-900">
-                          <MessageSquare className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
-                        </span>
-                        <span className="min-w-0 flex-1">
-                          <span className="flex items-center justify-between gap-2">
-                            <span className="text-xs font-bold text-slate-900 dark:text-slate-100">
-                              Mail &amp; Chat Hub
-                            </span>
-                            {unreadCommsCount > 0 ? (
-                              <span className="rounded-full bg-rose-600 px-1.5 py-0.5 font-mono text-[10px] font-bold text-white tabular-nums">
-                                {unreadCommsCount}
-                              </span>
-                            ) : (
-                              <GoogleMeetColorIcon className="h-3.5 w-3.5 shrink-0" />
-                            )}
-                          </span>
-                          <span className="block truncate text-[11px] text-slate-500 dark:text-slate-400">
-                            Mail compose, live chat &amp; Google Meet
-                          </span>
-                        </span>
-                      </button>
-                    )}
-                    {WORKSPACE_LAUNCHER_ITEMS.map((item) => {
-                      const isToolSelected =
-                        activeSection === 'workspace' && activeWorkspaceTool === item.id;
-                      return (
-                        <button
-                          key={item.id}
-                          type="button"
-                          onClick={() => {
-                            setWorkspaceMenuOpen(false);
-                            onSelectWorkspaceTool(item.id);
-                          }}
-                          className={`flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors ${
-                            isToolSelected
-                              ? 'bg-indigo-50 text-indigo-900 dark:bg-indigo-950/60 dark:text-indigo-100'
-                              : 'text-slate-800 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800'
-                          }`}
-                        >
-                          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
-                            {item.renderIcon('h-5 w-5')}
-                          </span>
-                          <span className="min-w-0 flex-1">
-                            <span className="block text-xs font-bold text-slate-900 dark:text-slate-100">
-                              {item.label}
-                            </span>
-                            <span className="block truncate text-[11px] text-slate-500 dark:text-slate-400">
-                              {item.description}
-                            </span>
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
             </div>
           )}
 
           {/* Read-Only Authenticated Role Pill (Strictly from Profile) */}
           <div
             title="Permission role assigned by your corporate profile"
-            className="hidden shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-medium whitespace-nowrap text-slate-800 sm:inline-flex dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+            className="hidden shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-medium whitespace-nowrap text-slate-800 xl:inline-flex dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
           >
             {getRoleIcon(activeRole)}
             <span className="font-semibold whitespace-nowrap text-slate-900 dark:text-slate-100">
@@ -1016,7 +963,8 @@ export function TopBar({
             <button
               type="button"
               onClick={onOpenCreateModal}
-              className="inline-flex h-9 shrink-0 items-center gap-1 rounded-lg bg-indigo-600 px-2.5 text-xs font-semibold whitespace-nowrap text-white transition-colors hover:bg-indigo-700 focus-visible:outline-2 focus-visible:outline-indigo-600 sm:gap-1.5 sm:px-3 md:h-auto md:px-2.5 md:py-1.5"
+              aria-label="New Request"
+              className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg bg-indigo-600 px-2 text-xs font-semibold whitespace-nowrap text-white transition-colors hover:bg-indigo-700 focus-visible:outline-2 focus-visible:outline-indigo-600 sm:h-9 sm:gap-1.5 sm:px-3 md:h-8 md:px-2.5"
             >
               <Plus className="h-3.5 w-3.5 shrink-0" />
               <span className="hidden sm:inline">New Request</span>
@@ -1034,7 +982,7 @@ export function TopBar({
                 ? `Auto Device Theme (${isDarkMode ? 'Dark' : 'Light'}) — Click to override`
                 : `Manual ${isDarkMode ? 'Dark' : 'Light'} Mode — Click to switch`
             }
-            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-indigo-600 md:h-8 md:w-8 dark:border-slate-700 dark:bg-slate-900 dark:text-amber-300 dark:hover:bg-slate-800 dark:hover:text-amber-200"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-indigo-600 sm:h-9 sm:w-9 md:h-8 md:w-8 dark:border-slate-700 dark:bg-slate-900 dark:text-amber-300 dark:hover:bg-slate-800 dark:hover:text-amber-200"
           >
             {isDarkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           </button>
@@ -1050,7 +998,7 @@ export function TopBar({
               }}
               aria-label={`Notifications (${unreadCount} unread, ${smartSlaAlerts.length} SLA alerts)`}
               aria-expanded={notifOpen}
-              className="relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-indigo-600 md:h-8 md:w-8 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
+              className="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-indigo-600 sm:h-9 sm:w-9 md:h-8 md:w-8 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
             >
               <Bell className="h-4 w-4" />
               {totalAlertCount > 0 && (
@@ -1059,235 +1007,10 @@ export function TopBar({
                 </span>
               )}
             </button>
-
-            {notifOpen && (
-              <div className="fixed inset-x-4 top-16 z-40 mx-auto max-h-[calc(100vh-5rem)] w-auto max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg sm:absolute sm:inset-x-auto sm:top-auto sm:right-0 sm:z-30 sm:mt-2 sm:max-h-none sm:w-96 dark:border-slate-800 dark:bg-slate-900">
-                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-3.5 py-3 sm:px-4 dark:border-slate-800">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                      Notifications
-                    </p>
-                    <p className="text-xs text-slate-500 tabular-nums dark:text-slate-400">
-                      {unreadCount} unread · {smartSlaAlerts.length} SLA alert
-                      {smartSlaAlerts.length === 1 ? '' : 's'}
-                      {activeRole === 'Admin' && pendingEditorApprovals.length > 0
-                        ? ` · ${pendingEditorApprovals.length} editor approval${pendingEditorApprovals.length === 1 ? '' : 's'}`
-                        : ''}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    {unreadCount > 0 && (
-                      <button
-                        type="button"
-                        onClick={onMarkAllRead}
-                        className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50 dark:text-indigo-400 dark:hover:bg-indigo-950/60"
-                      >
-                        <CheckCheck className="h-3.5 w-3.5" />
-                        Mark all read
-                      </button>
-                    )}
-                    {visibleNotifications.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={onClearNotifications}
-                        title="Clear all notifications"
-                        className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-rose-700 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-rose-400"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        Clear
-                      </button>
-                    )}
-                  </div>
-                </div>
-                <div className="max-h-96 divide-y divide-slate-100 overflow-y-auto dark:divide-slate-800">
-                  {pendingEditorApprovals.length > 0 && (
-                    <div className="bg-amber-50/45 dark:bg-amber-950/20">
-                      <div className="flex items-center justify-between border-b border-amber-100 px-4 py-2 dark:border-amber-900/50">
-                        <span className="inline-flex items-center gap-1.5 text-[11px] font-bold tracking-wide text-amber-800 dark:text-amber-300">
-                          <ShieldCheck className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
-                          <span>Editor Change Approvals (Maker-Checker)</span>
-                        </span>
-                        <span className="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-[10px] font-bold text-amber-800 tabular-nums dark:bg-amber-900/60 dark:text-amber-200">
-                          {pendingEditorApprovals.length}
-                        </span>
-                      </div>
-                      <div className="divide-y divide-amber-100/70 dark:divide-amber-900/40">
-                        {pendingEditorApprovals.slice(0, 5).map((chg) => (
-                          <button
-                            key={`editor-chg-${chg.id}`}
-                            type="button"
-                            onClick={() => {
-                              onSelectSection?.('settings');
-                              setNotifOpen(false);
-                            }}
-                            className="flex w-full items-start gap-2.5 px-4 py-2.5 text-left transition-colors hover:bg-amber-50/80 dark:hover:bg-amber-950/40"
-                          >
-                            <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
-                            <div className="min-w-0 flex-1">
-                              <div className="flex flex-wrap items-center justify-between gap-1.5">
-                                <span className="text-[11px] font-bold text-slate-900 dark:text-slate-100">
-                                  {chg.editorName} · {chg.moduleLabel}
-                                </span>
-                                <span className="rounded border border-amber-300 bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800 dark:border-amber-800 dark:bg-amber-950/70 dark:text-amber-300">
-                                  Pending Approval
-                                </span>
-                              </div>
-                              <p className="mt-0.5 truncate text-xs font-semibold text-slate-800 dark:text-slate-200">
-                                {chg.itemLabel}
-                              </p>
-                              <div className="mt-1 flex items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400">
-                                <span className="truncate">{chg.summary}</span>
-                                <span className="shrink-0 font-semibold text-indigo-700 dark:text-indigo-400">
-                                  Review →
-                                </span>
-                              </div>
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {smartSlaAlerts.length > 0 && (
-                    <div className="bg-rose-50/35 dark:bg-rose-950/20">
-                      <div className="flex items-center justify-between border-b border-rose-100 px-4 py-2 dark:border-rose-900/50">
-                        <span className="inline-flex items-center gap-1.5 text-[11px] font-bold tracking-wide text-rose-800 dark:text-rose-300">
-                          <AlertTriangle className="h-3.5 w-3.5 text-rose-600 dark:text-rose-400" />
-                          <span>Automated SLA &amp; Bottleneck Alerts</span>
-                        </span>
-                        <span className="rounded bg-rose-100 px-1.5 py-0.5 font-mono text-[10px] font-bold text-rose-800 tabular-nums dark:bg-rose-900/60 dark:text-rose-200">
-                          {smartSlaAlerts.length}
-                        </span>
-                      </div>
-                      <div className="divide-y divide-rose-100/70 dark:divide-rose-900/40">
-                        {smartSlaAlerts.map(({ request, sla, pendingOver24h }) => (
-                          <button
-                            key={`sla-alert-${request.id}`}
-                            type="button"
-                            onClick={() => {
-                              onSelectRequestById(request.id);
-                              setNotifOpen(false);
-                            }}
-                            className="flex w-full items-start gap-2.5 px-4 py-2.5 text-left transition-colors hover:bg-rose-50/80 dark:hover:bg-rose-950/40"
-                          >
-                            {sla.breached ? (
-                              <span
-                                className="relative mt-1.5 flex h-2 w-2 shrink-0"
-                                aria-hidden="true"
-                              >
-                                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-500 opacity-75" />
-                                <span className="relative inline-flex h-2 w-2 rounded-full bg-rose-600" />
-                              </span>
-                            ) : (
-                              <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
-                            )}
-                            <div className="min-w-0 flex-1">
-                              <div className="flex flex-wrap items-center justify-between gap-1.5">
-                                <span className="font-mono text-[11px] font-bold text-slate-900 dark:text-slate-100">
-                                  {request.id} · {request.department}
-                                </span>
-                                <span
-                                  className={`rounded border px-1.5 py-0.5 text-[10px] font-bold tabular-nums ${
-                                    sla.breached
-                                      ? 'border-rose-300 bg-rose-100 text-rose-800 dark:border-rose-800 dark:bg-rose-950/70 dark:text-rose-300'
-                                      : 'border-amber-300 bg-amber-100 text-amber-800 dark:border-amber-800 dark:bg-amber-950/70 dark:text-amber-300'
-                                  }`}
-                                >
-                                  {sla.breached
-                                    ? sla.label
-                                    : pendingOver24h
-                                      ? 'Pending > 24h'
-                                      : sla.label}
-                                </span>
-                              </div>
-                              <p className="mt-0.5 truncate text-xs font-semibold text-slate-800 dark:text-slate-200">
-                                {request.title}
-                              </p>
-                              <div className="mt-1 flex items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400">
-                                <span className="truncate">
-                                  {request.priority} · {request.status} · {request.submittedBy}
-                                </span>
-                                <span className="shrink-0 font-semibold text-indigo-700 dark:text-indigo-400">
-                                  Inspect →
-                                </span>
-                              </div>
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {visibleNotifications.length === 0 &&
-                  smartSlaAlerts.length === 0 &&
-                  pendingEditorApprovals.length === 0 ? (
-                    <div className="px-4 py-8 text-center text-xs text-slate-500 dark:text-slate-400">
-                      All active SLAs are on track and no unread notifications remain.
-                    </div>
-                  ) : visibleNotifications.length === 0 ? null : (
-                    visibleNotifications.map((notif) => {
-                      const severityIcon =
-                        notif.severity === 'success' ? (
-                          <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
-                        ) : notif.severity === 'warning' ? (
-                          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
-                        ) : notif.severity === 'danger' ? (
-                          <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-rose-600 dark:text-rose-400" />
-                        ) : (
-                          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-indigo-600 dark:text-indigo-400" />
-                        );
-
-                      return (
-                        <button
-                          key={notif.id}
-                          type="button"
-                          onClick={() => {
-                            onSelectNotification(notif);
-                            setNotifOpen(false);
-                          }}
-                          className={`flex w-full items-start gap-2.5 px-4 py-3 text-left transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/70 ${
-                            !notif.read
-                              ? 'bg-indigo-50/40 dark:bg-indigo-950/30'
-                              : 'bg-white dark:bg-slate-900'
-                          }`}
-                        >
-                          {severityIcon}
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="truncate text-xs font-semibold text-slate-900 dark:text-slate-100">
-                                {notif.title}
-                              </span>
-                              {!notif.read && (
-                                <span className="shrink-0 text-[10px] font-semibold text-indigo-600 dark:text-indigo-400">
-                                  Unread
-                                </span>
-                              )}
-                            </div>
-                            <p className="mt-0.5 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
-                              {notif.message}
-                            </p>
-                            <div className="mt-1 flex items-center justify-between gap-2">
-                              <span className="font-mono text-[11px] text-slate-400 tabular-nums dark:text-slate-500">
-                                {formatDateTime(notif.timestamp)}
-                              </span>
-                              {(notif.requestId || notif.targetSection) && (
-                                <span className="font-mono text-[10px] font-semibold text-indigo-600 dark:text-indigo-400">
-                                  {notif.requestId ? `Open ${notif.requestId} →` : 'View →'}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        </button>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-            )}
           </div>
 
-          {/* User Profile Menu */}
-          <div className="relative shrink-0" ref={profileRef}>
+          {/* User Profile Trigger */}
+          <div className="shrink-0" ref={profileRef}>
             <button
               type="button"
               onClick={() => {
@@ -1297,16 +1020,16 @@ export function TopBar({
               }}
               aria-expanded={profileOpen}
               aria-label="Open user profile menu"
-              className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white pr-1.5 pl-1 text-left whitespace-nowrap transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-indigo-600 sm:gap-2 sm:pr-2 sm:pl-1.5 md:h-auto md:gap-1.5 md:px-2.5 md:py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800"
+              className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-white px-1.5 text-left whitespace-nowrap transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-indigo-600 sm:h-9 sm:gap-1.5 sm:px-2 md:h-8 md:px-2 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800"
             >
               <UserAvatar
                 name={currentUser.name}
                 avatarUrl={currentUser.avatarUrl}
-                sizeClass="h-6 w-6 md:h-5 md:w-5"
-                textClass="text-xs md:text-[10px]"
+                sizeClass="h-5 w-5 sm:h-6 sm:w-6 md:h-5 md:w-5"
+                textClass="text-[10px] sm:text-xs md:text-[10px]"
                 roundedClass="rounded-md"
               />
-              <span className="hidden max-w-[104px] flex-col leading-tight sm:flex 2xl:max-w-[136px]">
+              <span className="hidden max-w-[96px] flex-col leading-tight lg:flex 2xl:max-w-[136px]">
                 <span className="truncate text-xs font-semibold text-slate-900 dark:text-slate-100">
                   {currentUser.name}
                 </span>
@@ -1314,142 +1037,506 @@ export function TopBar({
                   {currentUser.email}
                 </span>
               </span>
-              <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-500 dark:text-slate-400" />
+              <ChevronDown className="hidden h-3.5 w-3.5 shrink-0 text-slate-500 sm:inline dark:text-slate-400" />
             </button>
-
-            {profileOpen && (
-              <div className="fixed inset-x-4 top-16 z-40 mx-auto max-h-[calc(100vh-5rem)] w-auto max-w-[calc(100vw-2rem)] overflow-y-auto rounded-xl border border-slate-200 bg-white p-3 shadow-lg sm:absolute sm:inset-x-auto sm:top-auto sm:right-0 sm:z-30 sm:mt-2 sm:max-h-none sm:w-72 dark:border-slate-800 dark:bg-slate-900">
-                <div className="flex items-start justify-between gap-2.5">
-                  <div className="flex min-w-0 items-center gap-2.5">
-                    <UserAvatar
-                      name={currentUser.name}
-                      avatarUrl={currentUser.avatarUrl}
-                      sizeClass="h-9 w-9"
-                      textClass="text-xs"
-                      roundedClass="rounded-lg"
-                    />
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
-                        {currentUser.name}
-                      </p>
-                      <p className="truncate text-xs text-slate-500 dark:text-slate-400">
-                        {currentUser.signOffTitle || currentUser.title}
-                      </p>
-                    </div>
-                  </div>
-                  <span className="shrink-0 rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-slate-600 tabular-nums dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                    {currentUser.employeeId}
-                  </span>
-                </div>
-                <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2">
-                  <p className="truncate font-mono text-[11px] text-slate-400 dark:text-slate-500">
-                    {currentUser.email}
-                  </p>
-                  <PresenceBadge
-                    lastActiveAt={currentUser.lastActiveAt || currentUser.lastActive}
-                    nowMs={nowMs}
-                    compact
-                    isOnlineOverride={resolveLivePresenceOverride(
-                      currentUser,
-                      onlinePresenceKeys,
-                      recentlyOfflineKeys,
-                    )}
-                  />
-                </div>
-                <div className="mt-2.5 border-t border-slate-100 pt-2.5 dark:border-slate-800">
-                  <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
-                    Active Permission Tier
-                  </p>
-                  <p className="mt-0.5 text-xs font-semibold text-indigo-600 dark:text-indigo-400">
-                    {isSuperAdmin ? 'Super Admin' : currentUser.role} · {currentUser.department}
-                  </p>
-                  {currentUser.outOfOffice && (
-                    <p className="mt-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-800 dark:border-amber-800/70 dark:bg-amber-950/60 dark:text-amber-300">
-                      Out-of-Office: Delegating to {currentUser.delegateApproverName || 'Backup Approver'}
-                    </p>
-                  )}
-                </div>
-
-                {onSetThemePreference && (
-                  <div className="mt-2.5 border-t border-slate-100 pt-2.5 dark:border-slate-800">
-                    <div className="flex items-center justify-between">
-                      <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
-                        Appearance Theme
-                      </p>
-                      <span className="text-[10px] font-semibold text-indigo-600 dark:text-indigo-400">
-                        {themePreference === 'system' ? 'Auto (Device)' : 'Manual Override'}
-                      </span>
-                    </div>
-                    <div className="mt-1.5 grid grid-cols-3 gap-1 rounded-lg border border-slate-200 bg-slate-50 p-0.5 dark:border-slate-700 dark:bg-slate-950">
-                      {(
-                        [
-                          { id: 'system', label: 'System', icon: Monitor },
-                          { id: 'light', label: 'Light', icon: Sun },
-                          { id: 'dark', label: 'Dark', icon: Moon },
-                        ] as const
-                      ).map((opt) => {
-                        const Icon = opt.icon;
-                        const active = themePreference === opt.id;
-                        return (
-                          <button
-                            key={opt.id}
-                            type="button"
-                            onClick={() => onSetThemePreference(opt.id)}
-                            className={`inline-flex items-center justify-center gap-1 rounded-md py-1 text-[11px] font-semibold transition-colors ${
-                              active
-                                ? 'bg-slate-900 text-white dark:bg-indigo-600'
-                                : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'
-                            }`}
-                          >
-                            <Icon className="h-3 w-3" />
-                            <span>{opt.label}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                <div className="mt-3 space-y-1 border-t border-slate-100 pt-2.5 dark:border-slate-800">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setProfileOpen(false);
-                      onOpenProfile();
-                    }}
-                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 hover:text-slate-900 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white"
-                  >
-                    <Camera className="h-3.5 w-3.5 shrink-0 text-indigo-600 dark:text-indigo-400" />
-                    <span>Upload / Manage Profile Photo</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setProfileOpen(false);
-                      onOpenProfile();
-                    }}
-                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 hover:text-slate-900 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white"
-                  >
-                    <PenTool className="h-3.5 w-3.5 shrink-0 text-indigo-600 dark:text-indigo-400" />
-                    <span>Profile &amp; Digital Signature</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setProfileOpen(false);
-                      onSignOut();
-                    }}
-                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-semibold text-rose-700 transition-colors hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/50"
-                  >
-                    <LogOut className="h-3.5 w-3.5 shrink-0 text-rose-600 dark:text-rose-400" />
-                    <span>Sign Out</span>
-                  </button>
-                </div>
-              </div>
-            )}
           </div>
         </div>
       </div>
+
+      {/* Viewport-Safe Anchored Workspace Launcher Dropdown */}
+      {onSelectWorkspaceTool && workspaceMenuOpen && (
+        <div
+          ref={workspaceDropdownRef}
+          className="absolute top-[calc(100%+8px)] right-3 z-50 max-h-[calc(100vh-5.5rem)] w-72 max-w-[calc(100vw-24px)] overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 shadow-xl sm:right-6 sm:w-80 dark:border-slate-800 dark:bg-slate-900"
+        >
+          <div className="border-b border-slate-100 px-2.5 py-2 dark:border-slate-800">
+            <p className="text-xs font-bold text-slate-900 dark:text-slate-100">
+              Google Workspace Suite
+            </p>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+              Open directly inside NexOps Enterprise Hub
+            </p>
+          </div>
+          <div className="mt-1.5 space-y-1">
+            {onSelectSection && (
+              <button
+                type="button"
+                onClick={() => {
+                  setWorkspaceMenuOpen(false);
+                  onSelectSection('mailchat');
+                }}
+                className={`flex w-full items-center gap-3 rounded-lg border px-2.5 py-2 text-left transition-colors ${
+                  activeSection === 'mailchat'
+                    ? 'border-indigo-200 bg-indigo-50 text-indigo-900 dark:border-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-100'
+                    : 'border-slate-200/80 bg-slate-50/70 text-slate-800 hover:bg-indigo-50/60 dark:border-slate-800 dark:bg-slate-800/70 dark:text-slate-100 dark:hover:bg-slate-800'
+                }`}
+              >
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-indigo-200 bg-white dark:border-indigo-800 dark:bg-slate-900">
+                  <MessageSquare className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center justify-between gap-2">
+                    <span className="truncate text-xs font-bold text-slate-900 dark:text-slate-100">
+                      Mail &amp; Chat Hub
+                    </span>
+                    {unreadCommsCount > 0 ? (
+                      <span className="shrink-0 rounded-full bg-rose-600 px-1.5 py-0.5 font-mono text-[10px] font-bold text-white tabular-nums">
+                        {unreadCommsCount}
+                      </span>
+                    ) : (
+                      <GoogleMeetColorIcon className="h-3.5 w-3.5 shrink-0" />
+                    )}
+                  </span>
+                  <span className="block truncate text-[11px] text-slate-500 dark:text-slate-400">
+                    Mail compose, live chat &amp; Google Meet
+                  </span>
+                </span>
+              </button>
+            )}
+            {WORKSPACE_LAUNCHER_ITEMS.map((item) => {
+              const isToolSelected =
+                activeSection === 'workspace' && activeWorkspaceTool === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => {
+                    setWorkspaceMenuOpen(false);
+                    onSelectWorkspaceTool(item.id);
+                  }}
+                  className={`flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors ${
+                    isToolSelected
+                      ? 'bg-indigo-50 text-indigo-900 dark:bg-indigo-950/60 dark:text-indigo-100'
+                      : 'text-slate-800 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
+                    {item.renderIcon('h-5 w-5')}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-xs font-bold text-slate-900 dark:text-slate-100">
+                      {item.label}
+                    </span>
+                    <span className="block truncate text-[11px] text-slate-500 dark:text-slate-400">
+                      {item.description}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Viewport-Safe Anchored Notifications Popover */}
+      {notifOpen && (
+        <div
+          ref={notifMenuRef}
+          className="absolute top-[calc(100%+8px)] right-3 z-50 max-h-[calc(100vh-5.5rem)] w-80 max-w-[calc(100vw-24px)] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl sm:right-6 sm:w-96 dark:border-slate-800 dark:bg-slate-900"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-3.5 py-3 sm:px-4 dark:border-slate-800">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                Notifications
+              </p>
+              <p className="text-xs text-slate-500 tabular-nums dark:text-slate-400">
+                {unreadCount} unread · {smartSlaAlerts.length} SLA alert
+                {smartSlaAlerts.length === 1 ? '' : 's'}
+                {activeRole === 'Admin' && pendingEditorApprovals.length > 0
+                  ? ` · ${pendingEditorApprovals.length} editor approval${pendingEditorApprovals.length === 1 ? '' : 's'}`
+                  : ''}
+              </p>
+            </div>
+            <div className="flex shrink-0 items-center gap-1">
+              {unreadCount > 0 && (
+                <button
+                  type="button"
+                  onClick={onMarkAllRead}
+                  className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50 dark:text-indigo-400 dark:hover:bg-indigo-950/60"
+                >
+                  <CheckCheck className="h-3.5 w-3.5" />
+                  Mark all read
+                </button>
+              )}
+              {visibleNotifications.length > 0 && (
+                <button
+                  type="button"
+                  onClick={onClearNotifications}
+                  title="Clear all notifications"
+                  className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-rose-700 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-rose-400"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="max-h-[min(24rem,calc(100vh-11rem))] divide-y divide-slate-100 overflow-y-auto dark:divide-slate-800">
+            {pendingEditorApprovals.length > 0 && (
+              <div className="bg-amber-50/45 dark:bg-amber-950/20">
+                <div className="flex items-center justify-between border-b border-amber-100 px-4 py-2 dark:border-amber-900/50">
+                  <span className="inline-flex items-center gap-1.5 text-[11px] font-bold tracking-wide text-amber-800 dark:text-amber-300">
+                    <ShieldCheck className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
+                    <span>Editor Change Approvals (Maker-Checker)</span>
+                  </span>
+                  <span className="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-[10px] font-bold text-amber-800 tabular-nums dark:bg-amber-900/60 dark:text-amber-200">
+                    {pendingEditorApprovals.length}
+                  </span>
+                </div>
+                <div className="divide-y divide-amber-100/70 dark:divide-amber-900/40">
+                  {pendingEditorApprovals.slice(0, 5).map((chg) => (
+                    <button
+                      key={`editor-chg-${chg.id}`}
+                      type="button"
+                      onClick={() => {
+                        onSelectSection?.('settings');
+                        setNotifOpen(false);
+                      }}
+                      className="flex w-full items-start gap-2.5 px-4 py-2.5 text-left transition-colors hover:bg-amber-50/80 dark:hover:bg-amber-950/40"
+                    >
+                      <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center justify-between gap-1.5">
+                          <span className="text-[11px] font-bold text-slate-900 dark:text-slate-100">
+                            {chg.editorName} · {chg.moduleLabel}
+                          </span>
+                          <span className="rounded border border-amber-300 bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800 dark:border-amber-800 dark:bg-amber-950/70 dark:text-amber-300">
+                            Pending Approval
+                          </span>
+                        </div>
+                        <p className="mt-0.5 truncate text-xs font-semibold text-slate-800 dark:text-slate-200">
+                          {chg.itemLabel}
+                        </p>
+                        <div className="mt-1 flex items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+                          <span className="truncate">{chg.summary}</span>
+                          <span className="shrink-0 font-semibold text-indigo-700 dark:text-indigo-400">
+                            Review →
+                          </span>
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {smartSlaAlerts.length > 0 && (
+              <div className="bg-rose-50/35 dark:bg-rose-950/20">
+                <div className="flex items-center justify-between border-b border-rose-100 px-4 py-2 dark:border-rose-900/50">
+                  <span className="inline-flex items-center gap-1.5 text-[11px] font-bold tracking-wide text-rose-800 dark:text-rose-300">
+                    <AlertTriangle className="h-3.5 w-3.5 text-rose-600 dark:text-rose-400" />
+                    <span>Automated SLA &amp; Bottleneck Alerts</span>
+                  </span>
+                  <span className="rounded bg-rose-100 px-1.5 py-0.5 font-mono text-[10px] font-bold text-rose-800 tabular-nums dark:bg-rose-900/60 dark:text-rose-200">
+                    {smartSlaAlerts.length}
+                  </span>
+                </div>
+                <div className="divide-y divide-rose-100/70 dark:divide-rose-900/40">
+                  {smartSlaAlerts.map(({ request, sla, pendingOver24h }) => (
+                    <button
+                      key={`sla-alert-${request.id}`}
+                      type="button"
+                      onClick={() => {
+                        onSelectRequestById(request.id);
+                        setNotifOpen(false);
+                      }}
+                      className="flex w-full items-start gap-2.5 px-4 py-2.5 text-left transition-colors hover:bg-rose-50/80 dark:hover:bg-rose-950/40"
+                    >
+                      {sla.breached ? (
+                        <span
+                          className="relative mt-1.5 flex h-2 w-2 shrink-0"
+                          aria-hidden="true"
+                        >
+                          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-500 opacity-75" />
+                          <span className="relative inline-flex h-2 w-2 rounded-full bg-rose-600" />
+                        </span>
+                      ) : (
+                        <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center justify-between gap-1.5">
+                          <span className="font-mono text-[11px] font-bold text-slate-900 dark:text-slate-100">
+                            {request.id} · {request.department}
+                          </span>
+                          <span
+                            className={`rounded border px-1.5 py-0.5 text-[10px] font-bold tabular-nums ${
+                              sla.breached
+                                ? 'border-rose-300 bg-rose-100 text-rose-800 dark:border-rose-800 dark:bg-rose-950/70 dark:text-rose-300'
+                                : 'border-amber-300 bg-amber-100 text-amber-800 dark:border-amber-800 dark:bg-amber-950/70 dark:text-amber-300'
+                            }`}
+                          >
+                            {sla.breached
+                              ? sla.label
+                              : pendingOver24h
+                                ? 'Pending > 24h'
+                                : sla.label}
+                          </span>
+                        </div>
+                        <p className="mt-0.5 truncate text-xs font-semibold text-slate-800 dark:text-slate-200">
+                          {request.title}
+                        </p>
+                        <div className="mt-1 flex items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+                          <span className="truncate">
+                            {request.priority} · {request.status} · {request.submittedBy}
+                          </span>
+                          <span className="shrink-0 font-semibold text-indigo-700 dark:text-indigo-400">
+                            Inspect →
+                          </span>
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {visibleNotifications.length === 0 &&
+            smartSlaAlerts.length === 0 &&
+            pendingEditorApprovals.length === 0 ? (
+              <div className="px-4 py-8 text-center text-xs text-slate-500 dark:text-slate-400">
+                All active SLAs are on track and no unread notifications remain.
+              </div>
+            ) : visibleNotifications.length === 0 ? null : (
+              visibleNotifications.map((notif) => {
+                const severityIcon =
+                  notif.severity === 'success' ? (
+                    <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                  ) : notif.severity === 'warning' ? (
+                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+                  ) : notif.severity === 'danger' ? (
+                    <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-rose-600 dark:text-rose-400" />
+                  ) : (
+                    <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-indigo-600 dark:text-indigo-400" />
+                  );
+
+                return (
+                  <button
+                    key={notif.id}
+                    type="button"
+                    onClick={() => {
+                      onSelectNotification(notif);
+                      setNotifOpen(false);
+                    }}
+                    className={`flex w-full items-start gap-2.5 px-4 py-3 text-left transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/70 ${
+                      !notif.read
+                        ? 'bg-indigo-50/40 dark:bg-indigo-950/30'
+                        : 'bg-white dark:bg-slate-900'
+                    }`}
+                  >
+                    {severityIcon}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="truncate text-xs font-semibold text-slate-900 dark:text-slate-100">
+                          {notif.title}
+                        </span>
+                        {!notif.read && (
+                          <span className="shrink-0 text-[10px] font-semibold text-indigo-600 dark:text-indigo-400">
+                            Unread
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-0.5 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
+                        {notif.message}
+                      </p>
+                      <div className="mt-1 flex items-center justify-between gap-2">
+                        <span className="font-mono text-[11px] text-slate-400 tabular-nums dark:text-slate-500">
+                          {formatDateTime(notif.timestamp)}
+                        </span>
+                        {(notif.requestId || notif.targetSection) && (
+                          <span className="font-mono text-[10px] font-semibold text-indigo-600 dark:text-indigo-400">
+                            {notif.requestId ? `Open ${notif.requestId} →` : 'View →'}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Viewport-Safe Anchored Profile Dropdown (Never clips off right edge) */}
+      {profileOpen && (
+        <div
+          ref={profileMenuRef}
+          className="absolute top-[calc(100%+8px)] right-3 z-50 max-h-[calc(100vh-5.5rem)] w-80 max-w-[calc(100vw-24px)] overflow-y-auto rounded-xl border border-slate-200 bg-white p-3.5 shadow-xl sm:right-6 sm:w-[340px] dark:border-slate-800 dark:bg-slate-900"
+        >
+          {/* Profile Identity Header */}
+          <div className="flex min-w-0 items-start justify-between gap-2">
+            <div className="flex min-w-0 flex-1 items-center gap-2.5">
+              <UserAvatar
+                name={currentUser.name}
+                avatarUrl={currentUser.avatarUrl}
+                sizeClass="h-9 w-9 shrink-0"
+                textClass="text-xs"
+                roundedClass="rounded-lg"
+              />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
+                  {currentUser.name}
+                </p>
+                <p className="truncate text-xs text-slate-500 dark:text-slate-400">
+                  {currentUser.signOffTitle || currentUser.title}
+                </p>
+              </div>
+            </div>
+            <span className="shrink-0 rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 font-mono text-[10px] font-semibold whitespace-nowrap text-slate-700 tabular-nums dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+              {currentUser.employeeId}
+            </span>
+          </div>
+
+          {/* Email & Live Online Badge */}
+          <div className="mt-2 flex min-w-0 items-center justify-between gap-2">
+            <p className="min-w-0 flex-1 truncate font-mono text-[11px] text-slate-500 dark:text-slate-400">
+              {currentUser.email}
+            </p>
+            <div className="shrink-0">
+              <PresenceBadge
+                lastActiveAt={currentUser.lastActiveAt || currentUser.lastActive}
+                nowMs={nowMs}
+                compact
+                isOnlineOverride={resolveLivePresenceOverride(
+                  currentUser,
+                  onlinePresenceKeys,
+                  recentlyOfflineKeys,
+                )}
+              />
+            </div>
+          </div>
+
+          {/* Active Permission Tier */}
+          <div className="mt-2.5 border-t border-slate-100 pt-2.5 dark:border-slate-800">
+            <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+              Active Permission Tier
+            </p>
+            <p className="mt-0.5 truncate text-xs font-semibold text-indigo-600 dark:text-indigo-400">
+              {isSuperAdmin ? 'Super Admin' : currentUser.role} · {currentUser.department}
+            </p>
+            {currentUser.outOfOffice && (
+              <p className="mt-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-800 dark:border-amber-800/70 dark:bg-amber-950/60 dark:text-amber-300">
+                Out-of-Office: Delegating to {currentUser.delegateApproverName || 'Backup Approver'}
+              </p>
+            )}
+          </div>
+
+          {/* Compact Cloud Sync Status & Refresh on Mobile/Tablet (< xl) */}
+          <div className="mt-2.5 flex items-center justify-between gap-2 border-t border-slate-100 pt-2.5 xl:hidden dark:border-slate-800">
+            <span
+              className={`inline-flex min-w-0 items-center gap-1.5 truncate text-[11px] font-semibold ${
+                lastSyncError
+                  ? 'text-amber-700 dark:text-amber-300'
+                  : dbConnected
+                    ? 'text-emerald-700 dark:text-emerald-400'
+                    : 'text-slate-600 dark:text-slate-400'
+              }`}
+            >
+              {lastSyncError ? (
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+              ) : dbConnected ? (
+                <Cloud className="h-3.5 w-3.5 shrink-0" />
+              ) : (
+                <HardDrive className="h-3.5 w-3.5 shrink-0" />
+              )}
+              <span className="truncate">
+                {lastSyncError
+                  ? 'Sync Warning'
+                  : dbConnected
+                    ? 'Cloud Connected: Supabase'
+                    : 'Offline Storage'}
+              </span>
+            </span>
+            <button
+              type="button"
+              onClick={onSyncNow}
+              disabled={isSyncing}
+              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+            >
+              <RefreshCw className={`h-3 w-3 ${isSyncing ? 'animate-spin' : ''}`} />
+              <span>{isSyncing ? 'Syncing' : 'Refresh'}</span>
+            </button>
+          </div>
+
+          {/* Appearance Theme (Single-Line Header + Even 3-Button Grid) */}
+          {onSetThemePreference && (
+            <div className="mt-2.5 border-t border-slate-100 pt-2.5 dark:border-slate-800">
+              <div className="flex min-w-0 items-center justify-between gap-2">
+                <p className="truncate text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                  Appearance Theme
+                </p>
+                <span className="shrink-0 text-[10px] font-semibold whitespace-nowrap text-indigo-600 dark:text-indigo-400">
+                  {themePreference === 'system' ? 'Auto (Device)' : 'Manual Override'}
+                </span>
+              </div>
+              <div className="mt-1.5 grid grid-cols-3 gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1 dark:border-slate-700 dark:bg-slate-950">
+                {(
+                  [
+                    { id: 'system', label: 'System', icon: Monitor },
+                    { id: 'light', label: 'Light', icon: Sun },
+                    { id: 'dark', label: 'Dark', icon: Moon },
+                  ] as const
+                ).map((opt) => {
+                  const Icon = opt.icon;
+                  const active = themePreference === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => onSetThemePreference(opt.id)}
+                      className={`flex min-w-0 items-center justify-center gap-1 rounded-md px-1.5 py-1.5 text-[11px] font-semibold whitespace-nowrap transition-colors ${
+                        active
+                          ? 'bg-slate-900 text-white dark:bg-indigo-600'
+                          : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'
+                      }`}
+                    >
+                      <Icon className="h-3.5 w-3.5 shrink-0" />
+                      <span>{opt.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Profile & Session Actions */}
+          <div className="mt-3 space-y-1 border-t border-slate-100 pt-2.5 dark:border-slate-800">
+            <button
+              type="button"
+              onClick={() => {
+                setProfileOpen(false);
+                onOpenProfile();
+              }}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 hover:text-slate-900 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white"
+            >
+              <Camera className="h-3.5 w-3.5 shrink-0 text-indigo-600 dark:text-indigo-400" />
+              <span>Upload / Manage Profile Photo</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setProfileOpen(false);
+                onOpenProfile();
+              }}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 hover:text-slate-900 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white"
+            >
+              <PenTool className="h-3.5 w-3.5 shrink-0 text-indigo-600 dark:text-indigo-400" />
+              <span>Profile &amp; Digital Signature</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setProfileOpen(false);
+                onSignOut();
+              }}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-semibold text-rose-700 transition-colors hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/50"
+            >
+              <LogOut className="h-3.5 w-3.5 shrink-0 text-rose-600 dark:text-rose-400" />
+              <span>Sign Out</span>
+            </button>
+          </div>
+        </div>
+      )}
     </header>
 
       {/* Centered Wide Command Search Palette Modal (Desktop & Mobile) */}

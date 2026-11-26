@@ -317,15 +317,15 @@ export function LiveWeatherCard({
   const ConditionIcon = condition.icon;
 
   return (
-    <div className="flex h-full flex-col justify-between rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
-      <div>
+    <div className="flex h-full min-w-0 flex-col justify-between rounded-xl border border-slate-200 bg-white p-4 sm:p-5 dark:border-slate-800 dark:bg-slate-900">
+      <div className="min-w-0">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3.5 dark:border-slate-800">
-          <div className="flex items-center gap-2.5">
+          <div className="flex min-w-0 flex-1 items-center gap-2.5">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-sky-200 bg-sky-50 text-sky-600 dark:border-sky-900/60 dark:bg-sky-950/50 dark:text-sky-400">
               <ConditionIcon className="h-4 w-4" aria-hidden="true" />
             </div>
-            <div className="min-w-0">
-              <h2 className="font-display text-base font-bold text-slate-900 dark:text-slate-100">
+            <div className="min-w-0 flex-1">
+              <h2 className="truncate font-display text-base font-bold text-slate-900 dark:text-slate-100">
                 Live Weather
               </h2>
               <p className="truncate text-xs text-slate-500 dark:text-slate-400">
@@ -334,7 +334,7 @@ export function LiveWeatherCard({
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5">
+          <div className="flex shrink-0 items-center gap-1.5">
             <button
               type="button"
               onClick={onDetectGps}
@@ -452,31 +452,31 @@ export function LiveWeatherCard({
               </div>
             </div>
 
-            <div className="mt-3 grid grid-cols-3 gap-2.5">
-              <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-950/40">
-                <p className="flex items-center gap-1 text-[11px] font-medium text-slate-500 dark:text-slate-400">
-                  <Droplets className="h-3 w-3 text-sky-500" />
-                  Humidity
+            <div className="mt-3 grid grid-cols-3 gap-1.5 sm:gap-2.5">
+              <div className="min-w-0 rounded-lg border border-slate-200 bg-white px-2 py-2 sm:px-3 dark:border-slate-800 dark:bg-slate-950/40">
+                <p className="flex items-center gap-1 truncate text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                  <Droplets className="h-3 w-3 shrink-0 text-sky-500" />
+                  <span className="truncate">Humidity</span>
                 </p>
-                <p className="mt-0.5 font-mono text-sm font-bold text-slate-900 tabular-nums dark:text-slate-100">
+                <p className="mt-0.5 truncate font-mono text-xs font-bold text-slate-900 tabular-nums sm:text-sm dark:text-slate-100">
                   {weather.humidityPct}%
                 </p>
               </div>
-              <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-950/40">
-                <p className="flex items-center gap-1 text-[11px] font-medium text-slate-500 dark:text-slate-400">
-                  <Wind className="h-3 w-3 text-indigo-500" />
-                  Wind
+              <div className="min-w-0 rounded-lg border border-slate-200 bg-white px-2 py-2 sm:px-3 dark:border-slate-800 dark:bg-slate-950/40">
+                <p className="flex items-center gap-1 truncate text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                  <Wind className="h-3 w-3 shrink-0 text-indigo-500" />
+                  <span className="truncate">Wind</span>
                 </p>
-                <p className="mt-0.5 font-mono text-sm font-bold text-slate-900 tabular-nums dark:text-slate-100">
+                <p className="mt-0.5 truncate font-mono text-xs font-bold text-slate-900 tabular-nums sm:text-sm dark:text-slate-100">
                   {weather.windKmh} km/h
                 </p>
               </div>
-              <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-950/40">
-                <p className="flex items-center gap-1 text-[11px] font-medium text-slate-500 dark:text-slate-400">
-                  <Thermometer className="h-3 w-3 text-amber-500" />
-                  Range
+              <div className="min-w-0 rounded-lg border border-slate-200 bg-white px-2 py-2 sm:px-3 dark:border-slate-800 dark:bg-slate-950/40">
+                <p className="flex items-center gap-1 truncate text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                  <Thermometer className="h-3 w-3 shrink-0 text-amber-500" />
+                  <span className="truncate">Range</span>
                 </p>
-                <p className="mt-0.5 font-mono text-sm font-bold text-slate-900 tabular-nums dark:text-slate-100">
+                <p className="mt-0.5 truncate font-mono text-xs font-bold text-slate-900 tabular-nums sm:text-sm dark:text-slate-100">
                   {weather.lowC}–{weather.highC}°
                 </p>
               </div>
@@ -643,15 +643,15 @@ export function InteractiveMapCard({
   };
 
   return (
-    <div className="flex h-full flex-col justify-between rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
-      <div>
+    <div className="flex h-full min-w-0 flex-col justify-between rounded-xl border border-slate-200 bg-white p-4 sm:p-5 dark:border-slate-800 dark:bg-slate-900">
+      <div className="min-w-0">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3.5 dark:border-slate-800">
-          <div className="flex items-center gap-2.5">
+          <div className="flex min-w-0 flex-1 items-center gap-2.5">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-600 dark:border-indigo-900/60 dark:bg-indigo-950/50 dark:text-indigo-400">
               <Compass className="h-4 w-4" aria-hidden="true" />
             </div>
-            <div className="min-w-0">
-              <h2 className="font-display text-base font-bold text-slate-900 dark:text-slate-100">
+            <div className="min-w-0 flex-1">
+              <h2 className="truncate font-display text-base font-bold text-slate-900 dark:text-slate-100">
                 Interactive Operations Map
               </h2>
               <p className="truncate text-xs text-slate-500 dark:text-slate-400">
@@ -660,7 +660,7 @@ export function InteractiveMapCard({
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5">
+          <div className="flex shrink-0 items-center gap-1.5">
             <button
               type="button"
               onClick={onDetectGps}
@@ -675,7 +675,7 @@ export function InteractiveMapCard({
 
         {/* Search & Office Presets */}
         <div className="mt-3.5 flex flex-wrap items-center justify-between gap-2">
-          <form onSubmit={handleSearch} className="relative min-w-[210px] flex-1">
+          <form onSubmit={handleSearch} className="relative w-full min-w-0 flex-1 sm:min-w-[200px]">
             <div className="flex gap-1.5">
               <div className="relative flex-1">
                 <Search className="pointer-events-none absolute top-2.5 left-2.5 h-3.5 w-3.5 text-slate-400" />
@@ -845,12 +845,12 @@ export function WeatherAndMapSection() {
   return (
     <section
       aria-label="Live Weather and Interactive Operations Map"
-      className="grid grid-cols-1 items-stretch gap-6 lg:grid-cols-12"
+      className="grid min-w-0 grid-cols-1 items-stretch gap-6 lg:grid-cols-12"
     >
-      <div className="lg:col-span-5">
+      <div className="min-w-0 lg:col-span-5">
         <LiveWeatherCard {...weatherProps} />
       </div>
-      <div className="lg:col-span-7">
+      <div className="min-w-0 lg:col-span-7">
         <InteractiveMapCard {...weatherProps} />
       </div>
     </section>

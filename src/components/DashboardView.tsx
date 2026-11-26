@@ -679,11 +679,11 @@ export function DashboardView({
         : Moon;
 
   return (
-    <div className="space-y-6">
+    <div className="w-full min-w-0 max-w-full space-y-6 overflow-x-hidden">
       {/* Dynamic Time-of-Day Personalized Greeting Banner */}
       <section
         aria-label="Personalized Welcome Greeting"
-        className="flex flex-col justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-4 dark:border-slate-800 dark:bg-slate-900 sm:flex-row sm:items-center sm:px-6"
+        className="flex min-w-0 flex-col justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-4 dark:border-slate-800 dark:bg-slate-900 sm:flex-row sm:items-center sm:px-6"
       >
         <div className="flex min-w-0 items-start gap-3 sm:items-center">
           <div
@@ -781,12 +781,12 @@ export function DashboardView({
           </span>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
           {/* Sub-Tab Toggle: Overview vs Department & SLA Analytics */}
           <div
             role="tablist"
             aria-label="Dashboard view mode"
-            className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-100 p-0.5 dark:border-slate-700 dark:bg-slate-800"
+            className="inline-flex max-w-full items-center overflow-x-auto rounded-lg border border-slate-200 bg-slate-100 p-0.5 dark:border-slate-700 dark:bg-slate-800"
           >
             <button
               type="button"
@@ -1040,9 +1040,9 @@ export function DashboardView({
       </section>
 
       {/* Executive Visual Analytics Row: Task Completion Donut + Dept Workload & Attendance */}
-      <section className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+      <section className="grid min-w-0 grid-cols-1 gap-6 lg:grid-cols-12">
         {/* Task Completion Breakdown (SVG Donut Chart) */}
-        <div className="rounded-xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900 lg:col-span-5">
+        <div className="min-w-0 rounded-xl border border-slate-200 bg-white p-4 sm:p-6 dark:border-slate-800 dark:bg-slate-900 lg:col-span-5">
           <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-4 dark:border-slate-800">
             <div>
               <h2 className="font-display text-base font-bold text-slate-900 dark:text-slate-100">
@@ -1153,7 +1153,7 @@ export function DashboardView({
         </div>
 
         {/* Department-Wise Workload & Attendance Summary */}
-        <div className="rounded-xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900 lg:col-span-7">
+        <div className="min-w-0 rounded-xl border border-slate-200 bg-white p-4 sm:p-6 dark:border-slate-800 dark:bg-slate-900 lg:col-span-7">
           <div className="flex items-center justify-between gap-4 border-b border-slate-100 pb-4 dark:border-slate-800">
             <div>
               <h2 className="font-display text-base font-bold text-slate-900 dark:text-slate-100">
@@ -1226,7 +1226,7 @@ export function DashboardView({
       </section>
 
       {/* Financial Cost-Center & Budget Variance Tracker */}
-      <section className="rounded-xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900">
+      <section className="min-w-0 rounded-xl border border-slate-200 bg-white p-4 sm:p-6 dark:border-slate-800 dark:bg-slate-900">
         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-100 pb-4 dark:border-slate-800">
           <div className="flex items-center gap-2.5">
             <Wallet className="h-4 w-4 text-indigo-600 shrink-0 dark:text-indigo-400" aria-hidden="true" />

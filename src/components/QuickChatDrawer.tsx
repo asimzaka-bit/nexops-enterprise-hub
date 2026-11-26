@@ -15,6 +15,7 @@ import {
   formatPresenceStatus,
   resolveLivePresenceOverride,
 } from '../utils/storage';
+import type { ViewportInfo } from '../hooks/useViewport';
 import { SendChatMessagePayload, StartGoogleMeetPayload } from './MailChatHubView';
 import { GoogleMeetColorIcon } from './GoogleWorkspaceIcons';
 import { UserAvatar } from './UserAvatar';
@@ -30,6 +31,7 @@ interface QuickChatDrawerProps {
   onMarkChatRoomRead: (roomId: string) => void;
   onStartGoogleMeetSession: (payload: StartGoogleMeetPayload) => void;
   onOpenFullHub: () => void;
+  viewport?: ViewportInfo;
 }
 
 function openExternalUrlSafely(url: string) {
@@ -53,7 +55,9 @@ export function QuickChatDrawer({
   onMarkChatRoomRead,
   onStartGoogleMeetSession,
   onOpenFullHub,
+  viewport,
 }: QuickChatDrawerProps) {
+  const isCompactMobile = viewport ? viewport.isMobile : false;
   const [open, setOpen] = useState(false);
   const [activeRoomId, setActiveRoomId] = useState<string>(() => buildChannelRoomId('General'));
   const [draft, setDraft] = useState('');
@@ -210,13 +214,15 @@ export function QuickChatDrawer({
   };
 
   return (
-    <div className="no-print fixed right-4 bottom-4 z-30 sm:right-6 sm:bottom-6">
+    <div className="no-print fixed right-4 bottom-4 z-30 max-w-[calc(100vw-24px)] sm:right-6 sm:bottom-6">
       {!open ? (
         <button
           type="button"
           onClick={() => setOpen(true)}
           aria-label="Open Quick Team Chat Drawer"
-          className="inline-flex items-center gap-2 rounded-full border border-indigo-500/30 bg-indigo-600 px-4 py-2.5 text-xs font-bold text-white shadow-lg transition-transform hover:scale-[1.02] hover:bg-indigo-700 focus-visible:outline-2 focus-visible:outline-indigo-600"
+          className={`inline-flex items-center gap-2 rounded-full border border-indigo-500/30 bg-indigo-600 text-xs font-bold text-white shadow-lg transition-transform hover:scale-[1.02] hover:bg-indigo-700 focus-visible:outline-2 focus-visible:outline-indigo-600 ${
+            isCompactMobile ? 'px-3.5 py-2.5' : 'px-4 py-2.5'
+          }`}
         >
           <MessageSquare className="h-4 w-4 shrink-0" />
           <span>Team Chat</span>
@@ -228,7 +234,7 @@ export function QuickChatDrawer({
         </button>
       ) : (
         <div
-          className="flex h-[520px] max-h-[80vh] w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl sm:w-[400px] dark:border-slate-800 dark:bg-slate-900"
+          className="flex h-[520px] max-h-[80vh] w-[calc(100vw-24px)] max-w-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl sm:w-[400px] dark:border-slate-800 dark:bg-slate-900"
           role="dialog"
           aria-label="Quick Team Chat Drawer"
         >

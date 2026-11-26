@@ -32,6 +32,7 @@ import { UserProfileModal } from './components/UserProfileModal';
 import { DocumentVaultView } from './components/DocumentVaultView';
 import { WorkspaceSkeleton } from './components/WorkspaceSkeleton';
 import { WorkspaceToolsView } from './components/WorkspaceToolsView';
+import { useViewport } from './hooks/useViewport';
 import {
   AnnouncementPriorityTag,
   AnnouncementSeverity,
@@ -125,6 +126,7 @@ export default function App() {
   );
   const [activeSection, setActiveSection] = useState<NavSection>('dashboard');
   const [activeWorkspaceTool, setActiveWorkspaceTool] = useState<WorkspaceToolType>('gmail');
+  const viewport = useViewport();
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
     try {
       return localStorage.getItem('nexops_sidebar_collapsed_v1') === 'true';
@@ -133,6 +135,12 @@ export default function App() {
     }
   });
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  useEffect(() => {
+    if (viewport.isDesktop && mobileMenuOpen) {
+      setMobileMenuOpen(false);
+    }
+  }, [viewport.isDesktop, mobileMenuOpen]);
   const [themePreference, setThemePreference] = useState<ThemePreference>(() => {
     try {
       const saved = localStorage.getItem('nexops_theme_preference_v1');
@@ -7054,10 +7062,10 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen max-w-full overflow-x-hidden bg-slate-50 text-slate-900 transition-colors dark:bg-slate-950 dark:text-slate-100">
+    <div className="min-h-screen w-full max-w-full overflow-x-clip bg-slate-50 text-slate-900 transition-colors dark:bg-slate-950 dark:text-slate-100">
       {/* Main App Shell (hidden during window.print() when OfficialReportModal is open) */}
       <div className={reportModalState.open ? 'no-print' : ''}>
-        {/* Fixed Left Sidebar */}
+        {/* Fixed Left Sidebar (Desktop >= 1024px) & Slide-Over Drawer (Mobile/Tablet < 1024px) */}
         <Sidebar
           branding={branding}
           activeSection={activeSection}
@@ -7085,11 +7093,12 @@ export default function App() {
           onToggleCollapse={() => setSidebarCollapsed((prev) => !prev)}
           mobileOpen={mobileMenuOpen}
           onCloseMobile={() => setMobileMenuOpen(false)}
+          viewport={viewport}
         />
 
         {/* Main Content Shell */}
         <div
-          className={`flex min-h-screen min-w-0 max-w-full flex-col transition-all duration-200 ease-in-out ${
+          className={`flex min-h-screen w-full min-w-0 max-w-full flex-col transition-all duration-200 ease-in-out ${
             sidebarCollapsed ? 'lg:pl-20' : 'lg:pl-64'
           }`}
         >
@@ -7129,6 +7138,7 @@ export default function App() {
             themePreference={themePreference}
             onToggleDarkMode={() => setThemePreference(isDarkMode ? 'light' : 'dark')}
             onSetThemePreference={setThemePreference}
+            viewport={viewport}
             onSelectWorkspaceTool={(tool) => {
               setActiveWorkspaceTool(tool);
               setActiveSection('workspace');
@@ -7143,7 +7153,7 @@ export default function App() {
             onRestoreAnnouncement={handleRestoreAnnouncement}
           />
 
-          <main className="mx-auto w-full min-w-0 max-w-[1360px] flex-1 px-3 py-4 sm:px-6 sm:py-6 lg:px-8">
+          <main className="mx-auto w-full min-w-0 max-w-[1360px] flex-1 overflow-x-hidden px-3 py-4 sm:px-6 sm:py-6 lg:px-8">
             {isHydrating ? (
               <WorkspaceSkeleton />
             ) : (
@@ -7538,6 +7548,7 @@ export default function App() {
             onMarkChatRoomRead={handleMarkChatRoomRead}
             onStartGoogleMeetSession={handleStartGoogleMeetSession}
             onOpenFullHub={() => setActiveSection('mailchat')}
+            viewport={viewport}
           />
         )}
 

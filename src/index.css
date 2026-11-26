@@ -19,7 +19,7 @@
     font-size: 16px;
     line-height: 1.5;
     max-width: 100%;
-    overflow-x: hidden;
+    overflow-x: clip;
     scroll-behavior: smooth;
     -webkit-overflow-scrolling: touch;
     -webkit-font-smoothing: antialiased;
@@ -39,7 +39,7 @@
     line-height: 1.5;
     max-width: 100%;
     width: 100%;
-    overflow-x: hidden;
+    overflow-x: clip;
     background-color: #f8fafc;
     color: #0f172a;
     -webkit-overflow-scrolling: touch;

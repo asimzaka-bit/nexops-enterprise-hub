@@ -25,6 +25,7 @@ import {
   TeamMember,
   WorkspaceToolType,
 } from '../types/nexops';
+import type { ViewportInfo } from '../hooks/useViewport';
 import {
   GmailColorIcon,
   GoogleDocsColorIcon,
@@ -58,6 +59,7 @@ interface SidebarProps {
   onToggleCollapse: () => void;
   mobileOpen: boolean;
   onCloseMobile: () => void;
+  viewport?: ViewportInfo;
 }
 
 const WORKSPACE_SUB_TOOLS: {
@@ -107,7 +109,10 @@ export function Sidebar({
   onToggleCollapse,
   mobileOpen,
   onCloseMobile,
+  viewport,
 }: SidebarProps) {
+  const showDesktopFixedSidebar = viewport ? viewport.isDesktop : true;
+  const showDrawerMode = viewport ? !viewport.isDesktop : true;
   const navItems: {
     id: NavSection;
     label: string;
@@ -498,23 +503,25 @@ export function Sidebar({
 
   return (
     <>
-      {/* Desktop Fixed Collapsible Sidebar */}
-      <aside
-        className={`gpu-accelerated hidden lg:fixed lg:inset-y-0 lg:left-0 lg:z-30 lg:block lg:border-r lg:border-slate-800 transition-all duration-200 ease-in-out ${
-          collapsed ? 'lg:w-20' : 'lg:w-64'
-        }`}
-      >
-        {renderSidebarContent(collapsed)}
-      </aside>
+      {/* Desktop Fixed Collapsible Sidebar (>= 1024px) */}
+      {showDesktopFixedSidebar && (
+        <aside
+          className={`gpu-accelerated hidden lg:fixed lg:inset-y-0 lg:left-0 lg:z-30 lg:block lg:border-r lg:border-slate-800 transition-all duration-200 ease-in-out ${
+            collapsed ? 'lg:w-20' : 'lg:w-64'
+          }`}
+        >
+          {renderSidebarContent(collapsed)}
+        </aside>
+      )}
 
-      {/* Mobile Collapsible Drawer */}
-      {mobileOpen && (
-        <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true">
+      {/* Mobile & Tablet Slide-Over Drawer (< 1024px) */}
+      {showDrawerMode && mobileOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true">
           <div
             className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs transition-opacity"
             onClick={onCloseMobile}
           />
-          <aside className="gpu-accelerated fixed inset-y-0 left-0 z-50 w-72 max-w-[82vw] border-r border-slate-800 shadow-xl">
+          <aside className="gpu-accelerated fixed inset-y-0 left-0 z-50 w-72 max-w-[85vw] border-r border-slate-800 shadow-xl">
             {renderSidebarContent(false)}
           </aside>
         </div>
