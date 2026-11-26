@@ -1,8 +1,11 @@
 import {
   AlertTriangle,
   Archive,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
+  Clock,
   History,
   Info,
   Megaphone,
@@ -11,24 +14,32 @@ import {
   ShieldAlert,
   X,
 } from 'lucide-react';
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import {
   AnnouncementPriorityTag,
   AnnouncementSeverity,
   CompanyAnnouncement,
   Role,
 } from '../types/nexops';
-import { formatDateTime } from '../utils/storage';
+import {
+  formatDateTime,
+  isAnnouncementActive,
+  isSuperAdminEmail,
+  loadDismissedAnnouncementIds,
+  saveDismissedAnnouncementIds,
+} from '../utils/storage';
 
 interface AnnouncementBannerProps {
   announcements: CompanyAnnouncement[];
   activeRole: Role;
+  currentUserEmail: string;
   onPublishAnnouncement: (payload: {
     title: string;
     message: string;
     severity: AnnouncementSeverity;
     priorityTag: AnnouncementPriorityTag;
     pinned: boolean;
+    expiresAt?: string;
   }) => void;
   onArchiveAnnouncement: (announcementId: string) => void;
   onRestoreAnnouncement: (announcementId: string) => void;
@@ -37,15 +48,44 @@ interface AnnouncementBannerProps {
 export function AnnouncementBanner({
   announcements,
   activeRole,
+  currentUserEmail,
   onPublishAnnouncement,
   onArchiveAnnouncement,
   onRestoreAnnouncement,
 }: AnnouncementBannerProps) {
-  const isAdmin = activeRole === 'Admin';
-  const activeNotices = announcements
-    .filter((a) => !a.archived)
-    .sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)));
-  const archivedNotices = announcements.filter((a) => a.archived);
+  const isSuperAdmin = activeRole === 'Admin' && isSuperAdminEmail(currentUserEmail);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [dismissedIds, setDismissedIds] = useState<string[]>(() =>
+    loadDismissedAnnouncementIds(currentUserEmail),
+  );
+  const [collapsed, setCollapsed] = useState(false);
+
+  useEffect(() => {
+    setDismissedIds(loadDismissedAnnouncementIds(currentUserEmail));
+  }, [currentUserEmail]);
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNowMs(Date.now()), 60_000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const allLiveNotices = useMemo(
+    () =>
+      announcements
+        .filter((a) => isAnnouncementActive(a, nowMs))
+        .sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned))),
+    [announcements, nowMs],
+  );
+
+  const dismissedSet = useMemo(() => new Set(dismissedIds), [dismissedIds]);
+  const activeNotices = useMemo(
+    () => allLiveNotices.filter((a) => !dismissedSet.has(a.id)),
+    [allLiveNotices, dismissedSet],
+  );
+  const archivedNotices = useMemo(
+    () => announcements.filter((a) => a.archived || !isAnnouncementActive(a, nowMs)),
+    [announcements, nowMs],
+  );
 
   const [currentIndex, setCurrentIndex] = useState(0);
   const [publishOpen, setPublishOpen] = useState(false);
@@ -57,13 +97,27 @@ export function AnnouncementBanner({
   const [severity, setSeverity] = useState<AnnouncementSeverity>('info');
   const [priorityTag, setPriorityTag] = useState<AnnouncementPriorityTag>('General');
   const [pinned, setPinned] = useState(true);
+  const [expiresAtInput, setExpiresAtInput] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
 
   const safeIndex = activeNotices.length > 0 ? currentIndex % activeNotices.length : 0;
   const activeNotice = activeNotices[safeIndex];
 
+  const handleDismissNotice = (noticeId: string) => {
+    const next = Array.from(new Set([...dismissedIds, noticeId]));
+    setDismissedIds(next);
+    saveDismissedAnnouncementIds(currentUserEmail, next);
+  };
+
+  const handleRestoreDismissed = () => {
+    setDismissedIds([]);
+    saveDismissedAnnouncementIds(currentUserEmail, []);
+    setCollapsed(false);
+  };
+
   const handlePublishSubmit = (e: FormEvent) => {
     e.preventDefault();
+    if (!isSuperAdmin) return;
     if (!title.trim()) {
       setFormError('Announcement headline is required.');
       return;
@@ -72,6 +126,20 @@ export function AnnouncementBanner({
       setFormError('Official notice message body is required.');
       return;
     }
+    let normalizedExpiresAt: string | undefined;
+    if (expiresAtInput.trim()) {
+      const parsedExp = new Date(expiresAtInput);
+      if (Number.isNaN(parsedExp.getTime())) {
+        setFormError('Please provide a valid expiry date and time.');
+        return;
+      }
+      if (parsedExp.getTime() <= Date.now()) {
+        setFormError('Expiry date & time must be in the future.');
+        return;
+      }
+      normalizedExpiresAt = parsedExp.toISOString();
+    }
+
     setFormError(null);
     onPublishAnnouncement({
       title: title.trim(),
@@ -79,17 +147,20 @@ export function AnnouncementBanner({
       severity,
       priorityTag,
       pinned,
+      expiresAt: normalizedExpiresAt,
     });
     setTitle('');
     setMessage('');
     setSeverity('info');
     setPriorityTag('General');
     setPinned(true);
+    setExpiresAtInput('');
     setCurrentIndex(0);
+    setCollapsed(false);
     setPublishOpen(false);
   };
 
-  if (activeNotices.length === 0 && !isAdmin) {
+  if (activeNotices.length === 0 && !isSuperAdmin && allLiveNotices.length === 0) {
     return null;
   }
 
@@ -129,9 +200,9 @@ export function AnnouncementBanner({
         <div
           role="region"
           aria-label="Official Company Circulars"
-          className={`border-b px-4 py-2.5 sm:px-6 lg:px-8 ${severityStyles[activeNotice.severity].wrapper}`}
+          className={`border-b px-4 py-2 sm:px-6 lg:px-8 ${severityStyles[activeNotice.severity].wrapper}`}
         >
-          <div className="mx-auto flex max-w-[1360px] flex-wrap items-center justify-between gap-3">
+          <div className="mx-auto flex max-w-[1360px] flex-wrap items-center justify-between gap-2.5">
             <div className="flex min-w-0 flex-1 items-start gap-2.5 sm:items-center">
               {activeNotice.severity === 'urgent' ? (
                 <ShieldAlert
@@ -158,8 +229,16 @@ export function AnnouncementBanner({
                   <span className="hidden font-mono text-[10px] opacity-70 sm:inline">
                     · {activeNotice.publishedBy} · {formatDateTime(activeNotice.publishedAt)}
                   </span>
+                  {activeNotice.expiresAt && (
+                    <span className="inline-flex items-center gap-1 rounded border border-slate-900/15 bg-white/70 px-1.5 py-0.5 font-mono text-[10px] font-semibold opacity-85 dark:border-slate-700 dark:bg-slate-900/70">
+                      <Clock className="h-2.5 w-2.5" />
+                      <span>Expires {formatDateTime(activeNotice.expiresAt)}</span>
+                    </span>
+                  )}
                 </div>
-                <p className="mt-0.5 text-xs leading-relaxed opacity-90">{activeNotice.message}</p>
+                {!collapsed && (
+                  <p className="mt-0.5 text-xs leading-relaxed opacity-90">{activeNotice.message}</p>
+                )}
               </div>
             </div>
 
@@ -192,7 +271,29 @@ export function AnnouncementBanner({
                 </div>
               )}
 
-              {isAdmin && (
+              <button
+                type="button"
+                onClick={() => setCollapsed((prev) => !prev)}
+                title={collapsed ? 'Expand announcement' : 'Collapse announcement'}
+                aria-label={collapsed ? 'Expand announcement' : 'Collapse announcement'}
+                className="inline-flex items-center gap-1 rounded-md border border-slate-900/15 bg-white/80 px-2 py-1 text-[11px] font-semibold whitespace-nowrap text-slate-700 transition-colors hover:bg-white dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+              >
+                {collapsed ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />}
+                <span className="hidden sm:inline">{collapsed ? 'Expand' : 'Collapse'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleDismissNotice(activeNotice.id)}
+                title="Dismiss this announcement"
+                aria-label="Dismiss announcement"
+                className="inline-flex items-center gap-1 rounded-md border border-slate-900/15 bg-white/80 px-2 py-1 text-[11px] font-semibold whitespace-nowrap text-slate-700 transition-colors hover:bg-white dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+              >
+                <X className="h-3 w-3" />
+                <span className="hidden sm:inline">Dismiss</span>
+              </button>
+
+              {isSuperAdmin && (
                 <>
                   <button
                     type="button"
@@ -200,16 +301,16 @@ export function AnnouncementBanner({
                       setFormError(null);
                       setPublishOpen(true);
                     }}
-                    className="inline-flex items-center gap-1 rounded-md border border-slate-900/15 bg-white/85 px-2.5 py-1 text-[11px] font-semibold text-slate-900 transition-colors hover:bg-white whitespace-nowrap dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
+                    className="inline-flex items-center gap-1 rounded-md border border-slate-900/15 bg-white/85 px-2.5 py-1 text-[11px] font-semibold whitespace-nowrap text-slate-900 transition-colors hover:bg-white dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
                   >
                     <Plus className="h-3 w-3" />
-                    <span>Publish Notice</span>
+                    <span>Post Announcement</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => onArchiveAnnouncement(activeNotice.id)}
                     title="Archive this notice"
-                    className="inline-flex items-center gap-1 rounded-md border border-slate-900/15 bg-white/85 px-2.5 py-1 text-[11px] font-semibold text-slate-700 transition-colors hover:bg-white hover:text-rose-700 whitespace-nowrap dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-rose-400"
+                    className="inline-flex items-center gap-1 rounded-md border border-slate-900/15 bg-white/85 px-2.5 py-1 text-[11px] font-semibold whitespace-nowrap text-slate-700 transition-colors hover:bg-white hover:text-rose-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-rose-400"
                   >
                     <Archive className="h-3 w-3" />
                     <span>Archive</span>
@@ -218,7 +319,7 @@ export function AnnouncementBanner({
                     <button
                       type="button"
                       onClick={() => setArchiveOpen(true)}
-                      className="inline-flex items-center gap-1 rounded-md border border-slate-900/15 bg-white/85 px-2 py-1 text-[11px] font-semibold text-slate-700 transition-colors hover:bg-white whitespace-nowrap dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+                      className="inline-flex items-center gap-1 rounded-md border border-slate-900/15 bg-white/85 px-2 py-1 text-[11px] font-semibold whitespace-nowrap text-slate-700 transition-colors hover:bg-white dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
                     >
                       <History className="h-3 w-3" />
                       <span>({archivedNotices.length})</span>
@@ -230,15 +331,29 @@ export function AnnouncementBanner({
           </div>
         </div>
       ) : (
-        /* Admin-only compact circular bar when all notices are archived */
+        /* Compact bar when notices are dismissed or only Super Admin controls are shown */
         <div className="border-b border-slate-200 bg-slate-100/80 px-4 py-1.5 sm:px-6 lg:px-8 dark:border-slate-800 dark:bg-slate-900/70">
           <div className="mx-auto flex max-w-[1360px] flex-wrap items-center justify-between gap-2 text-xs">
             <span className="inline-flex items-center gap-1.5 text-slate-600 dark:text-slate-400">
               <Info className="h-3.5 w-3.5 text-slate-400 dark:text-slate-500" />
-              <span>No active executive circulars published.</span>
+              <span>
+                {allLiveNotices.length > 0
+                  ? `${allLiveNotices.length} active notice${allLiveNotices.length === 1 ? '' : 's'} dismissed.`
+                  : 'No active executive circulars published.'}
+              </span>
             </span>
-            <div className="flex items-center gap-2">
-              {archivedNotices.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2">
+              {allLiveNotices.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleRestoreDismissed}
+                  className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+                >
+                  <RotateCcw className="h-3 w-3" />
+                  <span>Show Notices ({allLiveNotices.length})</span>
+                </button>
+              )}
+              {isSuperAdmin && archivedNotices.length > 0 && (
                 <button
                   type="button"
                   onClick={() => setArchiveOpen(true)}
@@ -248,24 +363,26 @@ export function AnnouncementBanner({
                   <span>Archived ({archivedNotices.length})</span>
                 </button>
               )}
-              <button
-                type="button"
-                onClick={() => {
-                  setFormError(null);
-                  setPublishOpen(true);
-                }}
-                className="inline-flex items-center gap-1 rounded-md bg-slate-900 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-slate-800 dark:bg-indigo-600 dark:hover:bg-indigo-700"
-              >
-                <Megaphone className="h-3 w-3" />
-                <span>Publish Official Circular</span>
-              </button>
+              {isSuperAdmin && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFormError(null);
+                    setPublishOpen(true);
+                  }}
+                  className="inline-flex items-center gap-1 rounded-md bg-slate-900 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-slate-800 dark:bg-indigo-600 dark:hover:bg-indigo-700"
+                >
+                  <Megaphone className="h-3 w-3" />
+                  <span>Post Announcement</span>
+                </button>
+              )}
             </div>
           </div>
         </div>
       )}
 
-      {/* Publish Official Circular Modal (Admin Only) */}
-      {publishOpen && (
+      {/* Post Announcement Modal (Sole Super Admin Only) */}
+      {publishOpen && isSuperAdmin && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs sm:p-4 dark:bg-slate-950/75"
           role="dialog"
@@ -280,7 +397,7 @@ export function AnnouncementBanner({
                   id="publish-notice-heading"
                   className="font-display text-base font-bold text-slate-900 dark:text-slate-100"
                 >
-                  Publish Official Company Circular
+                  Post Live Company Announcement
                 </h2>
               </div>
               <button
@@ -350,17 +467,36 @@ export function AnnouncementBanner({
                   </select>
                 </div>
 
-                <div className="flex items-end pb-2">
-                  <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-300">
-                    <input
-                      type="checkbox"
-                      checked={pinned}
-                      onChange={(e) => setPinned(e.target.checked)}
-                      className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950"
-                    />
-                    Pin to top of Notice Board
+                <div>
+                  <label
+                    htmlFor="notice-expires"
+                    className="block text-xs font-semibold text-slate-700 dark:text-slate-300"
+                  >
+                    Auto-Expiry Date &amp; Time (Optional)
                   </label>
+                  <input
+                    id="notice-expires"
+                    type="datetime-local"
+                    value={expiresAtInput}
+                    onChange={(e) => {
+                      setExpiresAtInput(e.target.value);
+                      setFormError(null);
+                    }}
+                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                  />
                 </div>
+              </div>
+
+              <div>
+                <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={pinned}
+                    onChange={(e) => setPinned(e.target.checked)}
+                    className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950"
+                  />
+                  Pin to top of Notice Board
+                </label>
               </div>
 
               <div>
@@ -393,9 +529,9 @@ export function AnnouncementBanner({
                 </button>
                 <button
                   type="submit"
-                  className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-700"
+                  className="rounded-lg bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 dark:bg-indigo-600 dark:hover:bg-indigo-700"
                 >
-                  Publish to All Users
+                  Post Announcement
                 </button>
               </div>
             </form>
@@ -404,7 +540,7 @@ export function AnnouncementBanner({
       )}
 
       {/* Archived Circulars Modal */}
-      {archiveOpen && (
+      {archiveOpen && isSuperAdmin && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs sm:p-4 dark:bg-slate-950/75"
           role="dialog"
@@ -419,7 +555,7 @@ export function AnnouncementBanner({
                   id="archived-notices-heading"
                   className="font-display text-base font-bold text-slate-900 dark:text-slate-100"
                 >
-                  Archived Executive Circulars ({archivedNotices.length})
+                  Archived &amp; Expired Circulars ({archivedNotices.length})
                 </h2>
               </div>
               <button
@@ -435,7 +571,7 @@ export function AnnouncementBanner({
             <div className="flex-1 space-y-3 overflow-y-auto p-4 sm:p-6">
               {archivedNotices.length === 0 ? (
                 <p className="text-center text-xs text-slate-500 dark:text-slate-400">
-                  No archived circulars.
+                  No archived or expired circulars.
                 </p>
               ) : (
                 archivedNotices.map((item) => (
@@ -453,16 +589,19 @@ export function AnnouncementBanner({
                         </p>
                         <p className="mt-2 font-mono text-[11px] text-slate-400 dark:text-slate-500">
                           {item.publishedBy} · {formatDateTime(item.publishedAt)}
+                          {item.expiresAt ? ` · Expired ${formatDateTime(item.expiresAt)}` : ''}
                         </p>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => onRestoreAnnouncement(item.id)}
-                        className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
-                      >
-                        <RotateCcw className="h-3 w-3" />
-                        <span>Republish</span>
-                      </button>
+                      {item.archived && (
+                        <button
+                          type="button"
+                          onClick={() => onRestoreAnnouncement(item.id)}
+                          className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                        >
+                          <RotateCcw className="h-3 w-3" />
+                          <span>Republish</span>
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))

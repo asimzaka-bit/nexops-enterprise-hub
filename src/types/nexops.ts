@@ -60,6 +60,19 @@ export const DEFAULT_SLA_POLICY: SlaPolicyConfig = {
   lowHours: 48,
 };
 
+export interface DepartmentShiftConfig {
+  department: string;
+  startTime: string; // HH:MM (24h)
+  endTime: string; // HH:MM (24h)
+  graceMinutes: number;
+}
+
+export const DEFAULT_SHIFT_CONFIG: Omit<DepartmentShiftConfig, 'department'> = {
+  startTime: '09:00',
+  endTime: '17:00',
+  graceMinutes: 15,
+};
+
 export interface CompanyBrandingConfig {
   companyName: string;
   tagline: string;
@@ -67,6 +80,7 @@ export interface CompanyBrandingConfig {
   categories: string[];
   approvalBudgetThresholdUsd: number;
   slaPolicy?: SlaPolicyConfig;
+  shiftRosters?: Record<string, DepartmentShiftConfig>;
 }
 
 export type ProjectStatus = 'Active' | 'On Hold' | 'Completed';
@@ -144,6 +158,33 @@ export interface SopAcknowledgment {
   acknowledgedAt: string;
 }
 
+export interface DocumentVersionEntry {
+  version: string;
+  updatedAt: string;
+  updatedBy: string;
+  updatedByEmail?: string;
+  changeNote: string;
+  url?: string;
+  fileName?: string;
+  fileSize?: number;
+  mimeType?: string;
+  fileDataUrl?: string;
+  storageBucket?: string;
+  storagePath?: string;
+  procedureSteps?: string[];
+  complianceRules?: string[];
+  purpose?: string;
+  scope?: string;
+}
+
+export interface DigitalApprovalStamp {
+  stampedBy: string;
+  stampedByEmail: string;
+  stampedByEmployeeId: string;
+  stampedAt: string;
+  badgeLabel: string;
+}
+
 export interface SopDocument {
   id: string;
   code: string;
@@ -159,6 +200,8 @@ export interface SopDocument {
   procedureSteps: string[];
   complianceRules: string[];
   acknowledgments: SopAcknowledgment[];
+  versions?: DocumentVersionEntry[];
+  approvalStamp?: DigitalApprovalStamp;
   updatedAt: string;
 }
 
@@ -180,7 +223,8 @@ export type AuditActionType =
   | 'Vault Updated'
   | 'Subtask Updated'
   | 'Meet Session Logged'
-  | 'Mail Sent';
+  | 'Mail Sent'
+  | 'Security Alert';
 
 export type AnnouncementSeverity = 'info' | 'warning' | 'urgent';
 export type AnnouncementPriorityTag = 'Urgent' | 'General' | 'HR';
@@ -197,13 +241,21 @@ export interface CompanyAnnouncement {
   publishedByRole: Role;
   publishedAt: string;
   updatedAt?: string;
+  expiresAt?: string;
   archived: boolean;
 }
 
-export type MeetingActionStatus = 'Open' | 'Converted to Request' | 'Completed';
+export type MeetingActionStatus =
+  | 'Open'
+  | 'Todo'
+  | 'In Progress'
+  | 'Done'
+  | 'Converted to Request'
+  | 'Completed';
 
 export interface MeetingActionItem {
   id: string;
+  title?: string;
   description: string;
   ownerName: string;
   department: Department;
@@ -224,6 +276,7 @@ export interface MeetingMinute {
   summary: string;
   decisions: string[];
   actionItems: MeetingActionItem[];
+  approvalStamp?: DigitalApprovalStamp;
   createdAt: string;
   updatedAt: string;
 }
@@ -261,6 +314,8 @@ export interface LeaveRequest {
 
 export type AttendanceStatus = 'Present' | 'Late' | 'Completed';
 
+export type AttendanceTag = 'On Time' | 'Late' | 'Early Out';
+
 export interface AttendanceLog {
   id: string;
   userId: string;
@@ -273,6 +328,10 @@ export interface AttendanceLog {
   checkOutTime?: string; // ISO string
   totalHours?: number;
   status: AttendanceStatus;
+  checkInTag?: 'On Time' | 'Late';
+  checkOutTag?: 'On Time' | 'Early Out';
+  shiftStartTime?: string;
+  shiftEndTime?: string;
   notes?: string;
   createdAt: string;
   updatedAt: string;
@@ -315,6 +374,20 @@ export type DocumentVaultAccessTag =
 
 export type DocumentVaultSourceType = 'google_drive' | 'external_link' | 'uploaded_file';
 
+export type DocumentSignOffStatus = 'Pending' | 'Acknowledged';
+
+export interface DocumentSignOffRequest {
+  id: string;
+  reviewerEmail: string;
+  reviewerName: string;
+  requestedBy: string;
+  requestedByEmail: string;
+  requestedAt: string;
+  status: DocumentSignOffStatus;
+  signedOffAt?: string;
+  note?: string;
+}
+
 export interface DocumentVaultItem {
   id: string;
   title: string;
@@ -333,8 +406,28 @@ export interface DocumentVaultItem {
   storageProvider?: 'supabase_storage' | 'cloud_metadata' | 'external_link';
   uploadedBy: string;
   uploadedByEmail: string;
+  currentVersion?: string;
+  versions?: DocumentVersionEntry[];
+  approvalStamp?: DigitalApprovalStamp;
+  expiryDate?: string;
+  signOffRequests?: DocumentSignOffRequest[];
   createdAt: string;
   updatedAt: string;
+}
+
+export type RecycleBinItemType = 'vault' | 'announcement' | 'calendar' | 'meeting';
+
+export interface RecycleBinItem {
+  id: string;
+  itemType: RecycleBinItemType;
+  itemId: string;
+  title: string;
+  department?: Department;
+  deletedBy: string;
+  deletedByEmail: string;
+  deletedAt: string;
+  expiresAt: string;
+  payload: DocumentVaultItem | CompanyAnnouncement | CalendarEvent | MeetingMinute;
 }
 
 export type PermissionKey =
@@ -504,11 +597,22 @@ export interface CalendarEvent {
   time: string; // HH:MM
   department: Department;
   type: CalendarEventType;
+  locationOrLink?: string;
+  attendees?: string[];
   description?: string;
   createdBy: string;
   createdByEmail: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface QuickBookmark {
+  id: string;
+  label: string;
+  kind: 'module' | 'url';
+  section?: NavSection;
+  url?: string;
+  createdAt: string;
 }
 
 export type NavSection =
@@ -542,6 +646,7 @@ export interface CorporateMailMessage {
   fromUserId: string;
   fromName: string;
   fromEmail: string;
+  receiverEmail?: string;
   toEmails: string[];
   ccEmails: string[];
   subject: string;
@@ -563,6 +668,7 @@ export interface TeamChatMessage {
   senderId: string;
   senderName: string;
   senderEmail: string;
+  receiverEmail?: string;
   senderRole: Role;
   senderDepartment: Department;
   body: string;
@@ -672,6 +778,7 @@ export interface AuthSession {
   userTitle?: string;
   avatarUrl?: string;
   identityVerified?: boolean;
+  lastLoginAt?: string;
 }
 
 export interface AppNotification {
@@ -685,7 +792,15 @@ export interface AppNotification {
   recipientEmail?: string;
   recipientRole?: Role | 'all';
   actorEmail?: string;
-  category?: 'user_approval' | 'editor_approval' | 'task' | 'leave' | 'mention' | 'system';
+  category?:
+    | 'user_approval'
+    | 'editor_approval'
+    | 'task'
+    | 'leave'
+    | 'mention'
+    | 'vault_expiry'
+    | 'signoff'
+    | 'system';
   severity: 'info' | 'warning' | 'success' | 'danger';
 }
 
@@ -857,6 +972,12 @@ export type EditorChangePayload =
       op: 'meeting_complete_action';
       meetingId: string;
       actionItemId: string;
+    }
+  | {
+      op: 'meeting_update_action_status';
+      meetingId: string;
+      actionItemId: string;
+      nextStatus: MeetingActionStatus;
     };
 
 export interface PendingEditorChange {
@@ -909,6 +1030,7 @@ export interface NexOpsState {
   corporateMails: CorporateMailMessage[];
   chatMessages: TeamChatMessage[];
   calendarEvents: CalendarEvent[];
+  recycleBin: RecycleBinItem[];
   permissionMatrix: PermissionMatrix;
 }
 

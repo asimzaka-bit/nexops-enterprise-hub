@@ -1,9 +1,12 @@
 import {
+  BadgeCheck,
   BookOpenCheck,
   CheckCircle2,
   ClipboardList,
   Clock,
+  FileEdit,
   FileText,
+  History,
   LayoutGrid,
   List,
   Lock,
@@ -22,8 +25,18 @@ import {
   SopDocument,
   TeamMember,
 } from '../types/nexops';
-import { formatDateTime, formatShortDate } from '../utils/storage';
+import { formatDateTime, formatShortDate, isSuperAdminEmail } from '../utils/storage';
 import { PendingApprovalBadge } from './StatusIndicator';
+
+export interface SopRevisionPayload {
+  version: string;
+  changeNote: string;
+  effectiveDate: string;
+  purpose: string;
+  scope: string;
+  procedureSteps: string[];
+  complianceRules: string[];
+}
 
 interface SopVaultViewProps {
   sops: SopDocument[];
@@ -35,6 +48,8 @@ interface SopVaultViewProps {
   onPublishSop: (sop: Omit<SopDocument, 'id' | 'acknowledgments' | 'updatedAt'>) => void;
   onToggleMandatory: (sopId: string) => void;
   onAcknowledgeSop: (sopId: string) => void;
+  onReviseSop?: (sopId: string, patch: SopRevisionPayload) => void;
+  onStampSop?: (sopId: string) => void;
 }
 
 const SOP_CATEGORIES: SopCategory[] = [
@@ -111,6 +126,18 @@ function computeSopCompliance(sop: SopDocument, teamMembers: TeamMember[]) {
   };
 }
 
+function suggestNextSopVersion(current?: string): string {
+  const clean = (current || 'v1.0').trim().replace(/^v/i, '');
+  const parts = clean.split('.').map((p) => parseInt(p, 10));
+  if (parts.length >= 2 && Number.isFinite(parts[0]) && Number.isFinite(parts[1])) {
+    return `v${parts[0]}.${parts[1] + 1}`;
+  }
+  if (parts.length === 1 && Number.isFinite(parts[0])) {
+    return `v${parts[0] + 1}.0`;
+  }
+  return 'v1.1';
+}
+
 export function SopVaultView({
   sops,
   activeRole,
@@ -121,9 +148,12 @@ export function SopVaultView({
   onPublishSop,
   onToggleMandatory,
   onAcknowledgeSop,
+  onReviseSop,
+  onStampSop,
 }: SopVaultViewProps) {
   const isViewer = activeRole === 'Viewer';
   const canManageSops = activeRole === 'Admin' || activeRole === 'Editor';
+  const isSuperAdmin = activeRole === 'Admin' && isSuperAdminEmail(currentUser.email);
 
   const pendingSopEditIds = useMemo(() => {
     const set = new Set<string>();
@@ -154,9 +184,19 @@ export function SopVaultView({
   const [pendingMineOnly, setPendingMineOnly] = useState(false);
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
 
-  // Reader & Publish modals
+  // Reader, Revision & Publish modals
   const [readerSopId, setReaderSopId] = useState<string | null>(null);
   const [publishOpen, setPublishOpen] = useState(false);
+  const [readerShowHistory, setReaderShowHistory] = useState(false);
+  const [reviseModalSop, setReviseModalSop] = useState<SopDocument | null>(null);
+  const [revVersion, setRevVersion] = useState('v1.1');
+  const [revNote, setRevNote] = useState('');
+  const [revEffectiveDate, setRevEffectiveDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [revPurpose, setRevPurpose] = useState('');
+  const [revScope, setRevScope] = useState('');
+  const [revStepsText, setRevStepsText] = useState('');
+  const [revRulesText, setRevRulesText] = useState('');
+  const [revError, setRevError] = useState<string | null>(null);
 
   // Publish Form state
   const [pubCode, setPubCode] = useState('');
@@ -255,6 +295,56 @@ export function SopVaultView({
     () => (readerSopId ? sops.find((s) => s.id === readerSopId) ?? null : null),
     [sops, readerSopId],
   );
+
+  const openReviseModal = (sop: SopDocument) => {
+    setReviseModalSop(sop);
+    setRevVersion(suggestNextSopVersion(sop.version));
+    setRevNote('');
+    setRevEffectiveDate(new Date().toISOString().slice(0, 10));
+    setRevPurpose(sop.purpose);
+    setRevScope(sop.scope);
+    setRevStepsText(sop.procedureSteps.join('\n'));
+    setRevRulesText(sop.complianceRules.join('\n'));
+    setRevError(null);
+  };
+
+  const handleReviseSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!reviseModalSop || !onReviseSop) return;
+    const cleanVer = revVersion.trim();
+    const steps = revStepsText
+      .split('\n')
+      .map((line) => line.replace(/^\d+[.)]\s*/, '').trim())
+      .filter(Boolean);
+    const rules = revRulesText
+      .split('\n')
+      .map((line) => line.replace(/^[-•*]\s*/, '').trim())
+      .filter(Boolean);
+
+    if (!cleanVer) {
+      setRevError('Version tag is required (e.g. v1.1).');
+      return;
+    }
+    if (!revNote.trim()) {
+      setRevError('Revision change note is required.');
+      return;
+    }
+    if (!revPurpose.trim() || !revScope.trim() || steps.length === 0 || rules.length === 0) {
+      setRevError('Purpose, Scope, Procedure Steps, and Compliance Rules cannot be empty.');
+      return;
+    }
+
+    onReviseSop(reviseModalSop.id, {
+      version: cleanVer.startsWith('v') ? cleanVer : `v${cleanVer}`,
+      changeNote: revNote.trim(),
+      effectiveDate: revEffectiveDate || new Date().toISOString().slice(0, 10),
+      purpose: revPurpose.trim(),
+      scope: revScope.trim(),
+      procedureSteps: steps,
+      complianceRules: rules,
+    });
+    setReviseModalSop(null);
+  };
 
   const openPublishModal = () => {
     const defaultCat: SopCategory = 'Standard Operating Procedure';
@@ -676,6 +766,15 @@ export function SopVaultView({
                       <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 font-mono text-[11px] font-semibold text-slate-700 tabular-nums dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
                         {sop.version}
                       </span>
+                      {sop.approvalStamp && (
+                        <span
+                          title={`${sop.approvalStamp.badgeLabel} (${formatDateTime(sop.approvalStamp.stampedAt)})`}
+                          className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 dark:border-emerald-800/70 dark:bg-emerald-950/50 dark:text-emerald-300"
+                        >
+                          <BadgeCheck className="h-3 w-3" />
+                          VERIFIED &amp; APPROVED
+                        </span>
+                      )}
                       {pendingSopEditIds.has(sop.id) && <PendingApprovalBadge compact />}
                     </div>
 
@@ -806,6 +905,12 @@ export function SopVaultView({
                       <td className="px-3 py-3.5">
                         <div className="flex flex-wrap items-center gap-1.5">
                           <p className="font-semibold text-slate-900 dark:text-slate-100">{sop.title}</p>
+                          {sop.approvalStamp && (
+                            <span className="inline-flex items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 dark:border-emerald-800/70 dark:bg-emerald-950/50 dark:text-emerald-300">
+                              <BadgeCheck className="h-3 w-3" />
+                              VERIFIED &amp; APPROVED
+                            </span>
+                          )}
                           {pendingSopEditIds.has(sop.id) && <PendingApprovalBadge compact />}
                         </div>
                         <div className="mt-1 flex items-center gap-2">
@@ -934,6 +1039,12 @@ export function SopVaultView({
                       >
                         {activeReaderSop.mandatoryRead ? 'Mandatory Read' : 'Reference Policy'}
                       </span>
+                      {activeReaderSop.approvalStamp && (
+                        <span className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-700 dark:border-emerald-800/70 dark:bg-emerald-950/50 dark:text-emerald-300">
+                          <BadgeCheck className="h-3.5 w-3.5" />
+                          <span>{activeReaderSop.approvalStamp.badgeLabel}</span>
+                        </span>
+                      )}
                     </div>
                     <h2
                       id="sop-reader-title"
@@ -950,14 +1061,51 @@ export function SopVaultView({
                       · Owner: <strong className="text-slate-700 dark:text-slate-200">{activeReaderSop.authorName}</strong>
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setReaderSopId(null)}
-                    aria-label="Close SOP reader"
-                    className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setReaderShowHistory((prev) => !prev)}
+                      className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+                        readerShowHistory
+                          ? 'border-indigo-300 bg-indigo-50 text-indigo-700 dark:border-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300'
+                          : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                      }`}
+                    >
+                      <History className="h-3.5 w-3.5" />
+                      <span>History ({(activeReaderSop.versions?.length ?? 0) + 1})</span>
+                    </button>
+                    {canManageSops && onReviseSop && (
+                      <button
+                        type="button"
+                        onClick={() => openReviseModal(activeReaderSop)}
+                        className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 dark:border-indigo-800/70 dark:bg-indigo-950/60 dark:text-indigo-300"
+                      >
+                        <FileEdit className="h-3.5 w-3.5" />
+                        <span>New Revision</span>
+                      </button>
+                    )}
+                    {isSuperAdmin && onStampSop && !activeReaderSop.approvalStamp && (
+                      <button
+                        type="button"
+                        onClick={() => onStampSop(activeReaderSop.id)}
+                        className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700"
+                      >
+                        <BadgeCheck className="h-3.5 w-3.5" />
+                        <span>Stamp &amp; Approve</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setReaderSopId(null);
+                        setReaderShowHistory(false);
+                      }}
+                      aria-label="Close SOP reader"
+                      className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
                 </div>
 
                 {/* Modal Body */}
@@ -1099,6 +1247,62 @@ export function SopVaultView({
                       </div>
                     )}
                   </section>
+
+                  {/* Version History Accordion */}
+                  {readerShowHistory && (
+                    <section className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-4 dark:border-indigo-900/60 dark:bg-indigo-950/20">
+                      <h3 className="flex items-center gap-1.5 text-xs font-bold text-slate-900 dark:text-slate-100">
+                        <History className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
+                        <span>SOP Version History</span>
+                      </h3>
+                      <div className="mt-3 space-y-2">
+                        <div className="rounded-lg border border-indigo-200 bg-white p-3 text-xs dark:border-indigo-900/60 dark:bg-slate-900">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <span className="rounded bg-indigo-50 px-2 py-0.5 font-mono text-[11px] font-bold text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300">
+                                {activeReaderSop.version}
+                              </span>
+                              <span className="rounded bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300">
+                                Active Version
+                              </span>
+                            </div>
+                            <span className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                              {formatDateTime(activeReaderSop.updatedAt)}
+                            </span>
+                          </div>
+                          <p className="mt-1.5 text-slate-600 dark:text-slate-300">
+                            Effective {formatShortDate(activeReaderSop.effectiveDate)} · Author: {activeReaderSop.authorName}
+                          </p>
+                        </div>
+                        {(activeReaderSop.versions ?? [])
+                          .slice()
+                          .reverse()
+                          .map((rev, idx) => (
+                            <div
+                              key={`${rev.version}-${rev.updatedAt}-${idx}`}
+                              className="rounded-lg border border-slate-200 bg-white p-3 text-xs dark:border-slate-800 dark:bg-slate-900"
+                            >
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="rounded bg-slate-100 px-2 py-0.5 font-mono text-[11px] font-bold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                                    {rev.version}
+                                  </span>
+                                  <span className="font-semibold text-slate-700 dark:text-slate-300">
+                                    Archived by {rev.updatedBy}
+                                  </span>
+                                </div>
+                                <span className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                                  {formatDateTime(rev.updatedAt)}
+                                </span>
+                              </div>
+                              <p className="mt-1 text-slate-600 dark:text-slate-400">
+                                {rev.changeNote}
+                              </p>
+                            </div>
+                          ))}
+                      </div>
+                    </section>
+                  )}
                 </div>
 
                 {/* Modal Footer: Digital Sign-Off Action */}
@@ -1404,6 +1608,149 @@ export function SopVaultView({
                   className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-700"
                 >
                   Publish to Vault
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Create New SOP Revision Modal */}
+      {reviseModalSop && onReviseSop && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs sm:p-4 dark:bg-slate-950/75"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3.5 sm:px-6 sm:py-4 dark:border-slate-800">
+              <div className="min-w-0">
+                <h2 className="truncate font-display text-base font-bold text-slate-900 dark:text-slate-100">
+                  Publish New Revision — {reviseModalSop.code}
+                </h2>
+                <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                  Archives {reviseModalSop.version} in Version History and updates live SOP content
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReviseModalSop(null)}
+                className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <form
+              onSubmit={handleReviseSubmit}
+              className="flex-1 space-y-4 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5"
+            >
+              {revError && (
+                <div className="rounded-lg border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs font-medium text-rose-800 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300">
+                  {revError}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    New Version *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={revVersion}
+                    onChange={(e) => setRevVersion(e.target.value)}
+                    className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 font-mono text-xs text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Effective Date
+                  </label>
+                  <input
+                    type="date"
+                    value={revEffectiveDate}
+                    onChange={(e) => setRevEffectiveDate(e.target.value)}
+                    className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 font-mono text-xs text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Change Summary *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={revNote}
+                    onChange={(e) => setRevNote(e.target.value)}
+                    placeholder="Reason for revision..."
+                    className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Purpose
+                </label>
+                <textarea
+                  rows={2}
+                  value={revPurpose}
+                  onChange={(e) => setRevPurpose(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2.5 text-xs text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Scope
+                </label>
+                <textarea
+                  rows={2}
+                  value={revScope}
+                  onChange={(e) => setRevScope(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2.5 text-xs text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Step-by-Step Procedure (one per line)
+                </label>
+                <textarea
+                  rows={4}
+                  value={revStepsText}
+                  onChange={(e) => setRevStepsText(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2.5 text-xs text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Compliance Rules (one per line)
+                </label>
+                <textarea
+                  rows={3}
+                  value={revRulesText}
+                  onChange={(e) => setRevRulesText(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2.5 text-xs text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 border-t border-slate-200 pt-4 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setReviseModalSop(null)}
+                  className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-700"
+                >
+                  Save Revision {revVersion}
                 </button>
               </div>
             </form>

@@ -15,7 +15,12 @@ import {
 } from 'lucide-react';
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Department, TeamMember } from '../types/nexops';
-import { isSuperAdminEmail, resolveLivePresenceOverride } from '../utils/storage';
+import {
+  evaluatePasswordStrength,
+  isSuperAdminEmail,
+  resolveLivePresenceOverride,
+  validateStrongPassword,
+} from '../utils/storage';
 import { PresenceBadge, RoleBadge } from './StatusIndicator';
 import { UserAvatar } from './UserAvatar';
 
@@ -111,6 +116,10 @@ export function UserProfileModal({
   } | null>(null);
   const [updatingPassword, setUpdatingPassword] = useState(false);
 
+  const pwStrength = useMemo(() => evaluatePasswordStrength(newPassword), [newPassword]);
+  const pwCheck = useMemo(() => validateStrongPassword(newPassword), [newPassword]);
+  const pwMatches = confirmPassword.length > 0 && newPassword === confirmPassword;
+
   const handleAvatarFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
@@ -166,10 +175,11 @@ export function UserProfileModal({
       setPasswordStatus({ type: 'error', message: 'Enter your current password.' });
       return;
     }
-    if (newPassword.trim().length < 8) {
+    const validation = validateStrongPassword(newPassword);
+    if (!validation.valid) {
       setPasswordStatus({
         type: 'error',
-        message: 'New password must be at least 8 characters.',
+        message: validation.error || 'Password does not meet security requirements.',
       });
       return;
     }
@@ -578,42 +588,72 @@ export function UserProfileModal({
                 >
                   New Password
                 </label>
-                <input
-                  id="new-pw"
-                  type="password"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="Min 8 chars"
-                  className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
-                />
+                  <input
+                    id="new-pw"
+                    type="password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="8+ chars, letter & number"
+                    className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
+                  />
+                </div>
+                <div>
+                  <label
+                    htmlFor="conf-pw"
+                    className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300"
+                  >
+                    Confirm Password
+                  </label>
+                  <input
+                    id="conf-pw"
+                    type="password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                  />
+                </div>
               </div>
-              <div>
-                <label
-                  htmlFor="conf-pw"
-                  className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300"
-                >
-                  Confirm Password
-                </label>
-                <input
-                  id="conf-pw"
-                  type="password"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-                />
-              </div>
-            </div>
 
-            <div className="mt-4 flex justify-end">
-              <button
-                type="submit"
-                disabled={updatingPassword}
-                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-800 transition-colors hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
-              >
-                {updatingPassword ? 'Updating...' : 'Update Password'}
-              </button>
-            </div>
-          </form>
+              {(newPassword.length > 0 || confirmPassword.length > 0) && (
+                <div className="mt-3 space-y-2 rounded-lg border border-slate-200 bg-slate-50/70 p-2.5 dark:border-slate-800 dark:bg-slate-950/60">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-slate-500 dark:text-slate-400">Password Strength</span>
+                    <span className={`font-bold ${pwStrength.textClass}`}>{pwStrength.label}</span>
+                  </div>
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
+                    <div className={`h-full rounded-full transition-all duration-200 ${pwStrength.barClass}`} />
+                  </div>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+                    <span className={`inline-flex items-center gap-1 font-medium ${pwCheck.hasMinLength ? 'text-emerald-700 dark:text-emerald-400' : 'text-slate-500 dark:text-slate-400'}`}>
+                      <CheckCircle2 className="h-3 w-3" />
+                      <span>8+ chars</span>
+                    </span>
+                    <span className={`inline-flex items-center gap-1 font-medium ${pwCheck.hasLetter ? 'text-emerald-700 dark:text-emerald-400' : 'text-slate-500 dark:text-slate-400'}`}>
+                      <CheckCircle2 className="h-3 w-3" />
+                      <span>1+ letter</span>
+                    </span>
+                    <span className={`inline-flex items-center gap-1 font-medium ${pwCheck.hasNumber ? 'text-emerald-700 dark:text-emerald-400' : 'text-slate-500 dark:text-slate-400'}`}>
+                      <CheckCircle2 className="h-3 w-3" />
+                      <span>1+ number</span>
+                    </span>
+                    <span className={`inline-flex items-center gap-1 font-medium ${pwMatches ? 'text-emerald-700 dark:text-emerald-400' : 'text-slate-500 dark:text-slate-400'}`}>
+                      <CheckCircle2 className="h-3 w-3" />
+                      <span>Passwords match</span>
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              <div className="mt-4 flex justify-end">
+                <button
+                  type="submit"
+                  disabled={updatingPassword || !pwCheck.valid || !pwMatches}
+                  className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-800 transition-colors hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                >
+                  {updatingPassword ? 'Updating...' : 'Update Password'}
+                </button>
+              </div>
+            </form>
         </div>
       </div>
     </div>

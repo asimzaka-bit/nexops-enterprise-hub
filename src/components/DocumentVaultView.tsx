@@ -1,5 +1,10 @@
 import {
+  AlertTriangle,
+  BadgeCheck,
   Briefcase,
+  CalendarClock,
+  CheckCircle2,
+  Clock,
   Cloud,
   Download,
   ExternalLink,
@@ -8,15 +13,18 @@ import {
   FileText,
   FolderLock,
   HardDrive,
+  History,
   Landmark,
   Link2,
   Loader2,
   Lock,
   Plus,
+  RotateCcw,
   Search,
   ShieldCheck,
   Trash2,
   Upload,
+  UserCheck,
   X,
 } from 'lucide-react';
 import { FormEvent, useMemo, useState } from 'react';
@@ -28,6 +36,7 @@ import {
   DocumentVaultItem,
   DocumentVaultSourceType,
   PendingEditorChange,
+  RecycleBinItem,
   Role,
   TeamMember,
 } from '../types/nexops';
@@ -35,18 +44,49 @@ import {
   calculateVaultStorageStats,
   formatDateTime,
   formatStorageSize,
+  getDocumentExpiryInfo,
+  getRecycleBinDaysLeft,
+  getTodayDateString,
+  isSuperAdminEmail,
   TEN_GB_BYTES,
 } from '../utils/storage';
 import { PendingApprovalBadge } from './StatusIndicator';
+
+export interface VaultNewVersionPayload {
+  version: string;
+  changeNote: string;
+  sourceType: DocumentVaultSourceType;
+  expiryDate?: string;
+  url?: string;
+  fileName?: string;
+  fileSize?: number;
+  mimeType?: string;
+  fileDataUrl?: string;
+  storageBucket?: string;
+  storagePath?: string;
+  storageProvider?: 'supabase_storage' | 'cloud_metadata' | 'external_link';
+}
 
 interface DocumentVaultViewProps {
   documents: DocumentVaultItem[];
   departments: Department[];
   activeRole: Role;
   currentUser: TeamMember;
+  teamMembers?: TeamMember[];
   pendingEditorChanges?: PendingEditorChange[];
+  recycleBin?: RecycleBinItem[];
   onAddDocument: (item: DocumentVaultItem) => void;
+  onUploadNewVersion: (docId: string, versionMeta: VaultNewVersionPayload) => void;
+  onStampDocument: (docId: string) => void;
   onDeleteDocument: (itemId: string) => void;
+  onRequestSignOff?: (
+    docId: string,
+    reviewers: { email: string; name: string }[],
+    note?: string,
+  ) => void;
+  onAcknowledgeSignOff?: (docId: string, signOffId: string) => void;
+  onRestoreRecycleItem?: (binId: string) => void;
+  onPurgeRecycleItem?: (binId: string) => void;
 }
 
 const VAULT_FOLDERS: {
@@ -116,22 +156,62 @@ function isPdfMime(mime?: string, fileName?: string): boolean {
   return false;
 }
 
+function suggestNextVersion(current?: string): string {
+  const clean = (current || 'v1.0').trim().replace(/^v/i, '');
+  const parts = clean.split('.').map((p) => parseInt(p, 10));
+  if (parts.length >= 2 && Number.isFinite(parts[0]) && Number.isFinite(parts[1])) {
+    return `v${parts[0]}.${parts[1] + 1}`;
+  }
+  if (parts.length === 1 && Number.isFinite(parts[0])) {
+    return `v${parts[0] + 1}.0`;
+  }
+  return 'v1.1';
+}
+
 export function DocumentVaultView({
   documents,
   departments,
   activeRole,
   currentUser,
+  teamMembers = [],
   pendingEditorChanges = [],
+  recycleBin = [],
   onAddDocument,
+  onUploadNewVersion,
+  onStampDocument,
   onDeleteDocument,
+  onRequestSignOff,
+  onAcknowledgeSignOff,
+  onRestoreRecycleItem,
+  onPurgeRecycleItem,
 }: DocumentVaultViewProps) {
   const [selectedFolder, setSelectedFolder] = useState<'ALL' | DocumentVaultFolder>('ALL');
   const [departmentFilter, setDepartmentFilter] = useState<string>('ALL');
+  const [expiryFilter, setExpiryFilter] = useState<
+    'ALL' | 'EXPIRING_SOON' | 'EXPIRED' | 'MY_SIGNOFF'
+  >('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [previewDoc, setPreviewDoc] = useState<DocumentVaultItem | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [sessionBlobUrls, setSessionBlobUrls] = useState<Record<string, string>>({});
+  const [historyDoc, setHistoryDoc] = useState<DocumentVaultItem | null>(null);
+  const [versionTargetDoc, setVersionTargetDoc] = useState<DocumentVaultItem | null>(null);
+  const [signOffDoc, setSignOffDoc] = useState<DocumentVaultItem | null>(null);
+  const [selectedReviewerEmails, setSelectedReviewerEmails] = useState<string[]>([]);
+  const [signOffNote, setSignOffNote] = useState('');
+  const [signOffError, setSignOffError] = useState('');
+  const [showVaultBin, setShowVaultBin] = useState(false);
+
+  // New Version Form State
+  const [verTag, setVerTag] = useState('v1.1');
+  const [verNote, setVerNote] = useState('');
+  const [verSourceType, setVerSourceType] = useState<DocumentVaultSourceType>('uploaded_file');
+  const [verExpiryDate, setVerExpiryDate] = useState('');
+  const [verUrl, setVerUrl] = useState('');
+  const [verFile, setVerFile] = useState<File | null>(null);
+  const [verUploading, setVerUploading] = useState(false);
+  const [verError, setVerError] = useState('');
 
   // Add Form State
   const [title, setTitle] = useState('');
@@ -141,6 +221,7 @@ export function DocumentVaultView({
   );
   const [accessTag, setAccessTag] = useState<DocumentVaultAccessTag>('All Staff');
   const [sourceType, setSourceType] = useState<DocumentVaultSourceType>('uploaded_file');
+  const [expiryDate, setExpiryDate] = useState('');
   const [url, setUrl] = useState('');
   const [description, setDescription] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -148,6 +229,14 @@ export function DocumentVaultView({
   const [formError, setFormError] = useState('');
 
   const canManageVault = activeRole === 'Admin' || activeRole === 'Editor';
+  const isSuperAdmin = activeRole === 'Admin' && isSuperAdminEmail(currentUser.email);
+  const todayStr = getTodayDateString();
+  const currentEmailLower = currentUser.email.trim().toLowerCase();
+
+  const vaultRecycleItems = useMemo(
+    () => recycleBin.filter((item) => item.itemType === 'vault'),
+    [recycleBin],
+  );
 
   const pendingVaultEditIds = useMemo(() => {
     const set = new Set<string>();
@@ -212,11 +301,55 @@ export function DocumentVaultView({
     return counts;
   }, [visibleDocuments]);
 
+  const alertSummary = useMemo(() => {
+    let expired = 0;
+    let expiringSoon = 0;
+    let myPendingSignOffs = 0;
+    for (const doc of visibleDocuments) {
+      const info = getDocumentExpiryInfo(doc.expiryDate, todayStr);
+      if (info.status === 'expired') expired += 1;
+      else if (info.status === 'expiring_soon') expiringSoon += 1;
+      if (
+        doc.signOffRequests?.some(
+          (r) => r.status === 'Pending' && r.reviewerEmail.trim().toLowerCase() === currentEmailLower,
+        )
+      ) {
+        myPendingSignOffs += 1;
+      }
+    }
+    return { expired, expiringSoon, myPendingSignOffs };
+  }, [visibleDocuments, todayStr, currentEmailLower]);
+
+  const activeSignOffCandidates = useMemo(
+    () =>
+      teamMembers.filter(
+        (m) =>
+          m.active &&
+          (isSuperAdminEmail(m.email) || (m.approvalStatus ?? 'approved') === 'approved'),
+      ),
+    [teamMembers],
+  );
+
+  const liveSignOffDoc = useMemo(
+    () => (signOffDoc ? documents.find((d) => d.id === signOffDoc.id) ?? signOffDoc : null),
+    [signOffDoc, documents],
+  );
+
   const filteredDocuments = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return visibleDocuments.filter((doc) => {
       if (selectedFolder !== 'ALL' && doc.folder !== selectedFolder) return false;
       if (departmentFilter !== 'ALL' && doc.department !== departmentFilter) return false;
+      if (expiryFilter === 'EXPIRED') {
+        if (getDocumentExpiryInfo(doc.expiryDate, todayStr).status !== 'expired') return false;
+      } else if (expiryFilter === 'EXPIRING_SOON') {
+        if (getDocumentExpiryInfo(doc.expiryDate, todayStr).status !== 'expiring_soon') return false;
+      } else if (expiryFilter === 'MY_SIGNOFF') {
+        const hasPending = doc.signOffRequests?.some(
+          (r) => r.status === 'Pending' && r.reviewerEmail.trim().toLowerCase() === currentEmailLower,
+        );
+        if (!hasPending) return false;
+      }
       if (!q) return true;
       return (
         doc.title.toLowerCase().includes(q) ||
@@ -227,7 +360,7 @@ export function DocumentVaultView({
         (doc.fileName ?? '').toLowerCase().includes(q)
       );
     });
-  }, [visibleDocuments, selectedFolder, departmentFilter, searchQuery]);
+  }, [visibleDocuments, selectedFolder, departmentFilter, expiryFilter, todayStr, currentEmailLower, searchQuery]);
 
   const resetForm = () => {
     setTitle('');
@@ -235,6 +368,7 @@ export function DocumentVaultView({
     setDepartment(currentUser.department || departments[0] || 'Operations');
     setAccessTag('All Staff');
     setSourceType('uploaded_file');
+    setExpiryDate('');
     setUrl('');
     setDescription('');
     setSelectedFile(null);
@@ -336,6 +470,27 @@ export function DocumentVaultView({
             : 'external_link',
         uploadedBy: currentUser.name,
         uploadedByEmail: currentUser.email,
+        expiryDate: expiryDate.trim() || undefined,
+        currentVersion: 'v1.0',
+        versions: [
+          {
+            version: 'v1.0',
+            updatedAt: now,
+            updatedBy: currentUser.name,
+            updatedByEmail: currentUser.email,
+            changeNote: 'Initial release uploaded to Document Vault',
+            url: sourceType !== 'uploaded_file' ? url.trim() : uploadMeta?.url,
+            fileName: sourceType === 'uploaded_file' ? selectedFile?.name : undefined,
+            fileSize: sourceType === 'uploaded_file' ? selectedFile?.size : undefined,
+            mimeType:
+              sourceType === 'uploaded_file'
+                ? selectedFile?.type || 'application/octet-stream'
+                : undefined,
+            fileDataUrl: sourceType === 'uploaded_file' ? uploadMeta?.fileDataUrl : undefined,
+            storageBucket: uploadMeta?.storageBucket,
+            storagePath: uploadMeta?.storagePath,
+          },
+        ],
         createdAt: now,
         updatedAt: now,
       };
@@ -350,6 +505,130 @@ export function DocumentVaultView({
     }
   };
 
+  const openVersionModal = (doc: DocumentVaultItem) => {
+    setVersionTargetDoc(doc);
+    setVerTag(suggestNextVersion(doc.currentVersion));
+    setVerNote('');
+    setVerSourceType(doc.sourceType);
+    setVerExpiryDate(doc.expiryDate || '');
+    setVerUrl(doc.sourceType !== 'uploaded_file' ? doc.url || '' : '');
+    setVerFile(null);
+    setVerError('');
+    setVerUploading(false);
+  };
+
+  const openSignOffModal = (doc: DocumentVaultItem) => {
+    setSignOffDoc(doc);
+    setSelectedReviewerEmails([]);
+    setSignOffNote('');
+    setSignOffError('');
+  };
+
+  const handleSubmitSignOffRequest = (e: FormEvent) => {
+    e.preventDefault();
+    if (!liveSignOffDoc || !onRequestSignOff) return;
+    if (selectedReviewerEmails.length === 0) {
+      setSignOffError('Select at least one team member to request sign-off.');
+      return;
+    }
+    const reviewers = selectedReviewerEmails
+      .map((email) => {
+        const member = activeSignOffCandidates.find(
+          (m) => m.email.toLowerCase() === email.toLowerCase(),
+        );
+        return member ? { email: member.email, name: member.name } : null;
+      })
+      .filter((r): r is { email: string; name: string } => Boolean(r));
+
+    if (reviewers.length === 0) {
+      setSignOffError('Selected reviewers could not be resolved.');
+      return;
+    }
+    onRequestSignOff(liveSignOffDoc.id, reviewers, signOffNote.trim() || undefined);
+    setSelectedReviewerEmails([]);
+    setSignOffNote('');
+    setSignOffError('');
+  };
+
+  const handleVersionSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!versionTargetDoc || !canManageVault || verUploading) return;
+    const cleanVer = verTag.trim();
+    if (!cleanVer) {
+      setVerError('Version tag is required (e.g. v1.1 or v2.0).');
+      return;
+    }
+    if (!verNote.trim()) {
+      setVerError('Change summary note is required for version audit tracking.');
+      return;
+    }
+    if (verSourceType !== 'uploaded_file' && !verUrl.trim()) {
+      setVerError('Please provide a valid URL for this revision.');
+      return;
+    }
+    if (verSourceType === 'uploaded_file' && !verFile) {
+      setVerError('Please select an updated file to upload.');
+      return;
+    }
+    if (verSourceType === 'uploaded_file' && verFile) {
+      if (storageStats.usedBytes + verFile.size > TEN_GB_BYTES) {
+        setVerError(
+          `Quota Exceeded: File exceeds remaining 10.0 GB quota (${formatStorageSize(storageStats.remainingBytes)} free).`,
+        );
+        return;
+      }
+    }
+
+    setVerUploading(true);
+    try {
+      let uploadMeta: {
+        url?: string;
+        fileDataUrl?: string;
+        storageBucket?: string;
+        storagePath?: string;
+        storageProvider: 'supabase_storage' | 'cloud_metadata';
+      } | null = null;
+
+      if (verSourceType === 'uploaded_file' && verFile) {
+        uploadMeta = await dataService.documentVault.uploadFile(verFile, {
+          id: `${versionTargetDoc.id}-${cleanVer}`,
+          folder: versionTargetDoc.folder,
+          department: versionTargetDoc.department,
+        });
+        if (!uploadMeta.url && !uploadMeta.fileDataUrl) {
+          const objectUrl = URL.createObjectURL(verFile);
+          setSessionBlobUrls((prev) => ({ ...prev, [versionTargetDoc.id]: objectUrl }));
+        }
+      }
+
+      onUploadNewVersion(versionTargetDoc.id, {
+        version: cleanVer.startsWith('v') ? cleanVer : `v${cleanVer}`,
+        changeNote: verNote.trim(),
+        sourceType: verSourceType,
+        expiryDate: verExpiryDate.trim() || undefined,
+        url: verSourceType !== 'uploaded_file' ? verUrl.trim() : uploadMeta?.url,
+        fileName: verSourceType === 'uploaded_file' ? verFile?.name : undefined,
+        fileSize: verSourceType === 'uploaded_file' ? verFile?.size : undefined,
+        mimeType:
+          verSourceType === 'uploaded_file'
+            ? verFile?.type || 'application/octet-stream'
+            : undefined,
+        fileDataUrl: verSourceType === 'uploaded_file' ? uploadMeta?.fileDataUrl : undefined,
+        storageBucket: uploadMeta?.storageBucket,
+        storagePath: uploadMeta?.storagePath,
+        storageProvider:
+          verSourceType === 'uploaded_file'
+            ? uploadMeta?.storageProvider ?? 'cloud_metadata'
+            : 'external_link',
+      });
+      setVersionTargetDoc(null);
+    } catch (err) {
+      setVerError(err instanceof Error ? err.message : 'Failed to upload new version.');
+    } finally {
+      setVerUploading(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header & Read-Only Notice */}
@@ -359,11 +638,21 @@ export function DocumentVaultView({
             Department Document Vault
           </h2>
           <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-            Structured company repository across HR, Operations, Finance &amp; Client Contracts with role-based access tags and 10.0 GB cloud storage.
+            Structured company repository across HR, Operations, Finance &amp; Client Contracts with version history, digital approval stamps, and 10.0 GB cloud storage.
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {isSuperAdmin && vaultRecycleItems.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowVaultBin((prev) => !prev)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-100 dark:border-amber-800/70 dark:bg-amber-950/50 dark:text-amber-300"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              <span>Recycle Bin ({vaultRecycleItems.length})</span>
+            </button>
+          )}
           {!canManageVault ? (
             <span className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
               <Lock className="h-3.5 w-3.5 text-slate-500 dark:text-slate-400" />
@@ -384,6 +673,68 @@ export function DocumentVaultView({
           )}
         </div>
       </div>
+
+      {/* Super Admin Quick Vault Recycle Bin Drawer */}
+      {isSuperAdmin && showVaultBin && vaultRecycleItems.length > 0 && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-4 dark:border-amber-800/70 dark:bg-amber-950/30">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="text-xs font-bold text-amber-950 dark:text-amber-200">
+                Vault 30-Day Recycle Bin ({vaultRecycleItems.length})
+              </h3>
+              <p className="text-[11px] text-amber-800 dark:text-amber-300">
+                Soft-deleted vault files remain recoverable by Super Admin for 30 days before auto-purge.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowVaultBin(false)}
+              className="rounded-md p-1 text-amber-700 hover:bg-amber-100 dark:text-amber-300 dark:hover:bg-amber-900/50"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="mt-3 space-y-2">
+            {vaultRecycleItems.map((bin) => (
+              <div
+                key={bin.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200/80 bg-white px-3.5 py-2.5 text-xs dark:border-amber-900/60 dark:bg-slate-900"
+              >
+                <div className="min-w-0">
+                  <p className="font-semibold text-slate-900 dark:text-slate-100">{bin.title}</p>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Deleted by {bin.deletedBy} · {formatDateTime(bin.deletedAt)} ·{' '}
+                    <span className="font-semibold text-amber-700 dark:text-amber-400">
+                      {getRecycleBinDaysLeft(bin.expiresAt)} days left
+                    </span>
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {onRestoreRecycleItem && (
+                    <button
+                      type="button"
+                      onClick={() => onRestoreRecycleItem(bin.id)}
+                      className="inline-flex items-center gap-1 rounded-md bg-emerald-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-emerald-700"
+                    >
+                      <RotateCcw className="h-3 w-3" />
+                      Restore
+                    </button>
+                  )}
+                  {onPurgeRecycleItem && (
+                    <button
+                      type="button"
+                      onClick={() => onPurgeRecycleItem(bin.id)}
+                      className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-semibold text-rose-700 hover:bg-rose-100 dark:border-rose-800 dark:bg-rose-950/60 dark:text-rose-300"
+                    >
+                      Purge
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* 10.0 GB Enterprise Cloud Storage Quota Meter */}
       <div className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
@@ -499,6 +850,58 @@ export function DocumentVaultView({
         })}
       </div>
 
+      {/* Expiry & Sign-Off Alerts Strip */}
+      {(alertSummary.expired > 0 ||
+        alertSummary.expiringSoon > 0 ||
+        alertSummary.myPendingSignOffs > 0) && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-xs dark:border-amber-900/60 dark:bg-amber-950/30">
+          <div className="flex flex-wrap items-center gap-2">
+            <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+            <span className="font-bold text-amber-950 dark:text-amber-200">
+              Vault Governance Alerts:
+            </span>
+            {alertSummary.expired > 0 && (
+              <button
+                type="button"
+                onClick={() => setExpiryFilter(expiryFilter === 'EXPIRED' ? 'ALL' : 'EXPIRED')}
+                className="rounded-md border border-rose-300 bg-rose-100 px-2 py-0.5 font-semibold text-rose-800 hover:bg-rose-200 dark:border-rose-800 dark:bg-rose-950/70 dark:text-rose-200"
+              >
+                {alertSummary.expired} Expired
+              </button>
+            )}
+            {alertSummary.expiringSoon > 0 && (
+              <button
+                type="button"
+                onClick={() =>
+                  setExpiryFilter(expiryFilter === 'EXPIRING_SOON' ? 'ALL' : 'EXPIRING_SOON')
+                }
+                className="rounded-md border border-amber-300 bg-amber-100 px-2 py-0.5 font-semibold text-amber-900 hover:bg-amber-200 dark:border-amber-800 dark:bg-amber-950/70 dark:text-amber-200"
+              >
+                {alertSummary.expiringSoon} Expiring ≤ 30d
+              </button>
+            )}
+            {alertSummary.myPendingSignOffs > 0 && (
+              <button
+                type="button"
+                onClick={() => setExpiryFilter(expiryFilter === 'MY_SIGNOFF' ? 'ALL' : 'MY_SIGNOFF')}
+                className="rounded-md border border-indigo-300 bg-indigo-100 px-2 py-0.5 font-semibold text-indigo-800 hover:bg-indigo-200 dark:border-indigo-800 dark:bg-indigo-950/70 dark:text-indigo-200"
+              >
+                {alertSummary.myPendingSignOffs} Awaiting Your Sign-Off
+              </button>
+            )}
+          </div>
+          {expiryFilter !== 'ALL' && (
+            <button
+              type="button"
+              onClick={() => setExpiryFilter('ALL')}
+              className="text-[11px] font-semibold text-indigo-700 hover:underline dark:text-indigo-400"
+            >
+              Show All Documents
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Filters Bar */}
       <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between dark:border-slate-800 dark:bg-slate-900">
         <div className="flex flex-1 flex-wrap items-center gap-2.5">
@@ -537,6 +940,22 @@ export function DocumentVaultView({
                 {dept}
               </option>
             ))}
+          </select>
+
+          <select
+            aria-label="Filter by expiry or sign-off status"
+            value={expiryFilter}
+            onChange={(e) =>
+              setExpiryFilter(
+                e.target.value as 'ALL' | 'EXPIRING_SOON' | 'EXPIRED' | 'MY_SIGNOFF',
+              )
+            }
+            className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+          >
+            <option value="ALL">All Expiry &amp; Sign-Offs</option>
+            <option value="EXPIRING_SOON">Expiring Soon (≤ 30d)</option>
+            <option value="EXPIRED">Expired Only</option>
+            <option value="MY_SIGNOFF">Pending My Sign-Off</option>
           </select>
         </div>
 
@@ -610,6 +1029,14 @@ export function DocumentVaultView({
                   const isFile = doc.sourceType === 'uploaded_file';
                   const isConfirming = confirmDeleteId === doc.id;
                   const downloadSrc = resolveDownloadSource(doc);
+                  const expiryInfo = getDocumentExpiryInfo(doc.expiryDate, todayStr);
+                  const signOffList = doc.signOffRequests ?? [];
+                  const ackCount = signOffList.filter((r) => r.status === 'Acknowledged').length;
+                  const myPendingSignOff = signOffList.find(
+                    (r) =>
+                      r.status === 'Pending' &&
+                      r.reviewerEmail.trim().toLowerCase() === currentEmailLower,
+                  );
                   const canPreview =
                     Boolean(downloadSrc) &&
                     (!isFile ||
@@ -632,6 +1059,48 @@ export function DocumentVaultView({
                               <p className="font-semibold text-slate-900 dark:text-slate-100">
                                 {doc.title}
                               </p>
+                              <span className="rounded border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 font-mono text-[10px] font-bold text-indigo-700 tabular-nums dark:border-indigo-800/70 dark:bg-indigo-950/50 dark:text-indigo-300">
+                                {doc.currentVersion || 'v1.0'}
+                              </span>
+                              {expiryInfo.status !== 'none' && (
+                                <span
+                                  className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-bold ${
+                                    expiryInfo.status === 'expired'
+                                      ? 'border-rose-300 bg-rose-100 text-rose-800 dark:border-rose-800 dark:bg-rose-950/70 dark:text-rose-300'
+                                      : expiryInfo.status === 'expiring_soon'
+                                        ? 'border-amber-300 bg-amber-100 text-amber-900 dark:border-amber-800 dark:bg-amber-950/70 dark:text-amber-300'
+                                        : 'border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                                  }`}
+                                >
+                                  <CalendarClock className="h-3 w-3 shrink-0" />
+                                  <span>{expiryInfo.label}</span>
+                                </span>
+                              )}
+                              {signOffList.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => openSignOffModal(doc)}
+                                  className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-bold ${
+                                    ackCount === signOffList.length
+                                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800/70 dark:bg-emerald-950/50 dark:text-emerald-300'
+                                      : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800/70 dark:bg-amber-950/50 dark:text-amber-300'
+                                  }`}
+                                >
+                                  <UserCheck className="h-3 w-3" />
+                                  <span>
+                                    Sign-Offs {ackCount}/{signOffList.length}
+                                  </span>
+                                </button>
+                              )}
+                              {doc.approvalStamp && (
+                                <span
+                                  title={`${doc.approvalStamp.badgeLabel} (${formatDateTime(doc.approvalStamp.stampedAt)})`}
+                                  className="inline-flex items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 dark:border-emerald-800/70 dark:bg-emerald-950/50 dark:text-emerald-300"
+                                >
+                                  <BadgeCheck className="h-3 w-3" />
+                                  VERIFIED &amp; APPROVED
+                                </span>
+                              )}
                               {pendingVaultEditIds.has(doc.id) && <PendingApprovalBadge compact />}
                               {isFile && (
                                 <span className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-slate-600 tabular-nums dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
@@ -682,11 +1151,22 @@ export function DocumentVaultView({
                           {doc.uploadedBy}
                         </p>
                         <p className="font-mono text-[10px] text-slate-400 tabular-nums dark:text-slate-500">
-                          {formatDateTime(doc.createdAt || doc.updatedAt)}
+                          {formatDateTime(doc.updatedAt || doc.createdAt)}
                         </p>
                       </td>
                       <td className="px-4 py-3 text-right whitespace-nowrap">
                         <div className="inline-flex items-center gap-1.5">
+                          {myPendingSignOff && onAcknowledgeSignOff && (
+                            <button
+                              type="button"
+                              onClick={() => onAcknowledgeSignOff(doc.id, myPendingSignOff.id)}
+                              className="inline-flex items-center gap-1 rounded-md bg-emerald-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-emerald-700"
+                            >
+                              <CheckCircle2 className="h-3 w-3" />
+                              <span>Sign Off</span>
+                            </button>
+                          )}
+
                           {canPreview && (
                             <button
                               type="button"
@@ -715,6 +1195,52 @@ export function DocumentVaultView({
                             </a>
                           )}
 
+                          <button
+                            type="button"
+                            onClick={() => setHistoryDoc(doc)}
+                            title="View version history"
+                            className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                          >
+                            <History className="h-3 w-3" />
+                            <span>History ({doc.versions?.length || 1})</span>
+                          </button>
+
+                          {canManageVault && onRequestSignOff && (
+                            <button
+                              type="button"
+                              onClick={() => openSignOffModal(doc)}
+                              title="Request reviewer sign-off"
+                              className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                            >
+                              <UserCheck className="h-3 w-3 text-indigo-600 dark:text-indigo-400" />
+                              <span>Request Sign-Off</span>
+                            </button>
+                          )}
+
+                          {canManageVault && (
+                            <button
+                              type="button"
+                              onClick={() => openVersionModal(doc)}
+                              title="Upload new version"
+                              className="inline-flex items-center gap-1 rounded-md border border-indigo-200 bg-indigo-50 px-2 py-1 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100 dark:border-indigo-800/70 dark:bg-indigo-950/50 dark:text-indigo-300"
+                            >
+                              <Upload className="h-3 w-3" />
+                              <span>New Version</span>
+                            </button>
+                          )}
+
+                          {isSuperAdmin && !doc.approvalStamp && (
+                            <button
+                              type="button"
+                              onClick={() => onStampDocument(doc.id)}
+                              title="Attach Super Admin Digital Approval Stamp"
+                              className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-100 dark:border-emerald-800/70 dark:bg-emerald-950/50 dark:text-emerald-300"
+                            >
+                              <BadgeCheck className="h-3 w-3" />
+                              <span>Stamp &amp; Approve</span>
+                            </button>
+                          )}
+
                           {canManageVault &&
                             (isConfirming ? (
                               <div className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-rose-50 px-1.5 py-0.5 dark:border-rose-800 dark:bg-rose-950/60">
@@ -726,7 +1252,7 @@ export function DocumentVaultView({
                                   }}
                                   className="px-1.5 py-0.5 text-[11px] font-bold text-rose-700 hover:underline dark:text-rose-300"
                                 >
-                                  Confirm
+                                  Move to Bin
                                 </button>
                                 <button
                                   type="button"
@@ -740,7 +1266,7 @@ export function DocumentVaultView({
                               <button
                                 type="button"
                                 onClick={() => setConfirmDeleteId(doc.id)}
-                                title="Remove document from vault"
+                                title="Move document to 30-day Recycle Bin"
                                 className="inline-flex items-center justify-center rounded-md border border-slate-200 p-1.5 text-slate-400 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700 dark:border-slate-700 dark:text-slate-400 dark:hover:border-rose-800 dark:hover:bg-rose-950/50 dark:hover:text-rose-300"
                               >
                                 <Trash2 className="h-3.5 w-3.5" />
@@ -930,6 +1456,18 @@ export function DocumentVaultView({
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Expiry / Renewal Date (Optional)
+                </label>
+                <input
+                  type="date"
+                  value={expiryDate}
+                  onChange={(e) => setExpiryDate(e.target.value)}
+                  className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 font-mono text-xs text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
                   Description / Notes
                 </label>
                 <textarea
@@ -1067,6 +1605,439 @@ export function DocumentVaultView({
                     </a>
                   )}
                 </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Upload New Document Version Modal */}
+      {versionTargetDoc && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs sm:p-4 dark:bg-slate-950/75"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3.5 sm:px-5 sm:py-4 dark:border-slate-800">
+              <div className="min-w-0">
+                <h3 className="truncate font-display text-base font-bold text-slate-900 dark:text-slate-100">
+                  Upload New Version — {versionTargetDoc.title}
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Current active version: {versionTargetDoc.currentVersion || 'v1.0'} · Previous revisions remain archived in Version History
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setVersionTargetDoc(null)}
+                className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleVersionSubmit} className="flex-1 space-y-4 overflow-y-auto p-4 sm:p-5">
+              {verError && (
+                <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700 dark:border-rose-800 dark:bg-rose-950/60 dark:text-rose-300">
+                  {verError}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    New Version Tag
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={verTag}
+                    onChange={(e) => setVerTag(e.target.value)}
+                    placeholder="v1.1"
+                    className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 font-mono text-xs text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Source Type
+                  </label>
+                  <select
+                    value={verSourceType}
+                    onChange={(e) => setVerSourceType(e.target.value as DocumentVaultSourceType)}
+                    className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                  >
+                    <option value="uploaded_file">Upload File</option>
+                    <option value="google_drive">Google Drive Link</option>
+                    <option value="external_link">External URL</option>
+                  </select>
+                </div>
+              </div>
+
+              {verSourceType !== 'uploaded_file' ? (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Updated Document URL
+                  </label>
+                  <input
+                    type="url"
+                    required
+                    value={verUrl}
+                    onChange={(e) => setVerUrl(e.target.value)}
+                    placeholder="https://docs.google.com/..."
+                    className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                  />
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Select Replacement File
+                  </label>
+                  <label className="mt-1 flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-4 text-xs font-medium text-slate-600 hover:border-indigo-400 hover:bg-indigo-50/40 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300">
+                    <Upload className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                    <span className="truncate">
+                      {verFile
+                        ? `${verFile.name} (${formatStorageSize(verFile.size)})`
+                        : 'Choose updated file...'}
+                    </span>
+                    <input
+                      type="file"
+                      accept={ACCEPTED_UPLOAD_TYPES}
+                      className="sr-only"
+                      onChange={(e) => setVerFile(e.target.files?.[0] ?? null)}
+                    />
+                  </label>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Updated Expiry / Renewal Date (Optional)
+                </label>
+                <input
+                  type="date"
+                  value={verExpiryDate}
+                  onChange={(e) => setVerExpiryDate(e.target.value)}
+                  className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 font-mono text-xs text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Change Summary Note <span className="text-rose-600">*</span>
+                </label>
+                <textarea
+                  rows={2}
+                  required
+                  value={verNote}
+                  onChange={(e) => setVerNote(e.target.value)}
+                  placeholder="Describe what changed in this revision..."
+                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2.5 text-xs text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setVersionTargetDoc(null)}
+                  disabled={verUploading}
+                  className="rounded-lg border border-slate-200 px-3.5 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={verUploading}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
+                >
+                  {verUploading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  <span>Publish {verTag}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Document Version History Modal */}
+      {historyDoc && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs sm:p-4 dark:bg-slate-950/75"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-5 py-4 dark:border-slate-800">
+              <div className="min-w-0">
+                <h3 className="truncate font-display text-base font-bold text-slate-900 dark:text-slate-100">
+                  Version History — {historyDoc.title}
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Active Version: {historyDoc.currentVersion || 'v1.0'} · {historyDoc.folder}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setHistoryDoc(null)}
+                className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="flex-1 space-y-3 overflow-y-auto p-5">
+              {historyDoc.approvalStamp && (
+                <div className="flex items-center justify-between gap-2 rounded-xl border border-emerald-200 bg-emerald-50/70 px-4 py-3 text-xs dark:border-emerald-800/70 dark:bg-emerald-950/40">
+                  <div className="flex items-center gap-2 font-semibold text-emerald-800 dark:text-emerald-300">
+                    <BadgeCheck className="h-4 w-4 shrink-0" />
+                    <span>{historyDoc.approvalStamp.badgeLabel}</span>
+                  </div>
+                  <span className="font-mono text-[11px] text-emerald-700 dark:text-emerald-400">
+                    {formatDateTime(historyDoc.approvalStamp.stampedAt)}
+                  </span>
+                </div>
+              )}
+
+              {(historyDoc.versions && historyDoc.versions.length > 0
+                ? [...historyDoc.versions].reverse()
+                : [
+                    {
+                      version: historyDoc.currentVersion || 'v1.0',
+                      updatedAt: historyDoc.updatedAt || historyDoc.createdAt,
+                      updatedBy: historyDoc.uploadedBy,
+                      updatedByEmail: historyDoc.uploadedByEmail,
+                      changeNote: 'Initial document upload',
+                      url: historyDoc.url,
+                      fileName: historyDoc.fileName,
+                      fileSize: historyDoc.fileSize,
+                      fileDataUrl: historyDoc.fileDataUrl,
+                    },
+                  ]
+              ).map((entry, idx) => {
+                const entryHref = entry.fileDataUrl || entry.url;
+                return (
+                  <div
+                    key={`${entry.version}-${entry.updatedAt}-${idx}`}
+                    className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-950/60"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="rounded border border-indigo-200 bg-indigo-50 px-2 py-0.5 font-mono text-xs font-bold text-indigo-700 dark:border-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300">
+                          {entry.version}
+                        </span>
+                        {idx === 0 && (
+                          <span className="rounded bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300">
+                            Active Release
+                          </span>
+                        )}
+                        <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                          {entry.updatedBy}
+                        </span>
+                      </div>
+                      <span className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                        {formatDateTime(entry.updatedAt)}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-xs text-slate-700 dark:text-slate-300">
+                      {entry.changeNote}
+                    </p>
+                    <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                        {entry.fileName
+                          ? `${entry.fileName}${entry.fileSize ? ` (${formatStorageSize(entry.fileSize)})` : ''}`
+                          : entry.url || 'Vault revision'}
+                      </span>
+                      {entryHref && (
+                        <a
+                          href={entryHref}
+                          download={entry.fileName || undefined}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-50 dark:border-slate-700 dark:bg-slate-800 dark:text-indigo-300"
+                        >
+                          <Download className="h-3 w-3" />
+                          Open Revision
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sign-Off Requests Modal */}
+      {liveSignOffDoc && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs sm:p-4 dark:bg-slate-950/75"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="flex max-h-[90vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-5 py-4 dark:border-slate-800">
+              <div className="min-w-0">
+                <h3 className="truncate font-display text-base font-bold text-slate-900 dark:text-slate-100">
+                  Document Sign-Offs — {liveSignOffDoc.title}
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Track reviewer acknowledgments and request official document sign-off
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSignOffDoc(null)}
+                className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 space-y-4 overflow-y-auto p-5">
+              {/* Sign-Off History */}
+              <div>
+                <p className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                  Sign-Off Status ({liveSignOffDoc.signOffRequests?.length ?? 0})
+                </p>
+                {!liveSignOffDoc.signOffRequests || liveSignOffDoc.signOffRequests.length === 0 ? (
+                  <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
+                    No sign-off requests sent for this document yet.
+                  </p>
+                ) : (
+                  <div className="mt-2 space-y-2">
+                    {liveSignOffDoc.signOffRequests.map((req) => {
+                      const isMyPending =
+                        req.status === 'Pending' &&
+                        req.reviewerEmail.trim().toLowerCase() === currentEmailLower;
+                      return (
+                        <div
+                          key={req.id}
+                          className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50/70 px-3.5 py-2.5 text-xs dark:border-slate-800 dark:bg-slate-950/60"
+                        >
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="font-bold text-slate-900 dark:text-slate-100">
+                                {req.reviewerName}
+                              </span>
+                              <span
+                                className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-bold ${
+                                  req.status === 'Acknowledged'
+                                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800/70 dark:bg-emerald-950/50 dark:text-emerald-300'
+                                    : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800/70 dark:bg-amber-950/50 dark:text-amber-300'
+                                }`}
+                              >
+                                {req.status === 'Acknowledged' ? (
+                                  <CheckCircle2 className="h-3 w-3" />
+                                ) : (
+                                  <Clock className="h-3 w-3" />
+                                )}
+                                <span>
+                                  {req.status === 'Acknowledged' ? 'Signed Off' : 'Pending'}
+                                </span>
+                              </span>
+                            </div>
+                            <p className="mt-0.5 font-mono text-[10px] text-slate-500 dark:text-slate-400">
+                              Requested by {req.requestedBy} · {formatDateTime(req.requestedAt)}
+                              {req.signedOffAt
+                                ? ` · Signed ${formatDateTime(req.signedOffAt)}`
+                                : ''}
+                            </p>
+                            {req.note && (
+                              <p className="mt-1 text-[11px] text-slate-600 dark:text-slate-300">
+                                Note: {req.note}
+                              </p>
+                            )}
+                          </div>
+                          {isMyPending && onAcknowledgeSignOff && (
+                            <button
+                              type="button"
+                              onClick={() => onAcknowledgeSignOff(liveSignOffDoc.id, req.id)}
+                              className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-700"
+                            >
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                              <span>Sign Off Now</span>
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Request New Sign-Off Form */}
+              {canManageVault && onRequestSignOff && (
+                <form
+                  onSubmit={handleSubmitSignOffRequest}
+                  className="space-y-3 border-t border-slate-200 pt-4 dark:border-slate-800"
+                >
+                  <p className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                    Request Reviewer Sign-Off
+                  </p>
+                  {signOffError && (
+                    <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700 dark:border-rose-800 dark:bg-rose-950/60 dark:text-rose-300">
+                      {signOffError}
+                    </div>
+                  )}
+                  <div className="grid max-h-40 grid-cols-1 gap-1.5 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50/50 p-2.5 sm:grid-cols-2 dark:border-slate-800 dark:bg-slate-950/50">
+                    {activeSignOffCandidates.map((member) => {
+                      const checked = selectedReviewerEmails.includes(member.email);
+                      return (
+                        <label
+                          key={member.id}
+                          className={`flex cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs transition-colors ${
+                            checked
+                              ? 'border-indigo-500 bg-indigo-50 text-indigo-900 dark:border-indigo-500 dark:bg-indigo-950/50 dark:text-indigo-200'
+                              : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(e) => {
+                              setSignOffError('');
+                              setSelectedReviewerEmails((prev) =>
+                                e.target.checked
+                                  ? [...prev, member.email]
+                                  : prev.filter((em) => em !== member.email),
+                              );
+                            }}
+                            className="h-3.5 w-3.5 rounded border-slate-300 text-indigo-600"
+                          />
+                          <span className="min-w-0 flex-1 truncate font-semibold">
+                            {member.name}
+                          </span>
+                          <span className="shrink-0 text-[10px] text-slate-500 dark:text-slate-400">
+                            {member.department}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <input
+                    type="text"
+                    value={signOffNote}
+                    onChange={(e) => setSignOffNote(e.target.value)}
+                    placeholder="Optional review note (e.g., Please acknowledge updated SLA policy)..."
+                    className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                  />
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setSignOffDoc(null)}
+                      className="rounded-lg border border-slate-200 px-3.5 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                    >
+                      Close
+                    </button>
+                    <button
+                      type="submit"
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 dark:bg-indigo-600 dark:hover:bg-indigo-700"
+                    >
+                      <UserCheck className="h-3.5 w-3.5" />
+                      <span>Send Sign-Off Request</span>
+                    </button>
+                  </div>
+                </form>
               )}
             </div>
           </div>

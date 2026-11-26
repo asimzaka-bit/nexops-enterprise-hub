@@ -3,25 +3,39 @@ import {
   ApprovalStatus,
   AttendanceLog,
   AuditEvent,
+  CalendarEvent,
+  CompanyAnnouncement,
   CompanyAsset,
+  CorporateMailMessage,
   CurrencyCode,
+  DEFAULT_SHIFT_CONFIG,
   DEFAULT_SLA_POLICY,
   DEFAULT_USER_PREFERENCES,
   DbAccessRole,
+  DepartmentShiftConfig,
   DocumentVaultItem,
   FontStyleOption,
+  LeaveRequest,
+  MeetingActionItem,
+  MeetingActionStatus,
+  MeetingMinute,
+  NavSection,
   NexOpsState,
   OperationalRequest,
   PermissionKey,
   PermissionMatrix,
   Priority,
+  QuickBookmark,
+  RecycleBinItem,
   RequestStatus,
   Role,
   SlaPolicyConfig,
+  TeamChatMessage,
   TeamMember,
   TemperatureUnit,
   TextScaleOption,
   UserPreferences,
+  WorkspaceEmailLog,
 } from '../types/nexops';
 
 export const SUPER_ADMIN_EMAIL = 'hassanzaka018@gmail.com';
@@ -709,7 +723,8 @@ export function exportAuditLogsCsv(logs: AuditEvent[]): void {
     'Target Request ID',
     'Details',
   ];
-  const rows = logs.map((log) => [
+  const safeLogs = logs.filter((ev) => !isPrivateCommsAuditEvent(ev));
+  const rows = safeLogs.map((log) => [
     escapeCell(log.id),
     escapeCell(log.timestamp),
     escapeCell(log.actorName),
@@ -1040,11 +1055,21 @@ export interface NexOpsBackupEnvelope {
 }
 
 export function downloadSystemBackupJson(state: NexOpsState, exportedBy: string): void {
+  const redactedState: NexOpsState = {
+    ...state,
+    corporateMails: [],
+    chatMessages: [],
+    workspaceEmails: [],
+    globalAuditLogs: Array.isArray(state.globalAuditLogs)
+      ? state.globalAuditLogs.filter((ev) => !isPrivateCommsAuditEvent(ev))
+      : [],
+  };
+
   const payload: NexOpsBackupEnvelope = {
     schemaVersion: 'nexops-backup-v1',
     exportedAt: new Date().toISOString(),
     exportedBy,
-    state,
+    state: redactedState,
   };
 
   const json = JSON.stringify(payload, null, 2);
@@ -1202,11 +1227,13 @@ export function parseSystemBackupJson(rawText: string): NexOpsState {
         }))
       : [],
     meetings: Array.isArray(rawState.meetings) ? rawState.meetings : [],
-    workspaceEmails: Array.isArray(rawState.workspaceEmails) ? rawState.workspaceEmails : [],
+    workspaceEmails: [],
     workspaceLinks: Array.isArray(rawState.workspaceLinks) ? rawState.workspaceLinks : [],
     teamMembers: normalizedMembers,
     globalAuditLogs: Array.isArray(rawState.globalAuditLogs)
-      ? rawState.globalAuditLogs.map((a) => ({ ...a, actorRole: normalizeRole(a.actorRole) }))
+      ? rawState.globalAuditLogs
+          .map((a) => ({ ...a, actorRole: normalizeRole(a.actorRole) }))
+          .filter((a) => !isPrivateCommsAuditEvent(a))
       : [],
     notifications: Array.isArray(rawState.notifications) ? rawState.notifications : [],
     subtasks: Array.isArray(rawState.subtasks) ? rawState.subtasks : [],
@@ -1215,9 +1242,12 @@ export function parseSystemBackupJson(rawText: string): NexOpsState {
     pendingEditorChanges: Array.isArray(rawState.pendingEditorChanges)
       ? rawState.pendingEditorChanges
       : [],
-    corporateMails: Array.isArray(rawState.corporateMails) ? rawState.corporateMails : [],
-    chatMessages: Array.isArray(rawState.chatMessages) ? rawState.chatMessages : [],
+    corporateMails: [],
+    chatMessages: [],
     calendarEvents: Array.isArray(rawState.calendarEvents) ? rawState.calendarEvents : [],
+    recycleBin: pruneExpiredRecycleBin(
+      Array.isArray(rawState.recycleBin) ? rawState.recycleBin : [],
+    ),
     permissionMatrix: normalizePermissionMatrix(rawState.permissionMatrix),
   };
 }
@@ -1553,3 +1583,903 @@ export function formatTemperatureValue(tempC: number, unit: TemperatureUnit): nu
   }
   return Math.round(tempC);
 }
+
+// ---------------------------------------------------------------------------
+// Security Hardening, Password Complexity, Log Masking & Isolation Helpers
+// ---------------------------------------------------------------------------
+
+export function validateStrongPassword(password: string): {
+  valid: boolean;
+  error?: string;
+  hasMinLength: boolean;
+  hasLetter: boolean;
+  hasNumber: boolean;
+} {
+  const trimmed = password.trim();
+  const hasMinLength = trimmed.length >= 8;
+  const hasLetter = /[a-zA-Z]/.test(password);
+  const hasNumber = /\d/.test(password);
+
+  if (!hasMinLength) {
+    return {
+      valid: false,
+      error: 'Password must be at least 8 characters long.',
+      hasMinLength,
+      hasLetter,
+      hasNumber,
+    };
+  }
+  if (!hasLetter || !hasNumber) {
+    return {
+      valid: false,
+      error: 'Password must include at least 1 letter and 1 number.',
+      hasMinLength,
+      hasLetter,
+      hasNumber,
+    };
+  }
+  return { valid: true, hasMinLength, hasLetter, hasNumber };
+}
+
+export function evaluatePasswordStrength(pw: string): {
+  score: number;
+  label: 'Weak' | 'Fair' | 'Good' | 'Strong';
+  barClass: string;
+  textClass: string;
+} {
+  const check = validateStrongPassword(pw);
+  if (!check.hasMinLength || !check.hasLetter || !check.hasNumber) {
+    return {
+      score: 1,
+      label: 'Weak',
+      barClass: 'w-1/4 bg-rose-500',
+      textClass: 'text-rose-600 dark:text-rose-400',
+    };
+  }
+  let variety = 0;
+  if (/[a-z]/.test(pw)) variety += 1;
+  if (/[A-Z]/.test(pw)) variety += 1;
+  if (/\d/.test(pw)) variety += 1;
+  if (/[^a-zA-Z0-9]/.test(pw)) variety += 1;
+
+  if (pw.length >= 12 && variety >= 3) {
+    return {
+      score: 4,
+      label: 'Strong',
+      barClass: 'w-full bg-emerald-600',
+      textClass: 'text-emerald-700 dark:text-emerald-400',
+    };
+  }
+  if (pw.length >= 10 || variety >= 3) {
+    return {
+      score: 3,
+      label: 'Good',
+      barClass: 'w-3/4 bg-indigo-600',
+      textClass: 'text-indigo-700 dark:text-indigo-400',
+    };
+  }
+  return {
+    score: 2,
+    label: 'Fair',
+    barClass: 'w-1/2 bg-amber-500',
+    textClass: 'text-amber-700 dark:text-amber-400',
+  };
+}
+
+export function maskEmailForLog(email?: string | null): string {
+  const raw = (email ?? '').trim();
+  if (!raw || !raw.includes('@')) return raw;
+  const atIdx = raw.indexOf('@');
+  const local = raw.slice(0, atIdx);
+  const domain = raw.slice(atIdx + 1);
+  if (local.length <= 2) {
+    return `${local[0] ?? '*'}***@${domain}`;
+  }
+  return `${local.slice(0, 2)}***@${domain}`;
+}
+
+export function maskSensitiveIdentifiers(text?: string | null): string {
+  if (!text) return '';
+  return text
+    .replace(/\b([a-zA-Z0-9._%+-]+)@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\b/g, (full) =>
+      maskEmailForLog(full),
+    )
+    .replace(/\b(Bearer\s+)[A-Za-z0-9._-]{8,}\b/gi, '$1***')
+    .replace(/\b((?:api[_-]?key|token|secret|password)\s*[:=]\s*)[^\s,;)]+/gi, '$1***');
+}
+
+export function sanitizePostgrestEmailFilter(email?: string | null): string | null {
+  const clean = (email ?? '').trim().toLowerCase();
+  if (!clean) return null;
+  if (!/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(clean)) {
+    return null;
+  }
+  return clean;
+}
+
+export function extractDmPeerEmail(roomId: string, senderOrSelfEmail?: string | null): string | undefined {
+  if (!roomId.startsWith('dm:')) return undefined;
+  const participants = roomId
+    .slice(3)
+    .split('|')
+    .map((p) => p.trim().toLowerCase())
+    .filter(Boolean);
+  if (participants.length === 0) return undefined;
+  const cleanSelf = (senderOrSelfEmail ?? '').trim().toLowerCase();
+  if (!cleanSelf) return participants[0];
+  const other = participants.find((p) => p !== cleanSelf);
+  return other ?? (participants.length === 2 ? participants[0] : undefined);
+}
+
+export function normalizePrivateChatMessage(msg: TeamChatMessage): TeamChatMessage {
+  const senderLower = (msg.senderEmail ?? '').trim().toLowerCase();
+  const isDm = msg.roomType === 'dm' || msg.roomId.startsWith('dm:');
+  if (!isDm) {
+    return {
+      ...msg,
+      senderEmail: senderLower || msg.senderEmail,
+    };
+  }
+  const explicitReceiver = (msg.receiverEmail ?? '').trim().toLowerCase();
+  const derivedReceiver = explicitReceiver || extractDmPeerEmail(msg.roomId, senderLower) || '';
+  return {
+    ...msg,
+    roomType: 'dm',
+    senderEmail: senderLower || msg.senderEmail,
+    receiverEmail: derivedReceiver || undefined,
+  };
+}
+
+export function isDmParticipant(roomId: string, userEmail?: string | null): boolean {
+  const cleanEmail = (userEmail ?? '').trim().toLowerCase();
+  if (!cleanEmail || !roomId.startsWith('dm:')) return false;
+  const participants = roomId
+    .slice(3)
+    .split('|')
+    .map((p) => p.trim().toLowerCase())
+    .filter(Boolean);
+  return participants.includes(cleanEmail);
+}
+
+export function isStrictChatParticipant(
+  msg: Pick<TeamChatMessage, 'roomId' | 'roomType' | 'senderEmail' | 'receiverEmail'>,
+  userEmail?: string | null,
+): boolean {
+  const selfLower = (userEmail ?? '').trim().toLowerCase();
+  if (!selfLower) return false;
+
+  const isDm = msg.roomType === 'dm' || msg.roomId.startsWith('dm:');
+  if (!isDm) {
+    return true;
+  }
+
+  const senderLower = (msg.senderEmail ?? '').trim().toLowerCase();
+  const explicitReceiver = (msg.receiverEmail ?? '').trim().toLowerCase();
+  const receiverLower = explicitReceiver || extractDmPeerEmail(msg.roomId, senderLower) || '';
+
+  if (senderLower === selfLower || (Boolean(receiverLower) && receiverLower === selfLower)) {
+    // Also verify roomId participants if dm: prefix is used
+    if (msg.roomId.startsWith('dm:')) {
+      return isDmParticipant(msg.roomId, selfLower);
+    }
+    return true;
+  }
+  return false;
+}
+
+export function isStrictMailParticipant(
+  mail: Pick<CorporateMailMessage, 'fromEmail' | 'receiverEmail' | 'toEmails' | 'ccEmails' | 'status'>,
+  userEmail?: string | null,
+): boolean {
+  const selfLower = (userEmail ?? '').trim().toLowerCase();
+  if (!selfLower) return false;
+  const fromLower = (mail.fromEmail ?? '').trim().toLowerCase();
+  if (mail.status === 'draft') {
+    return fromLower === selfLower;
+  }
+  if (fromLower === selfLower) return true;
+  const directReceiver = (mail.receiverEmail ?? '').trim().toLowerCase();
+  if (directReceiver && directReceiver === selfLower) return true;
+  const toList = Array.isArray(mail.toEmails)
+    ? mail.toEmails.map((e) => e.trim().toLowerCase()).filter(Boolean)
+    : [];
+  const ccList = Array.isArray(mail.ccEmails)
+    ? mail.ccEmails.map((e) => e.trim().toLowerCase()).filter(Boolean)
+    : [];
+  return toList.includes(selfLower) || ccList.includes(selfLower);
+}
+
+export function isStrictMailRecipient(
+  mail: Pick<CorporateMailMessage, 'receiverEmail' | 'toEmails' | 'ccEmails' | 'status'>,
+  userEmail?: string | null,
+): boolean {
+  const selfLower = (userEmail ?? '').trim().toLowerCase();
+  if (!selfLower || mail.status !== 'sent') return false;
+  const directReceiver = (mail.receiverEmail ?? '').trim().toLowerCase();
+  if (directReceiver && directReceiver === selfLower) return true;
+  const toList = Array.isArray(mail.toEmails)
+    ? mail.toEmails.map((e) => e.trim().toLowerCase()).filter(Boolean)
+    : [];
+  const ccList = Array.isArray(mail.ccEmails)
+    ? mail.ccEmails.map((e) => e.trim().toLowerCase()).filter(Boolean)
+    : [];
+  return toList.includes(selfLower) || ccList.includes(selfLower);
+}
+
+export function isStrictWorkspaceEmailParticipant(
+  emailLog: Pick<WorkspaceEmailLog, 'senderEmail' | 'toRecipients' | 'ccRecipients'>,
+  userEmail?: string | null,
+): boolean {
+  const selfLower = (userEmail ?? '').trim().toLowerCase();
+  if (!selfLower) return false;
+  if ((emailLog.senderEmail ?? '').trim().toLowerCase() === selfLower) {
+    return true;
+  }
+  const parseRecipients = (raw?: string): string[] =>
+    (raw ?? '')
+      .split(/[,\n;<>]+/)
+      .map((part) => part.trim().toLowerCase())
+      .filter((part) => part.includes('@'));
+  const toList = parseRecipients(emailLog.toRecipients);
+  const ccList = parseRecipients(emailLog.ccRecipients);
+  return toList.includes(selfLower) || ccList.includes(selfLower);
+}
+
+export function isPrivateCommsAuditEvent(ev?: Partial<AuditEvent> | null): boolean {
+  if (!ev) return false;
+  const action = String(ev.actionType ?? '').trim().toLowerCase();
+  const reqId = String(ev.requestId ?? '').trim().toUpperCase();
+  const details = String(ev.details ?? '').trim().toLowerCase();
+  if (action === 'mail sent') return true;
+  if (
+    reqId === 'MAIL-HUB' ||
+    reqId === 'WORKSPACE-GMAIL' ||
+    reqId.startsWith('MAIL-') ||
+    reqId.startsWith('CHAT-')
+  ) {
+    return true;
+  }
+  if (
+    details.includes('sent corporate email') ||
+    details.includes('sent email "') ||
+    details.includes('1:1 google meet')
+  ) {
+    return true;
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------------------
+// 24h SLA Overdue Helpers, 30-Day Recycle Bin & Filtered Executive CSV
+// ---------------------------------------------------------------------------
+
+export function isLeavePendingOver24h(leave: LeaveRequest, nowMs: number = Date.now()): boolean {
+  if (leave.status !== 'Pending') return false;
+  const createdMs = new Date(leave.createdAt).getTime();
+  if (Number.isNaN(createdMs)) return false;
+  return nowMs - createdMs >= 24 * 60 * 60 * 1000;
+}
+
+export const RECYCLE_BIN_RETENTION_DAYS = 30;
+
+export function createRecycleBinExpiry(deletedAtIso: string): string {
+  const baseMs = new Date(deletedAtIso).getTime();
+  const safeBase = Number.isNaN(baseMs) ? Date.now() : baseMs;
+  return new Date(safeBase + RECYCLE_BIN_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+}
+
+export function getRecycleBinDaysLeft(expiresAtIso: string, nowMs: number = Date.now()): number {
+  const expMs = new Date(expiresAtIso).getTime();
+  if (Number.isNaN(expMs)) return RECYCLE_BIN_RETENTION_DAYS;
+  const remaining = Math.ceil((expMs - nowMs) / (24 * 60 * 60 * 1000));
+  return Math.max(0, remaining);
+}
+
+export function pruneExpiredRecycleBin(
+  items: RecycleBinItem[],
+  nowMs: number = Date.now(),
+): RecycleBinItem[] {
+  if (!Array.isArray(items)) return [];
+  return items.filter((item) => {
+    if (!item || !item.id || !item.itemId) return false;
+    const expMs = new Date(item.expiresAt).getTime();
+    if (Number.isNaN(expMs)) return true;
+    return expMs > nowMs;
+  });
+}
+
+export function exportFilteredExecutiveReportCsv(params: {
+  companyName: string;
+  departmentFilter: string;
+  fromDate: string;
+  toDate: string;
+  preparedBy: string;
+  requests: OperationalRequest[];
+  attendanceLogs: AttendanceLog[];
+}): void {
+  const headers = [
+    'Request ID',
+    'Title',
+    'Department',
+    'Category',
+    'Priority',
+    'Status',
+    'Submitted By',
+    'Assigned Reviewer',
+    'Created Date',
+    'Due Date',
+    'QA Verified',
+    'QA Total',
+  ];
+
+  const metaHeader = [
+    [
+      escapeCsvCell(`${params.companyName} — Official Executive Report`),
+      escapeCsvCell(`Department: ${params.departmentFilter}`),
+      escapeCsvCell(`Range: ${params.fromDate || 'All'} to ${params.toDate || 'Present'}`),
+      escapeCsvCell(`Prepared by: ${params.preparedBy}`),
+      escapeCsvCell(`Attendance Records in Scope: ${params.attendanceLogs.length}`),
+    ],
+    [],
+    headers,
+  ];
+
+  const rows = params.requests.map((req) => [
+    escapeCsvCell(req.id),
+    escapeCsvCell(req.title),
+    escapeCsvCell(req.department),
+    escapeCsvCell(req.category),
+    escapeCsvCell(req.priority),
+    escapeCsvCell(req.status),
+    escapeCsvCell(req.submittedBy),
+    escapeCsvCell(req.assignedReviewer),
+    escapeCsvCell(req.createdAt.slice(0, 10)),
+    escapeCsvCell(req.dueDate),
+    escapeCsvCell(String(req.checklist.filter((c) => c.checked).length)),
+    escapeCsvCell(String(req.checklist.length)),
+  ]);
+
+  const csvContent = [...metaHeader, ...rows].map((r) => r.join(',')).join('\r\n');
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  const dateStamp = getTodayDateString();
+  link.href = url;
+  link.setAttribute('download', `nexops-official-report-${dateStamp}.csv`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+// ---------------------------------------------------------------------------
+// 1. Shift Roster & Punctuality Score Helpers
+// ---------------------------------------------------------------------------
+
+export function normalizeTimeHHMM(raw: unknown, fallback: string): string {
+  if (typeof raw !== 'string') return fallback;
+  const trimmed = raw.trim();
+  const match = trimmed.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
+  if (!match) return fallback;
+  return `${match[1].padStart(2, '0')}:${match[2]}`;
+}
+
+export function normalizeShiftRosters(
+  raw: unknown,
+  departments: string[] = [],
+): Record<string, DepartmentShiftConfig> {
+  const result: Record<string, DepartmentShiftConfig> = {};
+  const source = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  const allDepts = Array.from(new Set([...departments, ...Object.keys(source)])).filter(Boolean);
+
+  for (const dept of allDepts) {
+    const entry = source[dept];
+    const obj = entry && typeof entry === 'object' ? (entry as Partial<DepartmentShiftConfig>) : {};
+    const graceRaw = Number(obj.graceMinutes);
+    const graceMinutes =
+      Number.isFinite(graceRaw) && graceRaw >= 0 && graceRaw <= 180
+        ? Math.round(graceRaw)
+        : DEFAULT_SHIFT_CONFIG.graceMinutes;
+
+    result[dept] = {
+      department: dept,
+      startTime: normalizeTimeHHMM(obj.startTime, DEFAULT_SHIFT_CONFIG.startTime),
+      endTime: normalizeTimeHHMM(obj.endTime, DEFAULT_SHIFT_CONFIG.endTime),
+      graceMinutes,
+    };
+  }
+  return result;
+}
+
+export function getShiftForDepartment(
+  department: string,
+  shiftRosters?: Record<string, DepartmentShiftConfig>,
+): DepartmentShiftConfig {
+  const found = shiftRosters?.[department];
+  if (found) {
+    return {
+      department,
+      startTime: normalizeTimeHHMM(found.startTime, DEFAULT_SHIFT_CONFIG.startTime),
+      endTime: normalizeTimeHHMM(found.endTime, DEFAULT_SHIFT_CONFIG.endTime),
+      graceMinutes:
+        typeof found.graceMinutes === 'number' && Number.isFinite(found.graceMinutes)
+          ? Math.max(0, Math.min(180, Math.round(found.graceMinutes)))
+          : DEFAULT_SHIFT_CONFIG.graceMinutes,
+    };
+  }
+  return {
+    department,
+    ...DEFAULT_SHIFT_CONFIG,
+  };
+}
+
+export function formatTime12hFromHHMM(time24: string): string {
+  const normalized = normalizeTimeHHMM(time24, '09:00');
+  const [hStr, mStr] = normalized.split(':');
+  const h = Number(hStr);
+  const period = h >= 12 ? 'PM' : 'AM';
+  const hour12 = h % 12 === 0 ? 12 : h % 12;
+  return `${String(hour12).padStart(2, '0')}:${mStr} ${period}`;
+}
+
+function toMinutesFromHHMM(time24: string): number {
+  const normalized = normalizeTimeHHMM(time24, '09:00');
+  const [h, m] = normalized.split(':').map(Number);
+  return h * 60 + m;
+}
+
+function getLocalMinutesFromIso(iso?: string): number | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.getHours() * 60 + d.getMinutes();
+}
+
+export function evaluateAttendanceTags(
+  log: Pick<
+    AttendanceLog,
+    'checkInTime' | 'checkOutTime' | 'status' | 'checkInTag' | 'checkOutTag' | 'shiftStartTime' | 'shiftEndTime'
+  >,
+  shift: DepartmentShiftConfig,
+): {
+  checkInTag: 'On Time' | 'Late';
+  checkOutTag?: 'On Time' | 'Early Out';
+  shiftStartTime: string;
+  shiftEndTime: string;
+} {
+  const shiftStartTime = log.shiftStartTime || shift.startTime;
+  const shiftEndTime = log.shiftEndTime || shift.endTime;
+
+  let checkInTag: 'On Time' | 'Late';
+  if (log.checkInTag) {
+    checkInTag = log.checkInTag;
+  } else {
+    const inMins = getLocalMinutesFromIso(log.checkInTime);
+    if (inMins !== null) {
+      const cutoffMins = toMinutesFromHHMM(shiftStartTime) + shift.graceMinutes;
+      checkInTag = inMins > cutoffMins ? 'Late' : 'On Time';
+    } else {
+      checkInTag = log.status === 'Late' ? 'Late' : 'On Time';
+    }
+  }
+
+  let checkOutTag: 'On Time' | 'Early Out' | undefined = log.checkOutTag;
+  if (!checkOutTag && log.checkOutTime) {
+    const outMins = getLocalMinutesFromIso(log.checkOutTime);
+    if (outMins !== null) {
+      const endMins = toMinutesFromHHMM(shiftEndTime);
+      checkOutTag = outMins < endMins ? 'Early Out' : 'On Time';
+    }
+  }
+
+  return {
+    checkInTag,
+    checkOutTag,
+    shiftStartTime,
+    shiftEndTime,
+  };
+}
+
+export interface PunctualityStats {
+  score: number;
+  totalCount: number;
+  onTimeCount: number;
+  lateCount: number;
+  earlyOutCount: number;
+}
+
+export function calculatePunctualityStats(
+  logs: AttendanceLog[],
+  shiftRosters?: Record<string, DepartmentShiftConfig>,
+): PunctualityStats {
+  if (logs.length === 0) {
+    return { score: 100, totalCount: 0, onTimeCount: 0, lateCount: 0, earlyOutCount: 0 };
+  }
+  let onTimeCount = 0;
+  let lateCount = 0;
+  let earlyOutCount = 0;
+  for (const log of logs) {
+    const shift = getShiftForDepartment(log.department, shiftRosters);
+    const evaluated = evaluateAttendanceTags(log, shift);
+    if (evaluated.checkInTag === 'On Time') {
+      onTimeCount += 1;
+    } else {
+      lateCount += 1;
+    }
+    if (evaluated.checkOutTag === 'Early Out') {
+      earlyOutCount += 1;
+    }
+  }
+  const score = Math.round((onTimeCount / logs.length) * 100);
+  return {
+    score,
+    totalCount: logs.length,
+    onTimeCount,
+    lateCount,
+    earlyOutCount,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 2. Meeting Action Items Tracker Helpers
+// ---------------------------------------------------------------------------
+
+export function normalizeActionItemStatus(
+  status: MeetingActionStatus,
+): 'Todo' | 'In Progress' | 'Done' | 'Converted to Request' {
+  if (status === 'Open' || status === 'Todo') return 'Todo';
+  if (status === 'In Progress') return 'In Progress';
+  if (status === 'Done' || status === 'Completed') return 'Done';
+  return 'Converted to Request';
+}
+
+export function getNextActionTrackerStatus(
+  status: MeetingActionStatus,
+): 'Todo' | 'In Progress' | 'Done' {
+  const norm = normalizeActionItemStatus(status);
+  if (norm === 'Todo') return 'In Progress';
+  if (norm === 'In Progress') return 'Done';
+  return 'Todo';
+}
+
+export function isActionItemOpen(status: MeetingActionStatus): boolean {
+  const norm = normalizeActionItemStatus(status);
+  return norm === 'Todo' || norm === 'In Progress';
+}
+
+export function isActionItemOverdue(
+  item: Pick<MeetingActionItem, 'dueDate' | 'status'>,
+  todayStr: string = getTodayDateString(),
+): boolean {
+  if (!item.dueDate) return false;
+  const norm = normalizeActionItemStatus(item.status);
+  if (norm === 'Done') return false;
+  return item.dueDate.slice(0, 10) < todayStr;
+}
+
+// ---------------------------------------------------------------------------
+// 3. Document Expiry Alerts Helpers
+// ---------------------------------------------------------------------------
+
+export interface DocumentExpiryInfo {
+  status: 'none' | 'valid' | 'expiring_soon' | 'expired';
+  daysLeft: number;
+  label: string;
+}
+
+export function getDocumentExpiryInfo(
+  expiryDate?: string,
+  todayStr: string = getTodayDateString(),
+): DocumentExpiryInfo {
+  const clean = (expiryDate ?? '').trim().slice(0, 10);
+  if (!clean) {
+    return { status: 'none', daysLeft: 0, label: 'No Expiry' };
+  }
+  const expMs = new Date(`${clean}T00:00:00`).getTime();
+  const todayMs = new Date(`${todayStr}T00:00:00`).getTime();
+  if (Number.isNaN(expMs) || Number.isNaN(todayMs)) {
+    return { status: 'none', daysLeft: 0, label: 'No Expiry' };
+  }
+  const daysLeft = Math.round((expMs - todayMs) / (1000 * 60 * 60 * 24));
+  if (daysLeft < 0) {
+    const overdueDays = Math.abs(daysLeft);
+    return {
+      status: 'expired',
+      daysLeft,
+      label: `Expired ${overdueDays}d ago`,
+    };
+  }
+  if (daysLeft === 0) {
+    return {
+      status: 'expiring_soon',
+      daysLeft: 0,
+      label: 'Expires Today',
+    };
+  }
+  if (daysLeft <= 30) {
+    return {
+      status: 'expiring_soon',
+      daysLeft,
+      label: `Expiring in ${daysLeft}d`,
+    };
+  }
+  return {
+    status: 'valid',
+    daysLeft,
+    label: `Expires ${formatShortDate(clean)}`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 4. Safe External URL Validation & Calendar Conflict Detection
+// ---------------------------------------------------------------------------
+
+export function sanitizeExternalHttpUrl(rawUrl?: string | null): string | null {
+  const raw = (rawUrl ?? '').trim();
+  if (!raw) return null;
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+      return parsed.toString();
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export interface CalendarConflictItem {
+  id: string;
+  title: string;
+  time: string;
+  source: 'calendar' | 'meeting';
+  reasons: string[];
+}
+
+export function detectCalendarConflicts(
+  candidate: {
+    id?: string;
+    date: string;
+    time: string;
+    locationOrLink?: string;
+    attendees?: string[];
+  },
+  existingEvents: CalendarEvent[],
+  meetings: MeetingMinute[],
+): CalendarConflictItem[] {
+  const cleanDate = (candidate.date ?? '').slice(0, 10);
+  if (!cleanDate) return [];
+
+  const candMins = toMinutesFromHHMM(candidate.time || '09:00');
+  const candLocation = (candidate.locationOrLink ?? '').trim().toLowerCase();
+  const candAttendees = new Set(
+    (candidate.attendees ?? []).map((a) => a.trim().toLowerCase()).filter(Boolean),
+  );
+
+  if (!candLocation && candAttendees.size === 0) {
+    return [];
+  }
+
+  const conflicts: CalendarConflictItem[] = [];
+
+  for (const ev of existingEvents) {
+    if (candidate.id && ev.id === candidate.id) continue;
+    if ((ev.date ?? '').slice(0, 10) !== cleanDate) continue;
+
+    const evMins = toMinutesFromHHMM(ev.time || '09:00');
+    if (Math.abs(candMins - evMins) >= 60) continue;
+
+    const reasons: string[] = [];
+    const evLocation = (ev.locationOrLink ?? '').trim().toLowerCase();
+    if (candLocation && evLocation && candLocation === evLocation) {
+      reasons.push(`Room/Link conflict (${ev.locationOrLink})`);
+    }
+
+    const evPeople = new Set(
+      [
+        ...(ev.attendees ?? []),
+        ev.createdBy,
+        ev.createdByEmail,
+      ]
+        .map((p) => (p ?? '').trim().toLowerCase())
+        .filter(Boolean),
+    );
+    const sharedAttendees = Array.from(candAttendees).filter((a) => evPeople.has(a));
+    if (sharedAttendees.length > 0) {
+      reasons.push(`Attendee busy (${sharedAttendees.join(', ')})`);
+    }
+
+    if (reasons.length > 0) {
+      conflicts.push({
+        id: ev.id,
+        title: ev.title,
+        time: ev.time || '09:00',
+        source: 'calendar',
+        reasons,
+      });
+    }
+  }
+
+  for (const mom of meetings) {
+    if ((mom.meetingDate ?? '').slice(0, 10) !== cleanDate) continue;
+    const momTime = '10:00';
+    const momMins = toMinutesFromHHMM(momTime);
+    if (Math.abs(candMins - momMins) >= 60) continue;
+
+    const momPeople = new Set(
+      [...(mom.attendees ?? []), mom.facilitator]
+        .map((p) => (p ?? '').trim().toLowerCase())
+        .filter(Boolean),
+    );
+    const sharedAttendees = Array.from(candAttendees).filter((a) => momPeople.has(a));
+    if (sharedAttendees.length > 0) {
+      conflicts.push({
+        id: `mom-${mom.id}`,
+        title: `${mom.code}: ${mom.title}`,
+        time: momTime,
+        source: 'meeting',
+        reasons: [`MoM attendee overlap (${sharedAttendees.join(', ')})`],
+      });
+    }
+  }
+
+  return conflicts;
+}
+
+// ---------------------------------------------------------------------------
+// 5. Announcement Expiry & Per-User Dismiss Helpers
+// ---------------------------------------------------------------------------
+
+export function isAnnouncementActive(
+  ann: Pick<CompanyAnnouncement, 'archived' | 'expiresAt'>,
+  nowMs: number = Date.now(),
+): boolean {
+  if (ann.archived) return false;
+  if (!ann.expiresAt) return true;
+  const expMs = new Date(ann.expiresAt).getTime();
+  if (Number.isNaN(expMs)) return true;
+  return expMs > nowMs;
+}
+
+function getDismissedAnnouncementsStorageKey(email?: string | null): string {
+  const safe = (email ?? 'guest').trim().toLowerCase() || 'guest';
+  return `nexops_dismissed_announcements_v1_${safe}`;
+}
+
+export function loadDismissedAnnouncementIds(email?: string | null): string[] {
+  try {
+    const raw = localStorage.getItem(getDismissedAnnouncementsStorageKey(email));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? parsed.filter((id): id is string => typeof id === 'string')
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveDismissedAnnouncementIds(email: string | null | undefined, ids: string[]): void {
+  try {
+    localStorage.setItem(
+      getDismissedAnnouncementsStorageKey(email),
+      JSON.stringify(Array.from(new Set(ids)).slice(0, 50)),
+    );
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 6. Personal Bookmarks / Quick Launch Bar Helpers
+// ---------------------------------------------------------------------------
+
+export function getDefaultQuickBookmarks(
+  role: Role,
+  isSuperAdmin: boolean,
+): QuickBookmark[] {
+  const now = new Date().toISOString();
+  const base: QuickBookmark[] = [
+    { id: 'bm-dashboard', label: 'Executive KPIs', kind: 'module', section: 'dashboard', createdAt: now },
+    { id: 'bm-requests', label: 'Requests & Queue', kind: 'module', section: 'requests', createdAt: now },
+    { id: 'bm-vault', label: 'Document Vault', kind: 'module', section: 'vault', createdAt: now },
+    { id: 'bm-calendar', label: 'Calendar', kind: 'module', section: 'calendar', createdAt: now },
+  ];
+  if (isSuperAdmin && role === 'Admin') {
+    base.push({
+      id: 'bm-settings',
+      label: 'Settings',
+      kind: 'module',
+      section: 'settings',
+      createdAt: now,
+    });
+  }
+  return base;
+}
+
+function getQuickBookmarksStorageKey(email?: string | null): string {
+  const safe = (email ?? 'guest').trim().toLowerCase() || 'guest';
+  return `nexops_quick_bookmarks_v1_${safe}`;
+}
+
+export function sanitizeQuickBookmarks(
+  raw: unknown,
+  role: Role,
+  isSuperAdmin: boolean,
+): QuickBookmark[] {
+  if (!Array.isArray(raw)) {
+    return getDefaultQuickBookmarks(role, isSuperAdmin);
+  }
+  const allowedSections = new Set<NavSection>([
+    'dashboard',
+    'requests',
+    'projects',
+    'assets',
+    'sops',
+    'vault',
+    'leaves',
+    'meetings',
+    'calendar',
+    'mailchat',
+    'workspace',
+    'user_settings',
+    ...(isSuperAdmin && role === 'Admin' ? (['audit', 'settings'] as NavSection[]) : []),
+  ]);
+
+  const cleaned: QuickBookmark[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const bm = item as Partial<QuickBookmark>;
+    const label = typeof bm.label === 'string' ? bm.label.trim().slice(0, 40) : '';
+    if (!label) continue;
+    if (bm.kind === 'module' && bm.section && allowedSections.has(bm.section)) {
+      cleaned.push({
+        id: typeof bm.id === 'string' && bm.id ? bm.id : `bm-${bm.section}`,
+        label,
+        kind: 'module',
+        section: bm.section,
+        createdAt: typeof bm.createdAt === 'string' ? bm.createdAt : new Date().toISOString(),
+      });
+    } else if (bm.kind === 'url') {
+      const safeUrl = sanitizeExternalHttpUrl(bm.url);
+      if (!safeUrl) continue;
+      cleaned.push({
+        id:
+          typeof bm.id === 'string' && bm.id
+            ? bm.id
+            : `bm-url-${Math.random().toString(36).slice(2, 8)}`,
+        label,
+        kind: 'url',
+        url: safeUrl,
+        createdAt: typeof bm.createdAt === 'string' ? bm.createdAt : new Date().toISOString(),
+      });
+    }
+  }
+  return cleaned;
+}
+
+export function loadQuickBookmarks(
+  email: string | null | undefined,
+  role: Role,
+  isSuperAdmin: boolean,
+): QuickBookmark[] {
+  try {
+    const raw = localStorage.getItem(getQuickBookmarksStorageKey(email));
+    if (!raw) return getDefaultQuickBookmarks(role, isSuperAdmin);
+    return sanitizeQuickBookmarks(JSON.parse(raw), role, isSuperAdmin);
+  } catch {
+    return getDefaultQuickBookmarks(role, isSuperAdmin);
+  }
+}
+
+export function saveQuickBookmarks(
+  email: string | null | undefined,
+  bookmarks: QuickBookmark[],
+): void {
+  try {
+    localStorage.setItem(getQuickBookmarksStorageKey(email), JSON.stringify(bookmarks));
+  } catch {
+    // Ignore storage errors
+  }
+}
+

@@ -53,6 +53,7 @@ import {
   getRequestSlaStatus,
   getTimeOfDayGreeting,
   getTodayDateString,
+  isAnnouncementActive,
   isRequestOverdue,
   isSuperAdminEmail,
   resolveLivePresenceOverride,
@@ -68,6 +69,7 @@ import {
 } from './StatusIndicator';
 import { UserAvatar } from './UserAvatar';
 import { WeatherAndMapSection } from './WeatherLocationWidgets';
+import { ExecutiveAnalyticsCharts } from './ExecutiveAnalyticsCharts';
 
 interface DashboardViewProps {
   companyName: string;
@@ -94,6 +96,7 @@ interface DashboardViewProps {
     severity: AnnouncementSeverity;
     priorityTag: AnnouncementPriorityTag;
     pinned: boolean;
+    expiresAt?: string;
   }) => void;
   onEditAnnouncement: (announcement: CompanyAnnouncement) => void;
   onDeleteAnnouncement: (announcementId: string) => void;
@@ -142,6 +145,7 @@ export function DashboardView({
   timezone,
 }: DashboardViewProps) {
   const isAdmin = activeRole === 'Admin';
+  const isNoticeAdmin = isAdmin && isSuperAdminEmail(currentUser.email);
   const todayStr = getTodayDateString();
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [dashboardTab, setDashboardTab] = useState<'overview' | 'analytics'>('overview');
@@ -208,26 +212,27 @@ export function DashboardView({
     [activeDirectoryWithPresence],
   );
 
-  // Notice Board Modal & Confirm State (Admin Only)
+  // Notice Board Modal & Confirm State (Sole Super Admin Only)
   const [noticeModalOpen, setNoticeModalOpen] = useState(false);
   const [editingNotice, setEditingNotice] = useState<CompanyAnnouncement | null>(null);
   const [noticeTitle, setNoticeTitle] = useState('');
   const [noticeMessage, setNoticeMessage] = useState('');
   const [noticeTag, setNoticeTag] = useState<AnnouncementPriorityTag>('General');
   const [noticePinned, setNoticePinned] = useState(true);
+  const [noticeExpiresAt, setNoticeExpiresAt] = useState('');
   const [noticeError, setNoticeError] = useState<string | null>(null);
   const [confirmDeleteNoticeId, setConfirmDeleteNoticeId] = useState<string | null>(null);
 
   const activeNotices = useMemo(
     () =>
       announcements
-        .filter((a) => !a.archived)
+        .filter((a) => isAnnouncementActive(a, nowMs))
         .sort((a, b) => {
           const pinDiff = Number(Boolean(b.pinned)) - Number(Boolean(a.pinned));
           if (pinDiff !== 0) return pinDiff;
           return new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime();
         }),
-    [announcements],
+    [announcements, nowMs],
   );
 
   const openPostNotice = () => {
@@ -236,6 +241,7 @@ export function DashboardView({
     setNoticeMessage('');
     setNoticeTag('General');
     setNoticePinned(true);
+    setNoticeExpiresAt('');
     setNoticeError(null);
     setNoticeModalOpen(true);
   };
@@ -249,13 +255,26 @@ export function DashboardView({
         (notice.severity === 'urgent' ? 'Urgent' : notice.severity === 'warning' ? 'HR' : 'General'),
     );
     setNoticePinned(Boolean(notice.pinned));
+    if (notice.expiresAt) {
+      const dt = new Date(notice.expiresAt);
+      if (!Number.isNaN(dt.getTime())) {
+        const localIso = new Date(dt.getTime() - dt.getTimezoneOffset() * 60000)
+          .toISOString()
+          .slice(0, 16);
+        setNoticeExpiresAt(localIso);
+      } else {
+        setNoticeExpiresAt('');
+      }
+    } else {
+      setNoticeExpiresAt('');
+    }
     setNoticeError(null);
     setNoticeModalOpen(true);
   };
 
   const handleNoticeSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if (!isAdmin) return;
+    if (!isNoticeAdmin) return;
     if (!noticeTitle.trim()) {
       setNoticeError('Notice title is required.');
       return;
@@ -263,6 +282,16 @@ export function DashboardView({
     if (!noticeMessage.trim()) {
       setNoticeError('Notice message body is required.');
       return;
+    }
+
+    let normalizedExpiresAt: string | undefined;
+    if (noticeExpiresAt.trim()) {
+      const parsedExp = new Date(noticeExpiresAt);
+      if (Number.isNaN(parsedExp.getTime())) {
+        setNoticeError('Please enter a valid expiry date and time.');
+        return;
+      }
+      normalizedExpiresAt = parsedExp.toISOString();
     }
 
     const mappedSeverity: AnnouncementSeverity =
@@ -276,6 +305,7 @@ export function DashboardView({
         priorityTag: noticeTag,
         severity: mappedSeverity,
         pinned: noticePinned,
+        expiresAt: normalizedExpiresAt,
         updatedAt: new Date().toISOString(),
       });
     } else {
@@ -285,6 +315,7 @@ export function DashboardView({
         severity: mappedSeverity,
         priorityTag: noticeTag,
         pinned: noticePinned,
+        expiresAt: normalizedExpiresAt,
       });
     }
 
@@ -839,10 +870,19 @@ export function DashboardView({
             className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-indigo-700 whitespace-nowrap"
           >
             <FileOutput className="h-3.5 w-3.5" />
-            <span>Export Print / PDF Report</span>
+            <span>Generate Official Report</span>
           </button>
         </div>
       </div>
+
+      {dashboardTab === 'analytics' && (
+        <ExecutiveAnalyticsCharts
+          requests={requests}
+          attendanceLogs={attendanceLogs}
+          teamMembers={teamMembers}
+          departments={departments}
+        />
+      )}
 
       {dashboardTab === 'overview' && (
         <>
@@ -866,14 +906,14 @@ export function DashboardView({
             </div>
           </div>
 
-          {isAdmin ? (
+          {isNoticeAdmin ? (
             <button
               type="button"
               onClick={openPostNotice}
               className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-slate-800 dark:bg-indigo-600 dark:hover:bg-indigo-500"
             >
               <Plus className="h-3.5 w-3.5" />
-              <span>Post Official Notice</span>
+              <span>Post Announcement</span>
             </button>
           ) : (
             <span className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
@@ -889,9 +929,9 @@ export function DashboardView({
               No active company announcements
             </p>
             <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-              {isAdmin
+              {isNoticeAdmin
                 ? 'Post circulars, holiday schedules, or HR policy notices using the button above.'
-                : 'Official company announcements posted by Administrators will appear here.'}
+                : 'Official company announcements posted by Super Admin will appear here.'}
             </p>
           </div>
         ) : (
@@ -939,7 +979,7 @@ export function DashboardView({
                         )}
                       </div>
 
-                      {isAdmin && (
+                      {isNoticeAdmin && (
                         <div className="flex items-center gap-1">
                           <button
                             type="button"
@@ -1003,6 +1043,7 @@ export function DashboardView({
 
                   <p className="mt-3 border-t border-slate-200/70 pt-2 font-mono text-[10px] text-slate-500 dark:border-slate-800 dark:text-slate-400">
                     Posted by {notice.publishedBy} · {formatDateTime(notice.publishedAt)}
+                    {notice.expiresAt ? ` · Expires ${formatDateTime(notice.expiresAt)}` : ''}
                     {notice.updatedAt && notice.updatedAt !== notice.publishedAt
                       ? ' (Edited)'
                       : ''}
@@ -1232,6 +1273,14 @@ export function DashboardView({
           </div>
         </div>
       </section>
+
+      {/* Executive Analytics SVG Charts (Department Attendance, Approval Breakdown, 6-Month Trends) */}
+      <ExecutiveAnalyticsCharts
+        requests={requests}
+        attendanceLogs={attendanceLogs}
+        teamMembers={teamMembers}
+        departments={departments}
+      />
 
       {/* Financial Cost-Center & Budget Variance Tracker */}
       <section className="min-w-0 rounded-xl border border-slate-200 bg-white p-4 sm:p-6 dark:border-slate-800 dark:bg-slate-900">
@@ -1851,8 +1900,8 @@ export function DashboardView({
         </>
       )}
 
-      {/* Post / Edit Official Notice Modal (Admin Only) */}
-      {noticeModalOpen && isAdmin && (
+      {/* Post / Edit Official Notice Modal (Sole Super Admin Only) */}
+      {noticeModalOpen && isNoticeAdmin && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs dark:bg-slate-950/75 sm:p-4"
           role="dialog"
@@ -1912,17 +1961,29 @@ export function DashboardView({
                   </select>
                 </div>
 
-                <div className="flex items-end pb-2">
-                  <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-300">
-                    <input
-                      type="checkbox"
-                      checked={noticePinned}
-                      onChange={(e) => setNoticePinned(e.target.checked)}
-                      className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-950"
-                    />
-                    Pin to top of Notice Board
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Auto-Expiry Date &amp; Time (Optional)
                   </label>
+                  <input
+                    type="datetime-local"
+                    value={noticeExpiresAt}
+                    onChange={(e) => setNoticeExpiresAt(e.target.value)}
+                    className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                  />
                 </div>
+              </div>
+
+              <div>
+                <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={noticePinned}
+                    onChange={(e) => setNoticePinned(e.target.checked)}
+                    className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-950"
+                  />
+                  Pin to top of Notice Board
+                </label>
               </div>
 
               <div>

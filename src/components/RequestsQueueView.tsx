@@ -31,6 +31,7 @@ import {
   getOverdueDays,
   getRequestSlaStatus,
   isRequestOverdue,
+  isRequestPendingOver24h,
   requiresTwoTierApproval,
 } from '../utils/storage';
 import {
@@ -200,6 +201,10 @@ export function RequestsQueueView({
       const matchesOverdue = !overdueOnly || isRequestOverdue(req, slaPolicy, nowMs);
 
       return matchesSearch && matchesStatus && matchesDept && matchesPriority && matchesOverdue;
+    }).sort((a, b) => {
+      const aOver24 = isRequestPendingOver24h(a, nowMs) ? 1 : 0;
+      const bOver24 = isRequestPendingOver24h(b, nowMs) ? 1 : 0;
+      return bOver24 - aOver24;
     });
   }, [
     requests,
@@ -636,6 +641,7 @@ export function RequestsQueueView({
                     columnItems.map((req) => {
                       const slaStatus = getRequestSlaStatus(req, slaPolicy, nowMs);
                       const overdue = slaStatus.breached;
+                      const pendingOver24h = isRequestPendingOver24h(req, nowMs);
                       const overdueDays = overdue ? getOverdueDays(req.dueDate) : 0;
                       const doneChecks = req.checklist.filter((c) => c.checked).length;
                       return (
@@ -653,7 +659,7 @@ export function RequestsQueueView({
                           className={`group cursor-pointer rounded-xl border bg-white p-3.5 text-left transition-all hover:border-indigo-300 hover:shadow-sm focus-visible:outline-2 focus-visible:outline-indigo-600 dark:bg-slate-900 dark:hover:border-indigo-500/70 ${
                             overdue
                               ? 'border-rose-300 bg-rose-50/25 dark:border-rose-900/60 dark:bg-rose-950/25'
-                              : slaStatus.approaching
+                              : slaStatus.approaching || pendingOver24h
                                 ? 'border-amber-300 bg-amber-50/20 dark:border-amber-900/60 dark:bg-amber-950/20'
                                 : 'border-slate-200 dark:border-slate-800'
                           }`}
@@ -664,6 +670,15 @@ export function RequestsQueueView({
                             </span>
                             <div className="flex flex-wrap items-center justify-end gap-1">
                               {pendingRequestEditIds.has(req.id) && <PendingApprovalBadge compact />}
+                              {pendingOver24h && (
+                                <span
+                                  title="Pending approval or review for more than 24 hours"
+                                  className="inline-flex items-center gap-1 rounded border border-amber-300 bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800 dark:border-amber-800 dark:bg-amber-950/70 dark:text-amber-300"
+                                >
+                                  <AlertCircle className="h-2.5 w-2.5" />
+                                  <span>SLA Overdue</span>
+                                </span>
+                              )}
                               {overdue && <OverdueBadge days={overdueDays} />}
                               <PriorityBadge priority={req.priority} slaBreached={overdue} />
                             </div>
@@ -789,6 +804,7 @@ export function RequestsQueueView({
                   const doneChecks = req.checklist.filter((c) => c.checked).length;
                   const slaStatus = getRequestSlaStatus(req, slaPolicy, nowMs);
                   const overdue = slaStatus.breached;
+                  const pendingOver24h = isRequestPendingOver24h(req, nowMs);
                   const overdueDays = overdue ? getOverdueDays(req.dueDate) : 0;
                   const isSelected = activeSelectedIds.includes(req.id);
 
@@ -801,7 +817,7 @@ export function RequestsQueueView({
                           ? 'bg-indigo-50/50 hover:bg-indigo-50/80 dark:bg-indigo-950/40 dark:hover:bg-indigo-950/60'
                           : overdue
                             ? 'bg-rose-50/30 hover:bg-rose-50/55 dark:bg-rose-950/25 dark:hover:bg-rose-950/40'
-                            : slaStatus.approaching
+                            : slaStatus.approaching || pendingOver24h
                               ? 'bg-amber-50/25 hover:bg-amber-50/45 dark:bg-amber-950/20 dark:hover:bg-amber-950/35'
                               : 'hover:bg-slate-50/90 dark:hover:bg-slate-800/50'
                       }`}
@@ -864,6 +880,15 @@ export function RequestsQueueView({
                         <div className="flex flex-wrap items-center gap-1.5">
                           <StatusBadge status={req.status} />
                           {pendingRequestEditIds.has(req.id) && <PendingApprovalBadge compact />}
+                          {pendingOver24h && (
+                            <span
+                              title="Pending approval or review for more than 24 hours"
+                              className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-800 dark:border-amber-800 dark:bg-amber-950/70 dark:text-amber-300"
+                            >
+                              <AlertCircle className="h-3 w-3" />
+                              <span>SLA Overdue (&gt;24h)</span>
+                            </span>
+                          )}
                           {requiresTwoTierApproval(req, approvalBudgetThresholdUsd) &&
                             req.status !== 'Approved' &&
                             req.status !== 'Rejected' && (

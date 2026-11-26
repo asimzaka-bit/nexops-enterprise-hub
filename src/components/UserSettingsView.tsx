@@ -20,6 +20,7 @@ import {
   Laptop,
   LayoutGrid,
   Loader2,
+  LogOut,
   Mail,
   MapPin,
   MessageSquare,
@@ -41,6 +42,7 @@ import {
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import type { ViewportInfo } from '../hooks/useViewport';
 import {
+  AuthSession,
   Department,
   DocumentVaultFolder,
   DocumentVaultItem,
@@ -56,10 +58,13 @@ import {
 } from '../types/nexops';
 import {
   calculateVaultStorageStats,
+  evaluatePasswordStrength,
+  formatDateTime,
   formatStorageSize,
   isSuperAdminEmail,
   resolveFontFamilyCss,
   TEN_GB_BYTES,
+  validateStrongPassword,
 } from '../utils/storage';
 import { RoleBadge } from './StatusIndicator';
 import { UserAvatar } from './UserAvatar';
@@ -90,6 +95,8 @@ interface UserSettingsViewProps {
   onSaveSignOffTitle: (userId: string, signOffTitle: string) => void;
   onUpdateDepartment: (userId: string, department: Department) => void;
   onUpdatePassword: (newPassword: string) => Promise<void>;
+  authSession?: AuthSession | null;
+  onSignOutAllDevices?: () => Promise<void> | void;
   viewport: ViewportInfo;
 }
 
@@ -219,6 +226,8 @@ export function UserSettingsView({
   onSaveSignOffTitle,
   onUpdateDepartment,
   onUpdatePassword,
+  authSession,
+  onSignOutAllDevices,
   viewport,
 }: UserSettingsViewProps) {
   const [activeTab, setActiveTab] = useState<SettingsTabId>('all');
@@ -234,7 +243,7 @@ export function UserSettingsView({
   const [signOffError, setSignOffError] = useState<string | null>(null);
   const [signOffSaved, setSignOffSaved] = useState(false);
 
-  // Password Change state
+  // Password Change & Session Control state
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -246,6 +255,12 @@ export function UserSettingsView({
     type: 'success' | 'error';
     message: string;
   } | null>(null);
+  const [confirmRevokeOpen, setConfirmRevokeOpen] = useState(false);
+  const [revokingSessions, setRevokingSessions] = useState(false);
+
+  const pwStrength = useMemo(() => evaluatePasswordStrength(newPassword), [newPassword]);
+  const pwCheck = useMemo(() => validateStrongPassword(newPassword), [newPassword]);
+  const pwMatches = confirmPassword.length > 0 && newPassword === confirmPassword;
 
   // Weather city draft
   const [weatherCityInput, setWeatherCityInput] = useState(preferences.weatherCity);
@@ -343,10 +358,11 @@ export function UserSettingsView({
       setPasswordStatus({ type: 'error', message: 'Enter your current password.' });
       return;
     }
-    if (newPassword.trim().length < 8) {
+    const validation = validateStrongPassword(newPassword);
+    if (!validation.valid) {
       setPasswordStatus({
         type: 'error',
-        message: 'New password must be at least 8 characters.',
+        message: validation.error || 'Password does not meet security requirements.',
       });
       return;
     }
@@ -375,6 +391,17 @@ export function UserSettingsView({
       });
     } finally {
       setUpdatingPassword(false);
+    }
+  };
+
+  const handleRevokeAllSessions = async () => {
+    if (!onSignOutAllDevices) return;
+    setRevokingSessions(true);
+    try {
+      await onSignOutAllDevices();
+    } finally {
+      setRevokingSessions(false);
+      setConfirmRevokeOpen(false);
     }
   };
 
@@ -1071,7 +1098,7 @@ export function UserSettingsView({
                 </h3>
               </div>
               <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-                Minimum 8 characters required; updates your corporate session credentials
+                Requires at least 8 characters including 1 letter and 1 number
               </p>
 
               <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -1121,7 +1148,7 @@ export function UserSettingsView({
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
                       autoComplete="new-password"
-                      placeholder="Min 8 characters"
+                      placeholder="Min 8 chars, letter & number"
                       className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50 pr-9 pl-3 text-xs text-slate-900 focus:border-indigo-500 focus:bg-white focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                     />
                     <button
@@ -1172,6 +1199,36 @@ export function UserSettingsView({
                 </div>
               </div>
 
+              {(newPassword.length > 0 || confirmPassword.length > 0) && (
+                <div className="mt-3 space-y-2 rounded-lg border border-slate-200 bg-slate-50/70 p-2.5 dark:border-slate-800 dark:bg-slate-900/60">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-slate-500 dark:text-slate-400">Password Strength</span>
+                    <span className={`font-bold ${pwStrength.textClass}`}>{pwStrength.label}</span>
+                  </div>
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
+                    <div className={`h-full rounded-full transition-all duration-200 ${pwStrength.barClass}`} />
+                  </div>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+                    <span className={`inline-flex items-center gap-1 font-medium ${pwCheck.hasMinLength ? 'text-emerald-700 dark:text-emerald-400' : 'text-slate-500 dark:text-slate-400'}`}>
+                      <CheckCircle2 className="h-3 w-3" />
+                      <span>8+ chars</span>
+                    </span>
+                    <span className={`inline-flex items-center gap-1 font-medium ${pwCheck.hasLetter ? 'text-emerald-700 dark:text-emerald-400' : 'text-slate-500 dark:text-slate-400'}`}>
+                      <CheckCircle2 className="h-3 w-3" />
+                      <span>1+ letter</span>
+                    </span>
+                    <span className={`inline-flex items-center gap-1 font-medium ${pwCheck.hasNumber ? 'text-emerald-700 dark:text-emerald-400' : 'text-slate-500 dark:text-slate-400'}`}>
+                      <CheckCircle2 className="h-3 w-3" />
+                      <span>1+ number</span>
+                    </span>
+                    <span className={`inline-flex items-center gap-1 font-medium ${pwMatches ? 'text-emerald-700 dark:text-emerald-400' : 'text-slate-500 dark:text-slate-400'}`}>
+                      <CheckCircle2 className="h-3 w-3" />
+                      <span>Passwords match</span>
+                    </span>
+                  </div>
+                </div>
+              )}
+
               <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                 <div className="min-w-0 flex-1">
                   {passwordStatus && (
@@ -1188,7 +1245,7 @@ export function UserSettingsView({
                 </div>
                 <button
                   type="submit"
-                  disabled={updatingPassword}
+                  disabled={updatingPassword || !pwCheck.valid || !pwMatches}
                   className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg bg-indigo-600 px-4 text-xs font-semibold text-white transition-colors hover:bg-indigo-700 disabled:opacity-60"
                 >
                   {updatingPassword && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
@@ -1196,6 +1253,91 @@ export function UserSettingsView({
                 </button>
               </div>
             </form>
+
+            {/* Security & Session Status + Sign Out All Devices */}
+            <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-950/60">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                  <h3 className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                    Security &amp; Session Status
+                  </h3>
+                </div>
+                <span className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/60 dark:text-emerald-300">
+                  30m Idle Lock Active
+                </span>
+              </div>
+
+              <div className="mt-3 grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+                <div className="min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
+                  <p className="text-[10px] font-medium text-slate-500 dark:text-slate-400">
+                    Verified Account
+                  </p>
+                  <p className="mt-0.5 truncate font-mono text-[11px] font-semibold text-slate-900 dark:text-slate-100">
+                    {currentUser.email}
+                  </p>
+                </div>
+                <div className="min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
+                  <p className="text-[10px] font-medium text-slate-500 dark:text-slate-400">
+                    Active Role Tier
+                  </p>
+                  <p className="mt-0.5 truncate text-[11px] font-bold text-indigo-700 dark:text-indigo-400">
+                    {isSuperAdmin ? 'Super Admin (Employee 1)' : activeRole}
+                  </p>
+                </div>
+                <div className="min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
+                  <p className="text-[10px] font-medium text-slate-500 dark:text-slate-400">
+                    Last Sign-In
+                  </p>
+                  <p className="mt-0.5 truncate font-mono text-[11px] font-semibold text-slate-800 tabular-nums dark:text-slate-200">
+                    {formatDateTime(
+                      authSession?.lastLoginAt ||
+                        authSession?.signedInAt ||
+                        currentUser.lastActiveAt ||
+                        new Date().toISOString(),
+                    )}
+                  </p>
+                </div>
+              </div>
+
+              {onSignOutAllDevices && (
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-3 dark:border-slate-800">
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Immediately revoke all active browser and device sessions for your account.
+                  </p>
+                  {confirmRevokeOpen ? (
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        disabled={revokingSessions}
+                        onClick={() => void handleRevokeAllSessions()}
+                        className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-rose-600 px-3 text-xs font-semibold text-white hover:bg-rose-700 disabled:opacity-60"
+                      >
+                        {revokingSessions && <Loader2 className="h-3 w-3 animate-spin" />}
+                        <span>Confirm Sign Out All</span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={revokingSessions}
+                        onClick={() => setConfirmRevokeOpen(false)}
+                        className="h-8 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmRevokeOpen(true)}
+                      className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-3 text-xs font-semibold text-rose-700 transition-colors hover:bg-rose-100 dark:border-rose-900/60 dark:bg-rose-950/50 dark:text-rose-300 dark:hover:bg-rose-900/60"
+                    >
+                      <LogOut className="h-3.5 w-3.5" />
+                      <span>Sign Out All Devices</span>
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           </section>
         )}
 

@@ -293,6 +293,8 @@ import {
   DocumentVaultFolder,
   DocumentVaultItem,
   DocumentVaultSourceType,
+  DocumentVersionEntry,
+  DigitalApprovalStamp,
   LeaveRequest,
   LeaveStatus,
   LeaveType,
@@ -306,6 +308,7 @@ import {
   PermissionMatrix,
   ProjectStatus,
   ProjectType,
+  RecycleBinItem,
   RequestStatus,
   Role,
   SlaPolicyConfig,
@@ -323,16 +326,26 @@ import {
   WorkspaceSavedLink,
 } from '../types/nexops';
 import {
+  extractDmPeerEmail,
   fromDbRole,
   isLegacyDowngradedViewerEmail,
+  isPrivateCommsAuditEvent,
+  isStrictChatParticipant,
+  isStrictMailParticipant,
+  isStrictWorkspaceEmailParticipant,
   isSuperAdminEmail,
   isSuperAdminEmployeeId,
   normalizeApprovalStatus,
   normalizePermissionMatrix,
+  normalizePrivateChatMessage,
   normalizeRole,
+  normalizeShiftRosters,
+  pruneExpiredRecycleBin,
+  sanitizePostgrestEmailFilter,
   SUPER_ADMIN_EMAIL,
   SUPER_ADMIN_EMPLOYEE_ID,
   toDbRole,
+  validateStrongPassword,
 } from '../utils/storage';
 
 const STORAGE_KEY = 'nexops_enterprise_hub_state_v3';
@@ -550,18 +563,44 @@ function applyOwnershipTransferToDirectory(members: TeamMember[]): {
   return { members: next, changed };
 }
 
-function readWorkspaceState(): NexOpsState {
+function getActiveSessionEmailSync(): string | null {
   try {
+    const persistentRaw = localStorage.getItem(AUTH_SESSION_KEY);
+    const tabRaw = sessionStorage.getItem(AUTH_SESSION_KEY);
+    const raw = persistentRaw || tabRaw;
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<AuthSession> | null;
+    if (!parsed || !parsed.isAuthenticated) return null;
+    return sanitizePostgrestEmailFilter(parsed.userEmail);
+  } catch {
+    return null;
+  }
+}
+
+function getUserMailStateKey(email: string): string {
+  return `nexops_user_mails:${email}`;
+}
+
+function getUserChatStateKey(email: string): string {
+  return `nexops_user_chats:${email}`;
+}
+
+const CHANNEL_CHAT_STATE_KEY = 'nexops_channel_chats';
+
+function readWorkspaceState(activeEmailOverride?: string | null): NexOpsState {
+  try {
+    const safeEmail =
+      sanitizePostgrestEmailFilter(activeEmailOverride) ?? getActiveSessionEmailSync();
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) {
       const seed = createSeedState();
-      writeWorkspaceState(seed);
+      writeWorkspaceState(seed, safeEmail);
       return seed;
     }
     const parsed = JSON.parse(raw) as NexOpsState;
     if (!parsed || !Array.isArray(parsed.requests) || !Array.isArray(parsed.teamMembers)) {
       const seed = createSeedState();
-      writeWorkspaceState(seed);
+      writeWorkspaceState(seed, safeEmail);
       return seed;
     }
     const baseMembers = parsed.teamMembers
@@ -608,6 +647,21 @@ function readWorkspaceState(): NexOpsState {
       ? parsed.meetings
       : [];
 
+    const scopedWorkspaceEmails =
+      safeEmail && Array.isArray(parsed.workspaceEmails)
+        ? parsed.workspaceEmails.filter((e) => isStrictWorkspaceEmailParticipant(e, safeEmail))
+        : [];
+    const scopedCorporateMails =
+      safeEmail && Array.isArray(parsed.corporateMails)
+        ? parsed.corporateMails.filter((m) => isStrictMailParticipant(m, safeEmail))
+        : [];
+    const scopedChatMessages =
+      safeEmail && Array.isArray(parsed.chatMessages)
+        ? parsed.chatMessages
+            .map(normalizePrivateChatMessage)
+            .filter((m) => isStrictChatParticipant(m, safeEmail))
+        : [];
+
     const resultState: NexOpsState = {
       ...parsed,
       activeRole: transferNeededLocally ? 'Viewer' : normalizeRole(parsed.activeRole),
@@ -624,11 +678,13 @@ function readWorkspaceState(): NexOpsState {
       attendanceLogs: normalizedAttendance,
       announcements: normalizedAnnouncements,
       meetings: normalizedMeetings,
-      workspaceEmails: Array.isArray(parsed.workspaceEmails) ? parsed.workspaceEmails : [],
+      workspaceEmails: scopedWorkspaceEmails,
       workspaceLinks: Array.isArray(parsed.workspaceLinks) ? parsed.workspaceLinks : [],
       teamMembers: normalizedMembers,
       globalAuditLogs: Array.isArray(parsed.globalAuditLogs)
-        ? parsed.globalAuditLogs.map((a) => ({ ...a, actorRole: normalizeRole(a.actorRole) }))
+        ? parsed.globalAuditLogs
+            .filter((a) => !isPrivateCommsAuditEvent(a))
+            .map((a) => ({ ...a, actorRole: normalizeRole(a.actorRole) }))
         : [],
       notifications: Array.isArray(parsed.notifications) ? parsed.notifications : [],
       subtasks: Array.isArray(parsed.subtasks) ? parsed.subtasks : [],
@@ -637,9 +693,12 @@ function readWorkspaceState(): NexOpsState {
       pendingEditorChanges: Array.isArray(parsed.pendingEditorChanges)
         ? parsed.pendingEditorChanges
         : [],
-      corporateMails: Array.isArray(parsed.corporateMails) ? parsed.corporateMails : [],
-      chatMessages: Array.isArray(parsed.chatMessages) ? parsed.chatMessages : [],
+      corporateMails: scopedCorporateMails,
+      chatMessages: scopedChatMessages,
       calendarEvents: Array.isArray(parsed.calendarEvents) ? parsed.calendarEvents : [],
+      recycleBin: pruneExpiredRecycleBin(
+        Array.isArray(parsed.recycleBin) ? parsed.recycleBin : [],
+      ),
       permissionMatrix: normalizePermissionMatrix(parsed.permissionMatrix),
     };
 
@@ -751,14 +810,36 @@ function saveRequestMeta(requestId: string, meta: RequestExtendedMeta): void {
   }
 }
 
-function writeWorkspaceState(state: NexOpsState): void {
+function writeWorkspaceState(state: NexOpsState, activeEmailOverride?: string | null): void {
+  const safeEmail =
+    sanitizePostgrestEmailFilter(activeEmailOverride) ?? getActiveSessionEmailSync();
+  const sanitizedState: NexOpsState = {
+    ...state,
+    globalAuditLogs: Array.isArray(state.globalAuditLogs)
+      ? state.globalAuditLogs.filter((a) => !isPrivateCommsAuditEvent(a))
+      : [],
+    workspaceEmails:
+      safeEmail && Array.isArray(state.workspaceEmails)
+        ? state.workspaceEmails.filter((e) => isStrictWorkspaceEmailParticipant(e, safeEmail))
+        : [],
+    corporateMails:
+      safeEmail && Array.isArray(state.corporateMails)
+        ? state.corporateMails.filter((m) => isStrictMailParticipant(m, safeEmail))
+        : [],
+    chatMessages:
+      safeEmail && Array.isArray(state.chatMessages)
+        ? state.chatMessages
+            .map(normalizePrivateChatMessage)
+            .filter((m) => isStrictChatParticipant(m, safeEmail))
+        : [],
+  };
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(sanitizedState));
   } catch {
     try {
       const compactState: NexOpsState = {
-        ...state,
-        vaultDocuments: state.vaultDocuments.map((doc) => ({
+        ...sanitizedState,
+        vaultDocuments: sanitizedState.vaultDocuments.map((doc) => ({
           ...doc,
           fileDataUrl:
             doc.fileDataUrl && doc.fileDataUrl.length <= 131072 ? doc.fileDataUrl : undefined,
@@ -804,8 +885,15 @@ function normalizeSlaPolicy(
 function readBrandingConfig(): CompanyBrandingConfig {
   try {
     const raw = localStorage.getItem(BRANDING_STORAGE_KEY);
-    if (!raw) return { ...DEFAULT_COMPANY_BRANDING, slaPolicy: { ...DEFAULT_SLA_POLICY } };
+    if (!raw) {
+      return {
+        ...DEFAULT_COMPANY_BRANDING,
+        slaPolicy: { ...DEFAULT_SLA_POLICY },
+        shiftRosters: normalizeShiftRosters(undefined, DEFAULT_DEPARTMENTS),
+      };
+    }
     const parsed = JSON.parse(raw) as Partial<CompanyBrandingConfig>;
+    const departments = normalizeStringList(parsed.departments, DEFAULT_DEPARTMENTS);
     return {
       companyName:
         typeof parsed.companyName === 'string' && parsed.companyName.trim()
@@ -815,7 +903,7 @@ function readBrandingConfig(): CompanyBrandingConfig {
         typeof parsed.tagline === 'string' && parsed.tagline.trim()
           ? parsed.tagline.trim()
           : DEFAULT_COMPANY_BRANDING.tagline,
-      departments: normalizeStringList(parsed.departments, DEFAULT_DEPARTMENTS),
+      departments,
       categories: normalizeStringList(parsed.categories, DEFAULT_CATEGORIES),
       approvalBudgetThresholdUsd:
         typeof parsed.approvalBudgetThresholdUsd === 'number' &&
@@ -824,17 +912,23 @@ function readBrandingConfig(): CompanyBrandingConfig {
           ? parsed.approvalBudgetThresholdUsd
           : DEFAULT_COMPANY_BRANDING.approvalBudgetThresholdUsd,
       slaPolicy: normalizeSlaPolicy(parsed.slaPolicy, DEFAULT_SLA_POLICY),
+      shiftRosters: normalizeShiftRosters(parsed.shiftRosters, departments),
     };
   } catch {
-    return { ...DEFAULT_COMPANY_BRANDING, slaPolicy: { ...DEFAULT_SLA_POLICY } };
+    return {
+      ...DEFAULT_COMPANY_BRANDING,
+      slaPolicy: { ...DEFAULT_SLA_POLICY },
+      shiftRosters: normalizeShiftRosters(undefined, DEFAULT_DEPARTMENTS),
+    };
   }
 }
 
 function writeBrandingConfig(config: CompanyBrandingConfig): CompanyBrandingConfig {
+  const departments = normalizeStringList(config.departments, DEFAULT_DEPARTMENTS);
   const normalized: CompanyBrandingConfig = {
     companyName: config.companyName.trim() || DEFAULT_COMPANY_BRANDING.companyName,
     tagline: config.tagline.trim() || DEFAULT_COMPANY_BRANDING.tagline,
-    departments: normalizeStringList(config.departments, DEFAULT_DEPARTMENTS),
+    departments,
     categories: normalizeStringList(config.categories, DEFAULT_CATEGORIES),
     approvalBudgetThresholdUsd:
       typeof config.approvalBudgetThresholdUsd === 'number' &&
@@ -843,6 +937,7 @@ function writeBrandingConfig(config: CompanyBrandingConfig): CompanyBrandingConf
         ? config.approvalBudgetThresholdUsd
         : DEFAULT_COMPANY_BRANDING.approvalBudgetThresholdUsd,
     slaPolicy: normalizeSlaPolicy(config.slaPolicy, DEFAULT_SLA_POLICY),
+    shiftRosters: normalizeShiftRosters(config.shiftRosters, departments),
   };
   try {
     localStorage.setItem(BRANDING_STORAGE_KEY, JSON.stringify(normalized));
@@ -1989,13 +2084,28 @@ export const SYSTEM_STATE_KEYS = {
   CHAT_MESSAGES: 'nexops_chats',
   MEET_CALL_CARDS: 'nexops_meet_cards',
   CALENDAR_EVENTS: 'nexops_calendar_events',
+  RECYCLE_BIN: 'nexops_recycle_bin_v1',
+  SOP_METADATA: 'nexops_sop_metadata_v1',
   OWNERSHIP_TRANSFER_V1: 'ownership_transfer_hassanzaka018_v1',
 } as const;
 
-const LEGACY_COMMS_STATE_KEYS = {
-  CORPORATE_MAILS: 'corporate_mails',
-  CHAT_MESSAGES: 'chat_messages',
-} as const;
+const SHARED_SYSTEM_STATE_KEYS = [
+  SYSTEM_STATE_KEYS.BRANDING,
+  SYSTEM_STATE_KEYS.PERMISSION_MATRIX,
+  SYSTEM_STATE_KEYS.ANNOUNCEMENTS,
+  SYSTEM_STATE_KEYS.TEAM_DIRECTORY,
+  SYSTEM_STATE_KEYS.USER_PRESENCE,
+  SYSTEM_STATE_KEYS.REQUEST_META,
+  SYSTEM_STATE_KEYS.WORKSPACE_GMAIL_PREFS,
+  SYSTEM_STATE_KEYS.MASTER_KEY,
+  SYSTEM_STATE_KEYS.DOCUMENT_VAULT,
+  SYSTEM_STATE_KEYS.PENDING_EDITOR_CHANGES,
+  SYSTEM_STATE_KEYS.MEET_CALL_CARDS,
+  SYSTEM_STATE_KEYS.CALENDAR_EVENTS,
+  SYSTEM_STATE_KEYS.RECYCLE_BIN,
+  SYSTEM_STATE_KEYS.SOP_METADATA,
+  SYSTEM_STATE_KEYS.OWNERSHIP_TRANSFER_V1,
+] as const;
 
 export function extractSupabaseErrorMessage(err: unknown): string {
   if (err instanceof Error && err.message) {
@@ -2125,8 +2235,9 @@ export function mergeChatMessages(
   incoming: TeamChatMessage[],
 ): TeamChatMessage[] {
   const byId = new Map<string, TeamChatMessage>();
-  for (const msg of [...existing, ...incoming]) {
-    if (!msg || !msg.id) continue;
+  for (const rawMsg of [...existing, ...incoming]) {
+    if (!rawMsg || !rawMsg.id) continue;
+    const msg = normalizePrivateChatMessage(rawMsg);
     const prev = byId.get(msg.id);
     if (!prev) {
       byId.set(msg.id, {
@@ -2175,10 +2286,12 @@ export function mergeCalendarEvents(
 export function mergeMeetings(
   existing: MeetingMinute[],
   incoming: MeetingMinute[],
+  deletedIds?: Iterable<string>,
 ): MeetingMinute[] {
+  const deletedSet = new Set<string>(deletedIds ?? []);
   const byId = new Map<string, MeetingMinute>();
   for (const meeting of [...existing, ...incoming]) {
-    if (!meeting || !meeting.id) continue;
+    if (!meeting || !meeting.id || deletedSet.has(meeting.id)) continue;
     const prev = byId.get(meeting.id);
     if (!prev) {
       byId.set(meeting.id, meeting);
@@ -2186,7 +2299,11 @@ export function mergeMeetings(
     }
     const prevTs = new Date(prev.updatedAt || prev.createdAt || 0).getTime();
     const nextTs = new Date(meeting.updatedAt || meeting.createdAt || 0).getTime();
-    byId.set(meeting.id, nextTs >= prevTs ? meeting : prev);
+    const winner = nextTs >= prevTs ? meeting : prev;
+    byId.set(meeting.id, {
+      ...winner,
+      approvalStamp: winner.approvalStamp ?? prev.approvalStamp ?? meeting.approvalStamp,
+    });
   }
   return Array.from(byId.values()).sort((a, b) => {
     const tsB = new Date(b.createdAt || b.meetingDate || 0).getTime();
@@ -2234,6 +2351,7 @@ function buildOfflineDiagnostics(state: NexOpsState): TableSyncStatus[] {
 function normalizeBrandingCandidate(raw: unknown, fallback: CompanyBrandingConfig): CompanyBrandingConfig {
   if (!raw || typeof raw !== 'object') return fallback;
   const parsed = raw as Partial<CompanyBrandingConfig>;
+  const departments = normalizeStringList(parsed.departments, fallback.departments);
   return {
     companyName:
       typeof parsed.companyName === 'string' && parsed.companyName.trim()
@@ -2243,7 +2361,7 @@ function normalizeBrandingCandidate(raw: unknown, fallback: CompanyBrandingConfi
       typeof parsed.tagline === 'string' && parsed.tagline.trim()
         ? parsed.tagline.trim()
         : fallback.tagline,
-    departments: normalizeStringList(parsed.departments, fallback.departments),
+    departments,
     categories: normalizeStringList(parsed.categories, fallback.categories),
     approvalBudgetThresholdUsd:
       typeof parsed.approvalBudgetThresholdUsd === 'number' &&
@@ -2252,6 +2370,10 @@ function normalizeBrandingCandidate(raw: unknown, fallback: CompanyBrandingConfi
         ? parsed.approvalBudgetThresholdUsd
         : fallback.approvalBudgetThresholdUsd,
     slaPolicy: normalizeSlaPolicy(parsed.slaPolicy, fallback.slaPolicy ?? DEFAULT_SLA_POLICY),
+    shiftRosters: normalizeShiftRosters(
+      parsed.shiftRosters ?? fallback.shiftRosters,
+      departments,
+    ),
   };
 }
 
@@ -2593,8 +2715,10 @@ export const dataService = {
    * and returns per-table connection health & live row counts.
    * Gracefully retains localStorage fallback for any table not yet migrated.
    */
-  async fetchFullWorkspaceState(): Promise<FullWorkspaceFetchResult> {
-    const localSnapshot = readWorkspaceState();
+  async fetchFullWorkspaceState(activeUserEmail?: string | null): Promise<FullWorkspaceFetchResult> {
+    const safeEmail =
+      sanitizePostgrestEmailFilter(activeUserEmail) ?? getActiveSessionEmailSync();
+    const localSnapshot = readWorkspaceState(safeEmail);
     const localBranding = readBrandingConfig();
 
     if (!supabase) {
@@ -2608,6 +2732,45 @@ export const dataService = {
     }
 
     const checkedAt = new Date().toISOString();
+    const scopedEmailsPromise = safeEmail
+      ? supabase
+          .from('nexops_workspace_emails')
+          .select('*')
+          .or(
+            `sender_email.ilike.${safeEmail},to_recipients.ilike.%${safeEmail}%,cc_recipients.ilike.%${safeEmail}%`,
+          )
+          .order('sent_at', { ascending: false })
+      : Promise.resolve({ data: [] as NexOpsWorkspaceEmailDbRow[], error: null });
+
+    const scopedUserCommsPromise = safeEmail
+      ? supabase
+          .from('nexops_system_state')
+          .select('*')
+          .in('state_key', [
+            getUserMailStateKey(safeEmail),
+            getUserChatStateKey(safeEmail),
+            CHANNEL_CHAT_STATE_KEY,
+          ])
+      : Promise.resolve({ data: [] as NexOpsSystemStateDbRow[], error: null });
+
+    const scopedRelationalChatsPromise = safeEmail
+      ? supabase
+          .from('team_chat_messages')
+          .select('*')
+          .or(`sender_email.eq.${safeEmail},receiver_email.eq.${safeEmail}`)
+          .order('created_at', { ascending: true })
+          .then((res) => res, () => ({ data: null, error: null }))
+      : Promise.resolve({ data: null, error: null });
+
+    const scopedRelationalMailsPromise = safeEmail
+      ? supabase
+          .from('corporate_mails')
+          .select('*')
+          .or(`sender_email.eq.${safeEmail},receiver_email.eq.${safeEmail}`)
+          .order('created_at', { ascending: false })
+          .then((res) => res, () => ({ data: null, error: null }))
+      : Promise.resolve({ data: null, error: null });
+
     const [
       reqRes,
       auditRes,
@@ -2622,6 +2785,9 @@ export const dataService = {
       emailRes,
       linkRes,
       sysRes,
+      userCommsRes,
+      relChatRes,
+      relMailRes,
       notifRes,
       attendanceRes,
       announcementRes,
@@ -2639,9 +2805,15 @@ export const dataService = {
       supabase.from('leave_requests').select('*').order('created_at', { ascending: false }),
       supabase.from('nexops_moms').select('*').order('meeting_date', { ascending: false }),
       supabase.from('user_access').select('*').order('created_at', { ascending: false }),
-      supabase.from('nexops_workspace_emails').select('*').order('sent_at', { ascending: false }),
+      scopedEmailsPromise,
       supabase.from('nexops_workspace_links').select('*').order('updated_at', { ascending: false }),
-      supabase.from('nexops_system_state').select('*'),
+      supabase
+        .from('nexops_system_state')
+        .select('*')
+        .in('state_key', [...SHARED_SYSTEM_STATE_KEYS]),
+      scopedUserCommsPromise,
+      scopedRelationalChatsPromise,
+      scopedRelationalMailsPromise,
       supabase.from('notifications').select('*').order('created_at', { ascending: false }).limit(200),
       supabase.from('attendance_logs').select('*').order('attendance_date', { ascending: false }),
       supabase.from('announcements').select('*').order('published_at', { ascending: false }),
@@ -2688,8 +2860,19 @@ export const dataService = {
           }))
         : localSnapshot.announcements;
 
+    const sysAnnouncementsById = new Map(sysAnnouncements.map((a) => [a.id, a]));
+    const localAnnouncementsById = new Map(localSnapshot.announcements.map((a) => [a.id, a]));
     const announcements: CompanyAnnouncement[] = !announcementRes.error
-      ? ((announcementRes.data ?? []) as NexOpsAnnouncementDbRow[]).map(mapDbAnnouncement)
+      ? ((announcementRes.data ?? []) as NexOpsAnnouncementDbRow[]).map((row) => {
+          const mapped = mapDbAnnouncement(row);
+          const meta = sysAnnouncementsById.get(mapped.id) ?? localAnnouncementsById.get(mapped.id);
+          return meta
+            ? {
+                ...mapped,
+                expiresAt: meta.expiresAt ?? mapped.expiresAt,
+              }
+            : mapped;
+        })
       : sysAnnouncements;
 
     const presenceMap = normalizePresenceMap(sysMap.get(SYSTEM_STATE_KEYS.USER_PRESENCE)?.payload);
@@ -2782,8 +2965,30 @@ export const dataService = {
       ? ((assetRes.data ?? []) as NexOpsAssetDbRow[]).map(mapDbAsset)
       : localSnapshot.assets;
 
+    const sopMetaRow = sysMap.get(SYSTEM_STATE_KEYS.SOP_METADATA);
+    const sopMetaMap: Record<
+      string,
+      { versions?: DocumentVersionEntry[]; approvalStamp?: DigitalApprovalStamp }
+    > =
+      sopMetaRow && sopMetaRow.payload && typeof sopMetaRow.payload === 'object'
+        ? (sopMetaRow.payload as Record<
+            string,
+            { versions?: DocumentVersionEntry[]; approvalStamp?: DigitalApprovalStamp }
+          >)
+        : {};
+    const localSopById = new Map(localSnapshot.sops.map((s) => [s.id, s]));
+
     const sops: SopDocument[] = !sopRes.error
-      ? ((sopRes.data ?? []) as NexOpsSopDbRow[]).map(mapDbSop)
+      ? ((sopRes.data ?? []) as NexOpsSopDbRow[]).map((row) => {
+          const mapped = mapDbSop(row);
+          const meta = sopMetaMap[mapped.id];
+          const localSop = localSopById.get(mapped.id);
+          return {
+            ...mapped,
+            versions: meta?.versions ?? localSop?.versions,
+            approvalStamp: meta?.approvalStamp ?? localSop?.approvalStamp,
+          };
+        })
       : localSnapshot.sops;
 
     // Merge legacy `nexops_leaves` and new `leave_requests` deduplicated by id
@@ -2818,24 +3023,35 @@ export const dataService = {
         ? mergeMeetings(dbMeetings, sysMeetings)
         : localSnapshot.meetings;
 
-    const workspaceEmails: WorkspaceEmailLog[] = !emailRes.error
-      ? ((emailRes.data ?? []) as NexOpsWorkspaceEmailDbRow[]).map(mapDbWorkspaceEmail)
-      : localSnapshot.workspaceEmails;
+    const workspaceEmails: WorkspaceEmailLog[] =
+      !safeEmail
+        ? []
+        : !emailRes.error
+          ? ((emailRes.data ?? []) as NexOpsWorkspaceEmailDbRow[])
+              .map(mapDbWorkspaceEmail)
+              .filter((e) => isStrictWorkspaceEmailParticipant(e, safeEmail))
+          : localSnapshot.workspaceEmails;
 
     const workspaceLinks: WorkspaceSavedLink[] = !linkRes.error
       ? ((linkRes.data ?? []) as NexOpsWorkspaceLinkDbRow[]).map(mapDbWorkspaceLink)
       : localSnapshot.workspaceLinks;
 
-    // Merge legacy `nexops_audit_logs` and new `audit_logs` deduplicated by id
+    // Merge legacy `nexops_audit_logs` and new `audit_logs` deduplicated by id (never store/expose private comms audit entries)
     const auditMap = new Map<string, AuditEvent>();
     if (!auditRes.error) {
       for (const row of (auditRes.data ?? []) as NexOpsAuditDbRow[]) {
-        auditMap.set(row.id, mapDbAudit(row, teamMembers));
+        const mapped = mapDbAudit(row, teamMembers);
+        if (!isPrivateCommsAuditEvent(mapped)) {
+          auditMap.set(row.id, mapped);
+        }
       }
     }
     if (!auditNewRes.error) {
       for (const row of (auditNewRes.data ?? []) as NexOpsAuditDbRow[]) {
-        auditMap.set(row.id, mapDbAudit(row, teamMembers));
+        const mapped = mapDbAudit(row, teamMembers);
+        if (!isPrivateCommsAuditEvent(mapped)) {
+          auditMap.set(row.id, mapped);
+        }
       }
     }
     const globalAuditLogs: AuditEvent[] =
@@ -2868,17 +3084,24 @@ export const dataService = {
         : [];
     const sysVaultById = new Map(sysVaultDocs.map((d) => [d.id, d]));
 
+    const localVaultById = new Map(localSnapshot.vaultDocuments.map((d) => [d.id, d]));
+
     let vaultDocuments: DocumentVaultItem[];
     if (!vaultRes.error) {
       const dbDocs = ((vaultRes.data ?? []) as NexOpsVaultDocumentDbRow[]).map((row) => {
         const mapped = mapDbVaultDocument(row);
-        const meta = sysVaultById.get(mapped.id);
+        const meta = sysVaultById.get(mapped.id) ?? localVaultById.get(mapped.id);
         return meta
           ? {
               ...mapped,
               storageBucket: meta.storageBucket ?? mapped.storageBucket,
               storagePath: meta.storagePath ?? mapped.storagePath,
               storageProvider: meta.storageProvider ?? mapped.storageProvider,
+              currentVersion: meta.currentVersion ?? mapped.currentVersion,
+              versions: meta.versions ?? mapped.versions,
+              approvalStamp: meta.approvalStamp ?? mapped.approvalStamp,
+              expiryDate: meta.expiryDate ?? mapped.expiryDate,
+              signOffRequests: meta.signOffRequests ?? mapped.signOffRequests,
             }
           : mapped;
       });
@@ -2897,39 +3120,63 @@ export const dataService = {
         ? (pendingChangesRow.payload as PendingEditorChange[])
         : localSnapshot.pendingEditorChanges;
 
-    const mailsRow = sysMap.get(SYSTEM_STATE_KEYS.CORPORATE_MAILS);
-    const legacyMailsRow = sysMap.get(LEGACY_COMMS_STATE_KEYS.CORPORATE_MAILS);
-    const hasCloudMails = Boolean(mailsRow || legacyMailsRow);
-    const corporateMails: CorporateMailMessage[] = hasCloudMails
-      ? mergeCorporateMails(
-          Array.isArray(legacyMailsRow?.payload)
-            ? (legacyMailsRow.payload as CorporateMailMessage[])
-            : [],
-          Array.isArray(mailsRow?.payload)
-            ? (mailsRow.payload as CorporateMailMessage[])
-            : [],
-        )
-      : localSnapshot.corporateMails;
+    const userCommsRows = !userCommsRes.error
+      ? ((userCommsRes.data ?? []) as NexOpsSystemStateDbRow[])
+      : [];
+    const userCommsMap = new Map<string, NexOpsSystemStateDbRow>();
+    for (const row of userCommsRows) {
+      userCommsMap.set(row.state_key, row);
+    }
 
-    const chatRow = sysMap.get(SYSTEM_STATE_KEYS.CHAT_MESSAGES);
-    const legacyChatRow = sysMap.get(LEGACY_COMMS_STATE_KEYS.CHAT_MESSAGES);
-    const hasCloudChats = Boolean(chatRow || legacyChatRow);
-    const chatMessages: TeamChatMessage[] = hasCloudChats
-      ? mergeChatMessages(
-          Array.isArray(legacyChatRow?.payload)
-            ? (legacyChatRow.payload as TeamChatMessage[])
-            : [],
-          Array.isArray(chatRow?.payload)
-            ? (chatRow.payload as TeamChatMessage[])
-            : [],
+    const userMailRow = safeEmail ? userCommsMap.get(getUserMailStateKey(safeEmail)) : undefined;
+    const relMailsRaw =
+      safeEmail && !relMailRes.error && Array.isArray(relMailRes.data)
+        ? (relMailRes.data as CorporateMailMessage[])
+        : [];
+    const corporateMails: CorporateMailMessage[] = !safeEmail
+      ? []
+      : mergeCorporateMails(
+          userMailRow && Array.isArray(userMailRow.payload)
+            ? (userMailRow.payload as CorporateMailMessage[])
+            : localSnapshot.corporateMails,
+          relMailsRaw,
+        ).filter((m) => isStrictMailParticipant(m, safeEmail));
+
+    const userChatRow = safeEmail ? userCommsMap.get(getUserChatStateKey(safeEmail)) : undefined;
+    const channelChatRow = userCommsMap.get(CHANNEL_CHAT_STATE_KEY);
+    const relChatsRaw =
+      safeEmail && !relChatRes.error && Array.isArray(relChatRes.data)
+        ? (relChatRes.data as TeamChatMessage[])
+        : [];
+    const chatMessages: TeamChatMessage[] = !safeEmail
+      ? []
+      : mergeChatMessages(
+          [
+            ...(userChatRow && Array.isArray(userChatRow.payload)
+              ? (userChatRow.payload as TeamChatMessage[])
+              : []),
+            ...(channelChatRow && Array.isArray(channelChatRow.payload)
+              ? (channelChatRow.payload as TeamChatMessage[])
+              : []),
+            ...(!userChatRow && !channelChatRow ? localSnapshot.chatMessages : []),
+          ],
+          relChatsRaw,
         )
-      : localSnapshot.chatMessages;
+          .map(normalizePrivateChatMessage)
+          .filter((m) => isStrictChatParticipant(m, safeEmail));
 
     const calendarRow = sysMap.get(SYSTEM_STATE_KEYS.CALENDAR_EVENTS);
     const calendarEvents: CalendarEvent[] =
       calendarRow && Array.isArray(calendarRow.payload)
         ? mergeCalendarEvents([], calendarRow.payload as CalendarEvent[])
         : localSnapshot.calendarEvents;
+
+    const recycleRow = sysMap.get(SYSTEM_STATE_KEYS.RECYCLE_BIN);
+    const recycleBin: RecycleBinItem[] = pruneExpiredRecycleBin(
+      recycleRow && Array.isArray(recycleRow.payload)
+        ? (recycleRow.payload as RecycleBinItem[])
+        : localSnapshot.recycleBin,
+    );
 
     const projectLinksMap = readRequestProjectsMap();
     const assetLinksMap = readRequestAssetsMap();
@@ -3010,7 +3257,7 @@ export const dataService = {
       {
         ...SUPABASE_TABLE_REGISTRY[8],
         status: emailRes.error ? 'error' : 'connected',
-        rowCount: emailRes.error ? localSnapshot.workspaceEmails.length : (emailRes.data ?? []).length,
+        rowCount: emailRes.error ? localSnapshot.workspaceEmails.length : workspaceEmails.length,
         lastCheckedAt: checkedAt,
         errorMessage: emailRes.error?.message,
       },
@@ -3106,10 +3353,11 @@ export const dataService = {
       corporateMails,
       chatMessages,
       calendarEvents,
+      recycleBin,
       permissionMatrix,
     };
 
-    writeWorkspaceState(hydrated);
+    writeWorkspaceState(hydrated, safeEmail);
     return {
       state: hydrated,
       branding,
@@ -3125,8 +3373,13 @@ export const dataService = {
   },
 
   diagnostics: {
-    async checkAllTables(stateHint?: NexOpsState): Promise<TableSyncStatus[]> {
-      const local = stateHint ?? readWorkspaceState();
+    async checkAllTables(
+      stateHint?: NexOpsState,
+      activeUserEmail?: string | null,
+    ): Promise<TableSyncStatus[]> {
+      const safeEmail =
+        sanitizePostgrestEmailFilter(activeUserEmail) ?? getActiveSessionEmailSync();
+      const local = stateHint ?? readWorkspaceState(safeEmail);
       if (!supabase) {
         return buildOfflineDiagnostics(local);
       }
@@ -3134,6 +3387,42 @@ export const dataService = {
       const checkedAt = new Date().toISOString();
       const results = await Promise.all(
         SUPABASE_TABLE_REGISTRY.map(async (entry) => {
+          if (entry.tableKey === 'workspace_emails') {
+            if (!safeEmail) {
+              return {
+                ...entry,
+                status: 'connected',
+                rowCount: 0,
+                lastCheckedAt: checkedAt,
+              } satisfies TableSyncStatus;
+            }
+            const { count, error } = await supabase!
+              .from(entry.tableName)
+              .select('*', { count: 'exact', head: true })
+              .or(
+                `sender_email.ilike.${safeEmail},to_recipients.ilike.%${safeEmail}%,cc_recipients.ilike.%${safeEmail}%`,
+              );
+            return {
+              ...entry,
+              status: error ? 'error' : 'connected',
+              rowCount: error ? 0 : count ?? 0,
+              lastCheckedAt: checkedAt,
+              errorMessage: error?.message,
+            } satisfies TableSyncStatus;
+          }
+          if (entry.tableKey === 'system_state') {
+            const { count, error } = await supabase!
+              .from(entry.tableName)
+              .select('*', { count: 'exact', head: true })
+              .in('state_key', [...SHARED_SYSTEM_STATE_KEYS]);
+            return {
+              ...entry,
+              status: error ? 'error' : 'connected',
+              rowCount: error ? 0 : count ?? 0,
+              lastCheckedAt: checkedAt,
+              errorMessage: error?.message,
+            } satisfies TableSyncStatus;
+          }
           const { count, error } = await supabase!
             .from(entry.tableName)
             .select('*', { count: 'exact', head: true });
@@ -3155,22 +3444,31 @@ export const dataService = {
     nextState: NexOpsState,
     brandingOverride?: CompanyBrandingConfig,
   ): Promise<NexOpsState> {
-    writeWorkspaceState(nextState);
+    const safeEmail = getActiveSessionEmailSync();
+    const existingScoped = readWorkspaceState(safeEmail);
+    const sanitizedRestoreState: NexOpsState = {
+      ...nextState,
+      globalAuditLogs: nextState.globalAuditLogs.filter((a) => !isPrivateCommsAuditEvent(a)),
+      workspaceEmails: existingScoped.workspaceEmails,
+      corporateMails: existingScoped.corporateMails,
+      chatMessages: existingScoped.chatMessages,
+    };
+    writeWorkspaceState(sanitizedRestoreState, safeEmail);
     if (supabase) {
-      if (nextState.requests.length > 0) {
+      if (sanitizedRestoreState.requests.length > 0) {
         const { error: reqErr } = await supabase
           .from('operations_data')
-          .upsert(nextState.requests.map(toRequestDbRow), { onConflict: 'id' });
+          .upsert(sanitizedRestoreState.requests.map(toRequestDbRow), { onConflict: 'id' });
         if (reqErr) throw reqErr;
       }
-      if (nextState.globalAuditLogs.length > 0) {
+      if (sanitizedRestoreState.globalAuditLogs.length > 0) {
         const { error: audErr } = await supabase
           .from('nexops_audit_logs')
-          .upsert(nextState.globalAuditLogs.map(toAuditDbRow), { onConflict: 'id' });
+          .upsert(sanitizedRestoreState.globalAuditLogs.map(toAuditDbRow), { onConflict: 'id' });
         if (audErr) throw audErr;
         await supabase
           .from('audit_logs')
-          .upsert(nextState.globalAuditLogs.map(toAuditLogsNewDbRow), { onConflict: 'id' })
+          .upsert(sanitizedRestoreState.globalAuditLogs.map(toAuditLogsNewDbRow), { onConflict: 'id' })
           .then(() => {}, () => {});
       }
       if (nextState.projects.length > 0) {
@@ -3237,22 +3535,16 @@ export const dataService = {
           .upsert(nextState.notifications.map(toNotificationDbRow), { onConflict: 'id' })
           .then(() => {}, () => {});
       }
-      if (nextState.meetings.length > 0) {
+      if (sanitizedRestoreState.meetings.length > 0) {
         const { error: momErr } = await supabase
           .from('nexops_moms')
-          .upsert(nextState.meetings.map(toMomDbRow), { onConflict: 'id' });
+          .upsert(sanitizedRestoreState.meetings.map(toMomDbRow), { onConflict: 'id' });
         if (momErr) throw momErr;
       }
-      if (nextState.workspaceEmails.length > 0) {
-        const { error: emlErr } = await supabase
-          .from('nexops_workspace_emails')
-          .upsert(nextState.workspaceEmails.map(toWorkspaceEmailDbRow), { onConflict: 'id' });
-        if (emlErr) throw emlErr;
-      }
-      if (nextState.workspaceLinks.length > 0) {
+      if (sanitizedRestoreState.workspaceLinks.length > 0) {
         const { error: lnkErr } = await supabase
           .from('nexops_workspace_links')
-          .upsert(nextState.workspaceLinks.map(toWorkspaceLinkDbRow), { onConflict: 'id' });
+          .upsert(sanitizedRestoreState.workspaceLinks.map(toWorkspaceLinkDbRow), { onConflict: 'id' });
         if (lnkErr) throw lnkErr;
       }
 
@@ -3260,17 +3552,17 @@ export const dataService = {
       const sysRows = [
         {
           state_key: SYSTEM_STATE_KEYS.PERMISSION_MATRIX,
-          payload: nextState.permissionMatrix ?? DEFAULT_PERMISSION_MATRIX,
+          payload: sanitizedRestoreState.permissionMatrix ?? DEFAULT_PERMISSION_MATRIX,
           updated_at: now,
         },
         {
           state_key: SYSTEM_STATE_KEYS.ANNOUNCEMENTS,
-          payload: nextState.announcements ?? [],
+          payload: sanitizedRestoreState.announcements ?? [],
           updated_at: now,
         },
         {
           state_key: SYSTEM_STATE_KEYS.TEAM_DIRECTORY,
-          payload: nextState.teamMembers ?? [],
+          payload: sanitizedRestoreState.teamMembers ?? [],
           updated_at: now,
         },
         {
@@ -3280,27 +3572,22 @@ export const dataService = {
         },
         {
           state_key: SYSTEM_STATE_KEYS.PENDING_EDITOR_CHANGES,
-          payload: nextState.pendingEditorChanges ?? [],
-          updated_at: now,
-        },
-        {
-          state_key: SYSTEM_STATE_KEYS.CORPORATE_MAILS,
-          payload: nextState.corporateMails ?? [],
-          updated_at: now,
-        },
-        {
-          state_key: SYSTEM_STATE_KEYS.CHAT_MESSAGES,
-          payload: nextState.chatMessages ?? [],
+          payload: sanitizedRestoreState.pendingEditorChanges ?? [],
           updated_at: now,
         },
         {
           state_key: SYSTEM_STATE_KEYS.MEET_CALL_CARDS,
-          payload: nextState.meetings ?? [],
+          payload: sanitizedRestoreState.meetings ?? [],
           updated_at: now,
         },
         {
           state_key: SYSTEM_STATE_KEYS.CALENDAR_EVENTS,
-          payload: nextState.calendarEvents ?? [],
+          payload: sanitizedRestoreState.calendarEvents ?? [],
+          updated_at: now,
+        },
+        {
+          state_key: SYSTEM_STATE_KEYS.RECYCLE_BIN,
+          payload: pruneExpiredRecycleBin(sanitizedRestoreState.recycleBin ?? []),
           updated_at: now,
         },
       ];
@@ -3309,7 +3596,7 @@ export const dataService = {
         .upsert(sysRows, { onConflict: 'state_key' });
       if (sysErr) throw sysErr;
     }
-    return nextState;
+    return sanitizedRestoreState;
   },
 
   // -------------------------------------------------------------------------
@@ -3696,7 +3983,8 @@ export const dataService = {
           isAuthenticated: true,
           userId: member.id,
           rememberSession,
-          signedInAt: new Date().toISOString(),
+          signedInAt: loginNow,
+          lastLoginAt: loginNow,
           authProvider: 'supabase',
           employeeId: member.employeeId,
           userName: member.name,
@@ -3776,6 +4064,7 @@ export const dataService = {
         userId: normalizedMatch.id,
         rememberSession,
         signedInAt: now,
+        lastLoginAt: now,
         authProvider: 'local',
         employeeId: normalizedMatch.employeeId,
         userName: normalizedMatch.name,
@@ -4058,8 +4347,9 @@ export const dataService = {
       if (!cleanEmail || !cleanEmail.includes('@')) {
         throw new Error('A valid corporate email address is required.');
       }
-      if (newPassword.trim().length < 8) {
-        throw new Error('New corporate password must be at least 8 characters.');
+      const pwCheck = validateStrongPassword(newPassword);
+      if (!pwCheck.valid) {
+        throw new Error(pwCheck.error || 'Password must be at least 8 characters with letters and numbers.');
       }
       await saveLocalCredential(cleanEmail, newPassword);
 
@@ -4367,14 +4657,18 @@ export const dataService = {
     },
 
     async updatePassword(newPassword: string, userEmail?: string): Promise<void> {
-      if (newPassword.trim().length < 8) {
-        throw new Error('New corporate password must be at least 8 characters.');
+      const pwCheck = validateStrongPassword(newPassword);
+      if (!pwCheck.valid) {
+        throw new Error(pwCheck.error || 'Password must be at least 8 characters with letters and numbers.');
       }
       if (supabase) {
         const { data } = await supabase.auth.getSession();
         if (data.session) {
           const { error } = await supabase.auth.updateUser({ password: newPassword });
           if (error) throw error;
+          if (userEmail) {
+            await saveLocalCredential(userEmail, newPassword);
+          }
           return;
         }
       }
@@ -4402,7 +4696,17 @@ export const dataService = {
       }
 
       const now = new Date().toISOString();
-      const cleanEmail = currentMember.email.trim().toLowerCase();
+      let cleanEmail = currentMember.email.trim().toLowerCase();
+      if (supabase) {
+        const { data: userRes } = await supabase.auth.getUser().catch(() => ({ data: { user: null } }));
+        const authEmail = userRes?.user?.email?.trim().toLowerCase();
+        if (authEmail && cleanEmail && authEmail !== cleanEmail) {
+          throw new Error('Session verification mismatch. Please sign in again.');
+        }
+        if (authEmail) {
+          cleanEmail = authEmail;
+        }
+      }
       const isSuper = isSuperAdminEmail(cleanEmail);
 
       if (isSuperAdminEmployeeId(cleanEmpId) && !isSuper) {
@@ -4531,11 +4835,23 @@ export const dataService = {
     },
 
     async signOut() {
+      dataService.comms.purgeLocalCache();
       dataService.auth.clearSessionSync();
       if (!supabase) return;
       const { data } = await supabase.auth.getSession();
       if (data.session) {
         await supabase.auth.signOut();
+      }
+    },
+
+    async signOutAllDevices() {
+      dataService.comms.purgeLocalCache();
+      dataService.auth.clearSessionSync();
+      if (!supabase) return;
+      const { data } = await supabase.auth.getSession();
+      if (data.session) {
+        const { error } = await supabase.auth.signOut({ scope: 'global' });
+        if (error) throw error;
       }
     },
   },
@@ -4902,15 +5218,36 @@ export const dataService = {
   },
 
   // -------------------------------------------------------------------------
-  // 7. Corporate SOP & Knowledge Vault (`nexops_sops`)
+  // 7. Corporate SOP & Knowledge Vault (`nexops_sops` + `nexops_system_state` metadata)
   // -------------------------------------------------------------------------
   sops: {
-    async upsert(sop: SopDocument, auditEntry?: AuditEvent): Promise<void> {
+    async upsert(
+      sop: SopDocument,
+      auditEntry?: AuditEvent,
+      allSops?: SopDocument[],
+    ): Promise<void> {
       if (!supabase) return;
       const { error } = await supabase
         .from('nexops_sops')
         .upsert(toSopDbRow(sop), { onConflict: 'id' });
       if (error) throw error;
+      if (allSops || sop.versions || sop.approvalStamp) {
+        const metaBundle: Record<
+          string,
+          { versions?: DocumentVersionEntry[]; approvalStamp?: DigitalApprovalStamp }
+        > = {};
+        for (const item of allSops ?? [sop]) {
+          if (item.versions?.length || item.approvalStamp) {
+            metaBundle[item.id] = {
+              versions: item.versions,
+              approvalStamp: item.approvalStamp,
+            };
+          }
+        }
+        await dataService.systemState
+          .upsertKey(SYSTEM_STATE_KEYS.SOP_METADATA, metaBundle, sop.authorName)
+          .catch(() => {});
+      }
       if (auditEntry) await dataService.auditLogs.append(auditEntry);
     },
   },
@@ -5164,6 +5501,27 @@ export const dataService = {
     async upsert(meeting: MeetingMinute, auditEntry?: AuditEvent): Promise<void> {
       await dataService.comms.saveMeetSession(meeting, meeting.facilitator, auditEntry);
     },
+
+    async remove(
+      meetingId: string,
+      remainingMeetings: MeetingMinute[],
+      actorName: string,
+      auditEntry?: AuditEvent,
+    ): Promise<void> {
+      const local = readWorkspaceState();
+      writeWorkspaceState({
+        ...local,
+        meetings: remainingMeetings,
+      });
+      if (!supabase) return;
+      await Promise.all([
+        supabase.from('nexops_moms').delete().eq('id', meetingId),
+        dataService.systemState
+          .upsertKey(SYSTEM_STATE_KEYS.MEET_CALL_CARDS, remainingMeetings, actorName)
+          .catch(() => {}),
+      ]);
+      if (auditEntry) await dataService.auditLogs.append(auditEntry).catch(() => {});
+    },
   },
 
   // -------------------------------------------------------------------------
@@ -5378,13 +5736,12 @@ export const dataService = {
   // 12. Workspace Tools — Gmail Sent Logs (`nexops_workspace_emails`)
   // -------------------------------------------------------------------------
   workspaceEmails: {
-    async append(emailLog: WorkspaceEmailLog, auditEntry?: AuditEvent): Promise<void> {
+    async append(emailLog: WorkspaceEmailLog): Promise<void> {
       if (!supabase) return;
       const { error } = await supabase
         .from('nexops_workspace_emails')
         .upsert(toWorkspaceEmailDbRow(emailLog), { onConflict: 'id' });
       if (error) throw error;
-      if (auditEntry) await dataService.auditLogs.append(auditEntry);
     },
   },
 
@@ -5865,61 +6222,115 @@ export const dataService = {
   },
 
   comms: {
+    purgeLocalCache(): void {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return;
+        const parsed = JSON.parse(raw) as NexOpsState;
+        if (!parsed || typeof parsed !== 'object') return;
+        const purged: NexOpsState = {
+          ...parsed,
+          corporateMails: [],
+          chatMessages: [],
+          workspaceEmails: [],
+          globalAuditLogs: Array.isArray(parsed.globalAuditLogs)
+            ? parsed.globalAuditLogs.filter((a) => !isPrivateCommsAuditEvent(a))
+            : [],
+        };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(purged));
+      } catch {
+        // Ignore storage errors on sign-out purge
+      }
+    },
+
     async saveCorporateMails(
       mails: CorporateMailMessage[],
       updatedBy?: string,
-      auditEntry?: AuditEvent,
+      _auditEntry?: AuditEvent,
       deletedIds?: string[],
+      activeUserEmail?: string | null,
+      syncPeers = false,
     ): Promise<CorporateMailMessage[]> {
-      const local = readWorkspaceState();
-      const localMerged = mergeCorporateMails(local.corporateMails, mails, deletedIds);
-      writeWorkspaceState({
-        ...local,
-        corporateMails: localMerged,
-      });
+      const safeEmail =
+        sanitizePostgrestEmailFilter(activeUserEmail) ?? getActiveSessionEmailSync();
+      if (!safeEmail) return [];
+
+      const scopedIncoming = mails.filter((m) => isStrictMailParticipant(m, safeEmail));
+      const local = readWorkspaceState(safeEmail);
+      const localMerged = mergeCorporateMails(local.corporateMails, scopedIncoming, deletedIds).filter(
+        (m) => isStrictMailParticipant(m, safeEmail),
+      );
+      writeWorkspaceState(
+        {
+          ...local,
+          corporateMails: localMerged,
+        },
+        safeEmail,
+      );
 
       if (!supabase) return localMerged;
 
+      const userMailKey = getUserMailStateKey(safeEmail);
       const synced = await retrySupabaseWrite(
-        'nexops_system_state[nexops_mails]',
+        `nexops_system_state[${userMailKey}]`,
         async () => {
-          const [cloudPrimary, cloudLegacy] = await Promise.all([
-            dataService.systemState.getKey<CorporateMailMessage[]>(SYSTEM_STATE_KEYS.CORPORATE_MAILS),
-            dataService.systemState.getKey<CorporateMailMessage[]>(
-              LEGACY_COMMS_STATE_KEYS.CORPORATE_MAILS,
-            ),
-          ]);
-          const cloudCombined = mergeCorporateMails(
-            Array.isArray(cloudLegacy) ? cloudLegacy : [],
-            Array.isArray(cloudPrimary) ? cloudPrimary : [],
+          const cloudSelf = await dataService.systemState.getKey<CorporateMailMessage[]>(userMailKey);
+          const mergedSelf = mergeCorporateMails(
+            Array.isArray(cloudSelf)
+              ? cloudSelf.filter((m) => isStrictMailParticipant(m, safeEmail))
+              : [],
+            scopedIncoming,
             deletedIds,
-          );
-          const merged = mergeCorporateMails(cloudCombined, mails, deletedIds);
-          await dataService.systemState.upsertKey(
-            SYSTEM_STATE_KEYS.CORPORATE_MAILS,
-            merged,
-            updatedBy,
-          );
-          return merged;
+          ).filter((m) => isStrictMailParticipant(m, safeEmail));
+
+          await dataService.systemState.upsertKey(userMailKey, mergedSelf, updatedBy);
+
+          if (syncPeers) {
+            const peerBuckets = new Map<string, CorporateMailMessage[]>();
+            for (const mail of scopedIncoming) {
+              if (mail.status !== 'sent') continue;
+              const candidates = [...(mail.toEmails ?? []), ...(mail.ccEmails ?? [])];
+              for (const rawPeer of candidates) {
+                const peerEmail = sanitizePostgrestEmailFilter(rawPeer);
+                if (!peerEmail || peerEmail === safeEmail) continue;
+                if (!isStrictMailParticipant(mail, peerEmail)) continue;
+                const list = peerBuckets.get(peerEmail) ?? [];
+                list.push(mail);
+                peerBuckets.set(peerEmail, list);
+              }
+            }
+
+            await Promise.all(
+              Array.from(peerBuckets.entries()).map(async ([peerEmail, peerMails]) => {
+                const peerKey = getUserMailStateKey(peerEmail);
+                const existingPeer = await dataService.systemState.getKey<CorporateMailMessage[]>(
+                  peerKey,
+                );
+                const nextPeer = mergeCorporateMails(
+                  Array.isArray(existingPeer)
+                    ? existingPeer.filter((m) => isStrictMailParticipant(m, peerEmail))
+                    : [],
+                  peerMails,
+                ).filter((m) => isStrictMailParticipant(m, peerEmail));
+                await dataService.systemState.upsertKey(peerKey, nextPeer, updatedBy);
+              }),
+            );
+          }
+
+          return mergedSelf;
         },
         2,
         1500,
       );
 
-      const refreshedLocal = readWorkspaceState();
-      writeWorkspaceState({
-        ...refreshedLocal,
-        corporateMails: synced,
-      });
-
-      if (auditEntry) {
-        void dataService.auditLogs.append(auditEntry).catch((auditErr) => {
-          console.warn(
-            '[NexOps Audit] Non-blocking mail audit log skipped:',
-            extractSupabaseErrorMessage(auditErr),
-          );
-        });
-      }
+      const refreshedLocal = readWorkspaceState(safeEmail);
+      writeWorkspaceState(
+        {
+          ...refreshedLocal,
+          corporateMails: synced,
+        },
+        safeEmail,
+      );
 
       return synced;
     },
@@ -5927,44 +6338,127 @@ export const dataService = {
     async saveChatMessages(
       messages: TeamChatMessage[],
       updatedBy?: string,
+      activeUserEmail?: string | null,
+      syncPeers = true,
     ): Promise<TeamChatMessage[]> {
-      const local = readWorkspaceState();
-      const localMerged = mergeChatMessages(local.chatMessages, messages);
-      writeWorkspaceState({
-        ...local,
-        chatMessages: localMerged,
-      });
+      const safeEmail =
+        sanitizePostgrestEmailFilter(activeUserEmail) ?? getActiveSessionEmailSync();
+      const normalizedAll = messages.map(normalizePrivateChatMessage);
+      const channelIncoming = normalizedAll.filter(
+        (m) => m.roomType === 'channel' && !m.roomId.startsWith('dm:'),
+      );
+      const dmIncoming = safeEmail
+        ? normalizedAll.filter(
+            (m) =>
+              (m.roomType === 'dm' || m.roomId.startsWith('dm:')) &&
+              isStrictChatParticipant(m, safeEmail),
+          )
+        : [];
+      const scopedIncoming = [...channelIncoming, ...dmIncoming];
+
+      const local = readWorkspaceState(safeEmail);
+      const localMerged = mergeChatMessages(local.chatMessages, scopedIncoming).filter((m) =>
+        isStrictChatParticipant(m, safeEmail),
+      );
+      writeWorkspaceState(
+        {
+          ...local,
+          chatMessages: localMerged,
+        },
+        safeEmail,
+      );
 
       if (!supabase) return localMerged;
 
       const synced = await retrySupabaseWrite(
-        'nexops_system_state[nexops_chats]',
+        'nexops_system_state[scoped_chats]',
         async () => {
-          const [cloudPrimary, cloudLegacy] = await Promise.all([
-            dataService.systemState.getKey<TeamChatMessage[]>(SYSTEM_STATE_KEYS.CHAT_MESSAGES),
-            dataService.systemState.getKey<TeamChatMessage[]>(LEGACY_COMMS_STATE_KEYS.CHAT_MESSAGES),
-          ]);
-          const cloudCombined = mergeChatMessages(
-            Array.isArray(cloudLegacy) ? cloudLegacy : [],
-            Array.isArray(cloudPrimary) ? cloudPrimary : [],
+          let mergedChannels: TeamChatMessage[] = [];
+          if (channelIncoming.length > 0) {
+            const cloudChannels = await dataService.systemState.getKey<TeamChatMessage[]>(
+              CHANNEL_CHAT_STATE_KEY,
+            );
+            mergedChannels = mergeChatMessages(
+              Array.isArray(cloudChannels)
+                ? cloudChannels.filter((m) => m.roomType === 'channel' && !m.roomId.startsWith('dm:'))
+                : [],
+              channelIncoming,
+            ).filter((m) => m.roomType === 'channel' && !m.roomId.startsWith('dm:'));
+            await dataService.systemState.upsertKey(
+              CHANNEL_CHAT_STATE_KEY,
+              mergedChannels,
+              updatedBy,
+            );
+          }
+
+          let mergedSelfDms: TeamChatMessage[] = [];
+          if (safeEmail && dmIncoming.length > 0) {
+            const userChatKey = getUserChatStateKey(safeEmail);
+            const cloudSelfDms = await dataService.systemState.getKey<TeamChatMessage[]>(userChatKey);
+            mergedSelfDms = mergeChatMessages(
+              Array.isArray(cloudSelfDms)
+                ? cloudSelfDms.filter((m) => isStrictChatParticipant(m, safeEmail))
+                : [],
+              dmIncoming,
+            ).filter((m) => isStrictChatParticipant(m, safeEmail));
+            await dataService.systemState.upsertKey(userChatKey, mergedSelfDms, updatedBy);
+
+            if (syncPeers) {
+              const peerBuckets = new Map<string, TeamChatMessage[]>();
+              for (const msg of dmIncoming) {
+                if (msg.senderEmail.trim().toLowerCase() !== safeEmail) continue;
+                const rawPeer = msg.receiverEmail || extractDmPeerEmail(msg.roomId, safeEmail);
+                const peerEmail = sanitizePostgrestEmailFilter(rawPeer);
+                if (!peerEmail || peerEmail === safeEmail) continue;
+                if (!isStrictChatParticipant(msg, peerEmail)) continue;
+                const list = peerBuckets.get(peerEmail) ?? [];
+                list.push(msg);
+                peerBuckets.set(peerEmail, list);
+              }
+
+              await Promise.all(
+                Array.from(peerBuckets.entries()).map(async ([peerEmail, peerMsgs]) => {
+                  const peerKey = getUserChatStateKey(peerEmail);
+                  const existingPeer = await dataService.systemState.getKey<TeamChatMessage[]>(
+                    peerKey,
+                  );
+                  const nextPeer = mergeChatMessages(
+                    Array.isArray(existingPeer)
+                      ? existingPeer.filter((m) => isStrictChatParticipant(m, peerEmail))
+                      : [],
+                    peerMsgs,
+                  ).filter((m) => isStrictChatParticipant(m, peerEmail));
+                  await dataService.systemState.upsertKey(peerKey, nextPeer, updatedBy);
+                }),
+              );
+            }
+          }
+
+          const existingLocalChannels =
+            channelIncoming.length > 0
+              ? mergedChannels
+              : localMerged.filter((m) => m.roomType === 'channel' && !m.roomId.startsWith('dm:'));
+          const existingLocalDms =
+            dmIncoming.length > 0
+              ? mergedSelfDms
+              : localMerged.filter((m) => m.roomType === 'dm' || m.roomId.startsWith('dm:'));
+
+          return mergeChatMessages(existingLocalChannels, existingLocalDms).filter((m) =>
+            isStrictChatParticipant(m, safeEmail),
           );
-          const merged = mergeChatMessages(cloudCombined, messages);
-          await dataService.systemState.upsertKey(
-            SYSTEM_STATE_KEYS.CHAT_MESSAGES,
-            merged,
-            updatedBy,
-          );
-          return merged;
         },
         2,
         1500,
       );
 
-      const refreshedLocal = readWorkspaceState();
-      writeWorkspaceState({
-        ...refreshedLocal,
-        chatMessages: synced,
-      });
+      const refreshedLocal = readWorkspaceState(safeEmail);
+      writeWorkspaceState(
+        {
+          ...refreshedLocal,
+          chatMessages: synced,
+        },
+        safeEmail,
+      );
 
       return synced;
     },
@@ -6090,6 +6584,43 @@ export const dataService = {
       }
 
       return synced;
+    },
+  },
+
+  recycleBin: {
+    async saveAll(
+      items: RecycleBinItem[],
+      updatedBy?: string,
+      auditEntry?: AuditEvent,
+    ): Promise<RecycleBinItem[]> {
+      const pruned = pruneExpiredRecycleBin(items);
+      const local = readWorkspaceState();
+      writeWorkspaceState({
+        ...local,
+        recycleBin: pruned,
+      });
+
+      if (!supabase) return pruned;
+
+      await retrySupabaseWrite(
+        'nexops_system_state[nexops_recycle_bin_v1]',
+        async () => {
+          await dataService.systemState.upsertKey(
+            SYSTEM_STATE_KEYS.RECYCLE_BIN,
+            pruned,
+            updatedBy,
+          );
+          return pruned;
+        },
+        2,
+        1500,
+      );
+
+      if (auditEntry) {
+        void dataService.auditLogs.append(auditEntry).catch(() => {});
+      }
+
+      return pruned;
     },
   },
 };

@@ -95,6 +95,7 @@ export function createSeedState(): NexOpsState {
     corporateMails: [],
     chatMessages: [],
     calendarEvents: [],
+    recycleBin: [],
     permissionMatrix: structuredClone(DEFAULT_PERMISSION_MATRIX),
   };
 }

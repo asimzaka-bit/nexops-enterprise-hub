@@ -137,6 +137,15 @@ export function DepartmentVerificationScreen({
 
         {/* Step 2: Department & Employee ID Verification Card */}
         <div className="mt-7 rounded-2xl border border-slate-200 bg-white p-6 shadow-xs sm:p-8 dark:border-slate-800 dark:bg-slate-900">
+          {userEmail && (
+            <div className="mb-4 flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs dark:border-slate-800 dark:bg-slate-950/60">
+              <span className="text-slate-500 dark:text-slate-400">Verified session</span>
+              <span className="truncate font-mono font-semibold text-slate-900 dark:text-slate-100">
+                {userEmail}
+              </span>
+            </div>
+          )}
+
           {error && (
             <div
               role="alert"

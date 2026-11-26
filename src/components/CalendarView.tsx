@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   Calendar as CalendarIcon,
   CalendarClock,
   CalendarDays,
@@ -6,10 +7,13 @@ import {
   ChevronRight,
   Clock,
   Edit3,
+  ExternalLink,
   Filter,
+  Link2,
   MapPin,
   Plus,
   Trash2,
+  Users,
   X,
 } from 'lucide-react';
 import { FormEvent, useMemo, useState } from 'react';
@@ -22,12 +26,14 @@ import {
   Role,
   TeamMember,
 } from '../types/nexops';
+import { detectCalendarConflicts, sanitizeExternalHttpUrl } from '../utils/storage';
 
 interface CalendarViewProps {
   calendarEvents: CalendarEvent[];
   meetings: MeetingMinute[];
   leaves: LeaveRequest[];
   departments: string[];
+  teamMembers?: TeamMember[];
   activeRole: Role;
   currentUser: TeamMember;
   onSaveEvent: (event: CalendarEvent) => void;
@@ -45,6 +51,8 @@ interface UnifiedCalendarItem {
   department: string;
   type: CalendarEventType;
   description?: string;
+  locationOrLink?: string;
+  attendees?: string[];
   createdBy: string;
   rawEvent?: CalendarEvent;
 }
@@ -127,6 +135,7 @@ export function CalendarView({
   meetings,
   leaves,
   departments,
+  teamMembers = [],
   activeRole,
   currentUser,
   onSaveEvent,
@@ -153,10 +162,49 @@ export function CalendarView({
     currentUser.department || departments[0] || 'Operations',
   );
   const [eventType, setEventType] = useState<CalendarEventType>('Meeting');
+  const [locationOrLink, setLocationOrLink] = useState('');
+  const [attendees, setAttendees] = useState<string[]>([]);
+  const [customAttendeeInput, setCustomAttendeeInput] = useState('');
+  const [overrideConflict, setOverrideConflict] = useState(false);
   const [description, setDescription] = useState('');
   const [formError, setFormError] = useState('');
 
   const canManage = activeRole === 'Admin' || activeRole === 'Editor';
+
+  const selectableMembers = useMemo(
+    () =>
+      teamMembers.filter(
+        (m) => m.active && (m.approvalStatus ?? 'approved') === 'approved',
+      ),
+    [teamMembers],
+  );
+
+  const conflicts = useMemo(
+    () =>
+      modalOpen
+        ? detectCalendarConflicts(
+            {
+              id: editingEvent?.id,
+              date: eventDate,
+              time: eventTime || '09:00',
+              locationOrLink,
+              attendees,
+            },
+            calendarEvents,
+            meetings,
+          )
+        : [],
+    [
+      modalOpen,
+      editingEvent?.id,
+      eventDate,
+      eventTime,
+      locationOrLink,
+      attendees,
+      calendarEvents,
+      meetings,
+    ],
+  );
 
   // Combine custom calendar events + synced Meetings & MoM + approved/pending Leaves
   const unifiedItems = useMemo<UnifiedCalendarItem[]>(() => {
@@ -169,6 +217,8 @@ export function CalendarView({
       department: ev.department,
       type: ev.type,
       description: ev.description,
+      locationOrLink: ev.locationOrLink,
+      attendees: ev.attendees,
       createdBy: ev.createdBy,
       rawEvent: ev,
     }));
@@ -184,6 +234,7 @@ export function CalendarView({
         department: m.department,
         type: 'Meeting',
         description: m.summary || `Facilitator: ${m.facilitator}`,
+        attendees: m.attendees,
         createdBy: m.facilitator,
       }));
 
@@ -325,6 +376,10 @@ export function CalendarView({
     setEventTime('10:00');
     setEventDepartment(currentUser.department || departments[0] || 'Operations');
     setEventType('Meeting');
+    setLocationOrLink('');
+    setAttendees([]);
+    setCustomAttendeeInput('');
+    setOverrideConflict(false);
     setDescription('');
     setFormError('');
     setModalOpen(true);
@@ -338,9 +393,34 @@ export function CalendarView({
     setEventTime(ev.time || '10:00');
     setEventDepartment(ev.department);
     setEventType(ev.type);
+    setLocationOrLink(ev.locationOrLink || '');
+    setAttendees(Array.isArray(ev.attendees) ? [...ev.attendees] : []);
+    setCustomAttendeeInput('');
+    setOverrideConflict(false);
     setDescription(ev.description || '');
     setFormError('');
     setModalOpen(true);
+  };
+
+  const toggleAttendee = (name: string) => {
+    const clean = name.trim();
+    if (!clean) return;
+    setOverrideConflict(false);
+    setAttendees((prev) =>
+      prev.some((a) => a.toLowerCase() === clean.toLowerCase())
+        ? prev.filter((a) => a.toLowerCase() !== clean.toLowerCase())
+        : [...prev, clean],
+    );
+  };
+
+  const handleAddCustomAttendee = () => {
+    const clean = customAttendeeInput.trim();
+    if (!clean) return;
+    setOverrideConflict(false);
+    setAttendees((prev) =>
+      prev.some((a) => a.toLowerCase() === clean.toLowerCase()) ? prev : [...prev, clean],
+    );
+    setCustomAttendeeInput('');
   };
 
   const handleSubmit = (e: FormEvent) => {
@@ -354,6 +434,14 @@ export function CalendarView({
       setFormError('Please select a date.');
       return;
     }
+    if (conflicts.length > 0 && !overrideConflict) {
+      setFormError(
+        'Schedule conflict detected. Adjust time/room/attendees or confirm the conflict override checkbox below.',
+      );
+      return;
+    }
+    const cleanLocation = locationOrLink.trim() || undefined;
+    const cleanAttendees = attendees.length > 0 ? attendees : undefined;
     const nowIso = new Date().toISOString();
     const nextEvent: CalendarEvent = editingEvent
       ? {
@@ -363,6 +451,8 @@ export function CalendarView({
           time: eventTime || '09:00',
           department: eventDepartment,
           type: eventType,
+          locationOrLink: cleanLocation,
+          attendees: cleanAttendees,
           description: description.trim() || undefined,
           updatedAt: nowIso,
         }
@@ -373,6 +463,8 @@ export function CalendarView({
           time: eventTime || '09:00',
           department: eventDepartment,
           type: eventType,
+          locationOrLink: cleanLocation,
+          attendees: cleanAttendees,
           description: description.trim() || undefined,
           createdBy: currentUser.name,
           createdByEmail: currentUser.email,
@@ -720,6 +812,46 @@ export function CalendarView({
                           <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                             {item.department} · {item.createdBy}
                           </p>
+                          {(item.locationOrLink || (item.attendees && item.attendees.length > 0)) && (
+                            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                              {item.locationOrLink && (() => {
+                                const safeUrl = sanitizeExternalHttpUrl(item.locationOrLink);
+                                if (safeUrl) {
+                                  return (
+                                    <a
+                                      href={safeUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-flex max-w-full items-center gap-1 rounded border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-700 transition-colors hover:bg-indigo-100 dark:border-indigo-800/80 dark:bg-indigo-950/60 dark:text-indigo-300 dark:hover:bg-indigo-900/60"
+                                    >
+                                      <Link2 className="h-3 w-3 shrink-0" />
+                                      <span className="truncate">Join Meeting Link</span>
+                                      <ExternalLink className="h-2.5 w-2.5 shrink-0" />
+                                    </a>
+                                  );
+                                }
+                                return (
+                                  <span className="inline-flex max-w-full items-center gap-1 rounded border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                                    <MapPin className="h-3 w-3 shrink-0 text-slate-400" />
+                                    <span className="truncate">{item.locationOrLink}</span>
+                                  </span>
+                                );
+                              })()}
+                              {item.attendees && item.attendees.length > 0 && (
+                                <span
+                                  className="inline-flex max-w-full items-center gap-1 rounded border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                                  title={item.attendees.join(', ')}
+                                >
+                                  <Users className="h-3 w-3 shrink-0 text-slate-400" />
+                                  <span className="truncate">
+                                    {item.attendees.length <= 2
+                                      ? item.attendees.join(', ')
+                                      : `${item.attendees.slice(0, 2).join(', ')} +${item.attendees.length - 2}`}
+                                  </span>
+                                </span>
+                              )}
+                            </div>
+                          )}
                           {item.description && (
                             <p className="mt-1.5 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
                               {item.description}
@@ -794,11 +926,26 @@ export function CalendarView({
                               {item.title}
                             </p>
                           </div>
-                          <p className="mt-0.5 flex items-center gap-1.5 font-mono text-[11px] text-slate-500 tabular-nums dark:text-slate-400">
+                          <p className="mt-0.5 flex flex-wrap items-center gap-1.5 font-mono text-[11px] text-slate-500 tabular-nums dark:text-slate-400">
                             <Clock className="h-3 w-3 shrink-0" />
                             <span>
                               {item.date} · {formatTime12h(item.time)}
                             </span>
+                            {item.locationOrLink && (
+                              <span className="inline-flex max-w-[160px] items-center gap-1 font-sans text-[10px] font-semibold text-indigo-600 dark:text-indigo-400">
+                                {sanitizeExternalHttpUrl(item.locationOrLink) ? (
+                                  <>
+                                    <Link2 className="h-2.5 w-2.5 shrink-0" />
+                                    <span className="truncate">Meeting Link</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <MapPin className="h-2.5 w-2.5 shrink-0" />
+                                    <span className="truncate">{item.locationOrLink}</span>
+                                  </>
+                                )}
+                              </span>
+                            )}
                           </p>
                         </div>
                         <span className="inline-flex shrink-0 items-center gap-1 rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
@@ -869,7 +1016,10 @@ export function CalendarView({
                     type="date"
                     required
                     value={eventDate}
-                    onChange={(e) => setEventDate(e.target.value)}
+                    onChange={(e) => {
+                      setEventDate(e.target.value);
+                      setOverrideConflict(false);
+                    }}
                     className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 font-mono text-sm text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                   />
                 </div>
@@ -880,7 +1030,10 @@ export function CalendarView({
                   <input
                     type="time"
                     value={eventTime}
-                    onChange={(e) => setEventTime(e.target.value)}
+                    onChange={(e) => {
+                      setEventTime(e.target.value);
+                      setOverrideConflict(false);
+                    }}
                     className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 font-mono text-sm text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                   />
                 </div>
@@ -923,6 +1076,159 @@ export function CalendarView({
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Location / Room or Meeting Link
+                </label>
+                <input
+                  type="text"
+                  value={locationOrLink}
+                  onChange={(e) => {
+                    setLocationOrLink(e.target.value);
+                    setOverrideConflict(false);
+                  }}
+                  placeholder="e.g., Boardroom B or https://meet.google.com/abc-defg-hij"
+                  className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                />
+                {locationOrLink.trim() && sanitizeExternalHttpUrl(locationOrLink) && (
+                  <p className="mt-1 flex items-center gap-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-400">
+                    <Link2 className="h-3 w-3" />
+                    Valid meeting URL detected — will render as a clickable join link.
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between gap-2">
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Attendees ({attendees.length})
+                  </label>
+                  {attendees.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAttendees([]);
+                        setOverrideConflict(false);
+                      }}
+                      className="text-[11px] font-semibold text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
+                    >
+                      Clear all
+                    </button>
+                  )}
+                </div>
+
+                {selectableMembers.length > 0 && (
+                  <div className="mt-1.5 flex max-h-24 flex-wrap gap-1.5 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50/70 p-2 dark:border-slate-700 dark:bg-slate-950/60">
+                    {selectableMembers.map((member) => {
+                      const selected = attendees.some(
+                        (a) => a.toLowerCase() === member.name.trim().toLowerCase(),
+                      );
+                      return (
+                        <button
+                          key={member.id}
+                          type="button"
+                          onClick={() => toggleAttendee(member.name)}
+                          className={`rounded-md border px-2 py-0.5 text-[11px] font-semibold transition-colors ${
+                            selected
+                              ? 'border-slate-900 bg-slate-900 text-white dark:border-indigo-500 dark:bg-indigo-600'
+                              : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800'
+                          }`}
+                        >
+                          {member.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <div className="mt-2 flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={customAttendeeInput}
+                    onChange={(e) => setCustomAttendeeInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddCustomAttendee();
+                      }
+                    }}
+                    placeholder="Add guest or participant name..."
+                    className="h-9 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddCustomAttendee}
+                    className="h-9 shrink-0 rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                  >
+                    Add
+                  </button>
+                </div>
+
+                {attendees.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {attendees.map((person) => (
+                      <span
+                        key={person}
+                        className="inline-flex items-center gap-1 rounded-md border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-700 dark:border-indigo-800/80 dark:bg-indigo-950/60 dark:text-indigo-300"
+                      >
+                        <span>{person}</span>
+                        <button
+                          type="button"
+                          onClick={() => toggleAttendee(person)}
+                          aria-label={`Remove ${person}`}
+                          className="rounded hover:text-rose-600 dark:hover:text-rose-400"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {conflicts.length > 0 && (
+                <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-700/70 dark:bg-amber-950/50 dark:text-amber-200">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                    <div className="min-w-0 flex-1 space-y-1.5">
+                      <p className="font-bold">
+                        Smart Schedule Conflict Detected ({conflicts.length})
+                      </p>
+                      <ul className="space-y-1">
+                        {conflicts.map((conflict) => (
+                          <li
+                            key={conflict.id}
+                            className="rounded-md border border-amber-200/80 bg-white/70 px-2.5 py-1.5 dark:border-amber-800/70 dark:bg-slate-900/60"
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-1 font-semibold">
+                              <span className="truncate">{conflict.title}</span>
+                              <span className="font-mono text-[11px] tabular-nums">
+                                {formatTime12h(conflict.time)}
+                              </span>
+                            </div>
+                            <p className="mt-0.5 text-[11px] text-amber-800 dark:text-amber-300">
+                              {conflict.reasons.join(' · ')}
+                            </p>
+                          </li>
+                        ))}
+                      </ul>
+                      <label className="mt-1 flex cursor-pointer items-center gap-2 pt-1 font-semibold">
+                        <input
+                          type="checkbox"
+                          checked={overrideConflict}
+                          onChange={(e) => {
+                            setOverrideConflict(e.target.checked);
+                            if (e.target.checked) setFormError('');
+                          }}
+                          className="h-3.5 w-3.5 rounded border-amber-400 text-slate-900 focus:ring-0"
+                        />
+                        <span>Schedule anyway (acknowledge conflict)</span>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
                   Agenda / Notes
                 </label>
                 <textarea
@@ -944,7 +1250,7 @@ export function CalendarView({
                 </button>
                 <button
                   type="submit"
-                  className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-700"
+                  className="rounded-lg bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 dark:bg-indigo-600 dark:hover:bg-indigo-700"
                 >
                   {editingEvent ? 'Save Changes' : 'Create Event'}
                 </button>

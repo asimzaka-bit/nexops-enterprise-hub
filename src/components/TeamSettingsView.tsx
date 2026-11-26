@@ -24,6 +24,8 @@ import {
   UserCheck,
   UserPlus,
   UserX,
+  Wifi,
+  WifiOff,
   X,
 } from 'lucide-react';
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
@@ -40,6 +42,7 @@ import {
   PendingEditorChange,
   PermissionKey,
   PermissionMatrix,
+  RecycleBinItem,
   Role,
   SlaPolicyConfig,
   TableSyncStatus,
@@ -49,6 +52,7 @@ import {
   calculateVaultStorageStats,
   formatDateTime,
   formatStorageSize,
+  getRecycleBinDaysLeft,
   isSuperAdminEmail,
   isSuperAdminEmployeeId,
   parseSystemBackupJson,
@@ -71,12 +75,18 @@ interface TeamSettingsViewProps {
   requests: OperationalRequest[];
   auditLogs: AuditEvent[];
   vaultDocuments?: DocumentVaultItem[];
+  recycleBin?: RecycleBinItem[];
+  isOnline?: boolean;
+  pendingSyncCount?: number;
   notificationsCount: number;
   dbConnected: boolean;
   onUpdateBranding: (nextBranding: CompanyBrandingConfig) => void;
   onResetBranding: () => void;
   onUpdatePermissionMatrix: (nextMatrix: PermissionMatrix) => void;
   onRunHealthCheck: () => void;
+  onForceCloudSync?: () => void;
+  onRestoreRecycleItem?: (binId: string) => void;
+  onPurgeRecycleItem?: (binId: string) => void;
   onUpdateMemberRole: (memberId: string, role: Role) => void;
   onUpdateMemberDepartment: (memberId: string, department: Department) => void;
   onToggleMemberActive: (memberId: string) => void;
@@ -178,12 +188,18 @@ export function TeamSettingsView({
   requests,
   auditLogs,
   vaultDocuments = [],
+  recycleBin = [],
+  isOnline = true,
+  pendingSyncCount = 0,
   notificationsCount,
   dbConnected,
   onUpdateBranding,
   onResetBranding,
   onUpdatePermissionMatrix,
   onRunHealthCheck,
+  onForceCloudSync,
+  onRestoreRecycleItem,
+  onPurgeRecycleItem,
   onUpdateMemberRole,
   onUpdateMemberDepartment,
   onToggleMemberActive,
@@ -202,6 +218,7 @@ export function TeamSettingsView({
 }: TeamSettingsViewProps) {
   const isAdmin = activeRole === 'Admin';
   const isSuperAdminOperator = isAdmin && isSuperAdminEmail(currentUserEmail);
+  const [confirmPurgeBinId, setConfirmPurgeBinId] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const backupFileRef = useRef<HTMLInputElement>(null);
 
@@ -2088,7 +2105,8 @@ export function TeamSettingsView({
             </div>
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
               Export a complete snapshot of operational requests, QA checklists, SOP acknowledgments,
-              inventory assets, team profiles, and immutable audit logs.
+              inventory assets, team profiles, and immutable audit logs (private 1-on-1 chats and
+              direct mails are excluded for Zero-Knowledge privacy).
             </p>
           </div>
 
@@ -2199,18 +2217,165 @@ export function TeamSettingsView({
         </div>
       </div>
 
+      {/* 30-Day Recycle Bin (Soft Delete Recovery) */}
+      {isAdmin && (
+        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+          <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 px-6 py-4 dark:border-slate-800">
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Trash2 className="h-4 w-4 text-amber-600 dark:text-amber-400" aria-hidden="true" />
+                <h3 className="font-display text-base font-bold text-slate-900 dark:text-slate-100">
+                  Recycle Bin (30-Day Retention)
+                </h3>
+                <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 font-mono text-[11px] font-semibold text-slate-700 tabular-nums dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                  {recycleBin.length} item{recycleBin.length === 1 ? '' : 's'}
+                </span>
+              </div>
+              <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                Soft-deleted Document Vault files, Circulars, Calendar events, and MoM records are retained for 30 days. Only Super Admin can restore or permanently purge.
+              </p>
+            </div>
+          </div>
+
+          {recycleBin.length === 0 ? (
+            <div className="px-6 py-8 text-center text-xs text-slate-500 dark:text-slate-400">
+              Recycle Bin is empty. Deleted items appear here for 30 days before automatic expiration.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[760px] border-collapse text-left text-xs">
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-50/80 font-semibold text-slate-500 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-400">
+                    <th className="py-2.5 pr-3 pl-6">Module</th>
+                    <th className="px-3 py-2.5">Item Title</th>
+                    <th className="px-3 py-2.5">Deleted By</th>
+                    <th className="px-3 py-2.5">Deleted At</th>
+                    <th className="px-3 py-2.5">Retention</th>
+                    <th className="py-2.5 pr-6 pl-3 text-right">Recovery Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {recycleBin.map((bin) => {
+                    const daysLeft = getRecycleBinDaysLeft(bin.expiresAt);
+                    const typeLabel =
+                      bin.itemType === 'vault'
+                        ? 'Document Vault'
+                        : bin.itemType === 'announcement'
+                          ? 'Circular'
+                          : bin.itemType === 'calendar'
+                            ? 'Calendar Event'
+                            : 'Meeting MoM';
+                    return (
+                      <tr key={bin.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/50">
+                        <td className="py-3 pr-3 pl-6 whitespace-nowrap">
+                          <span className="rounded border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-700 dark:border-indigo-900/60 dark:bg-indigo-950/50 dark:text-indigo-300">
+                            {typeLabel}
+                          </span>
+                        </td>
+                        <td className="px-3 py-3 font-semibold text-slate-900 dark:text-slate-100">
+                          {bin.title}
+                          {bin.department && (
+                            <span className="ml-2 text-[11px] font-normal text-slate-500 dark:text-slate-400">
+                              ({bin.department})
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-3 text-slate-600 dark:text-slate-300">
+                          {bin.deletedBy}
+                        </td>
+                        <td className="px-3 py-3 font-mono text-[11px] text-slate-500 tabular-nums whitespace-nowrap dark:text-slate-400">
+                          {formatDateTime(bin.deletedAt)}
+                        </td>
+                        <td className="px-3 py-3 whitespace-nowrap">
+                          <span className="rounded border border-amber-200 bg-amber-50 px-2 py-0.5 font-mono text-[11px] font-semibold text-amber-800 tabular-nums dark:border-amber-900/60 dark:bg-amber-950/50 dark:text-amber-300">
+                            {daysLeft} day{daysLeft === 1 ? '' : 's'} left
+                          </span>
+                        </td>
+                        <td className="py-3 pr-6 pl-3 text-right whitespace-nowrap">
+                          {isSuperAdminOperator ? (
+                            <div className="inline-flex items-center gap-1.5">
+                              {onRestoreRecycleItem && (
+                                <button
+                                  type="button"
+                                  onClick={() => onRestoreRecycleItem(bin.id)}
+                                  className="inline-flex items-center gap-1 rounded-md bg-emerald-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-emerald-700"
+                                >
+                                  <RotateCcw className="h-3 w-3" />
+                                  Restore
+                                </button>
+                              )}
+                              {onPurgeRecycleItem &&
+                                (confirmPurgeBinId === bin.id ? (
+                                  <div className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-rose-50 px-1.5 py-0.5 dark:border-rose-800 dark:bg-rose-950/60">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        onPurgeRecycleItem(bin.id);
+                                        setConfirmPurgeBinId(null);
+                                      }}
+                                      className="px-1 text-[11px] font-bold text-rose-700 hover:underline dark:text-rose-300"
+                                    >
+                                      Confirm Purge
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setConfirmPurgeBinId(null)}
+                                      className="px-1 text-[11px] text-slate-600 dark:text-slate-300"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmPurgeBinId(bin.id)}
+                                    className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-semibold text-rose-700 hover:bg-rose-100 dark:border-rose-800 dark:bg-rose-950/60 dark:text-rose-300"
+                                  >
+                                    Permanently Purge
+                                  </button>
+                                ))}
+                            </div>
+                          ) : (
+                            <span className="text-[11px] text-slate-400">Super Admin Only</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Cloud Health Diagnostics — Database Sync Status across all 8 Supabase Tables */}
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 px-6 py-4 dark:border-slate-800">
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <Cloud
-                className={`h-4 w-4 ${dbConnected ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500 dark:text-slate-400'}`}
+                className={`h-4 w-4 ${dbConnected && isOnline ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500 dark:text-slate-400'}`}
                 aria-hidden="true"
               />
               <h3 className="font-display text-base font-bold text-slate-900 dark:text-slate-100">
-                Cloud Health Diagnostics — Database Sync Status
+                Cloud Health Diagnostics — Database &amp; Network Sync
               </h3>
+              <span
+                className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 font-mono text-[11px] font-semibold ${
+                  isOnline
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/50 dark:text-emerald-300'
+                    : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/50 dark:text-amber-300'
+                }`}
+              >
+                {isOnline ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
+                {isOnline ? 'Network Online' : 'Offline Mode'}
+              </span>
+              {pendingSyncCount > 0 && (
+                <span className="rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 font-mono text-[11px] font-semibold text-amber-800 tabular-nums dark:border-amber-900/60 dark:bg-amber-950/50 dark:text-amber-300">
+                  {pendingSyncCount} Pending Local Sync{pendingSyncCount > 1 ? 's' : ''}
+                </span>
+              )}
               <span
                 className={`rounded-md border px-2 py-0.5 font-mono text-[11px] font-semibold tabular-nums ${
                   healthyTablesCount === tableDiagnostics.length && dbConnected
@@ -2226,21 +2391,32 @@ export function TeamSettingsView({
               </span>
             </div>
             <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-              Live row counts, Realtime replication targets, and PostgreSQL connection health for all
-              8 NexOps Supabase tables.
+              Live row counts, Realtime replication targets, offline local queue status, and PostgreSQL connection health across Supabase tables.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={onRunHealthCheck}
-            disabled={isCheckingHealth}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-60 whitespace-nowrap dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
-          >
-            <RefreshCw
-              className={`h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400 ${isCheckingHealth ? 'animate-spin' : ''}`}
-            />
-            <span>{isCheckingHealth ? 'Checking Tables...' : 'Run Health Check'}</span>
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            {onForceCloudSync && isOnline && pendingSyncCount > 0 && (
+              <button
+                type="button"
+                onClick={onForceCloudSync}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-indigo-700 whitespace-nowrap"
+              >
+                <Cloud className="h-3.5 w-3.5" />
+                <span>Sync Queued Changes Now</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onRunHealthCheck}
+              disabled={isCheckingHealth}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-60 whitespace-nowrap dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+            >
+              <RefreshCw
+                className={`h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400 ${isCheckingHealth ? 'animate-spin' : ''}`}
+              />
+              <span>{isCheckingHealth ? 'Checking Tables...' : 'Run Health Check'}</span>
+            </button>
+          </div>
         </div>
 
         <div className="overflow-x-auto">

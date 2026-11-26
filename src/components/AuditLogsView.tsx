@@ -1,7 +1,13 @@
 import { ArrowUpRight, Download, FileSpreadsheet, Search } from 'lucide-react';
 import { useState } from 'react';
 import { AuditActionType, AuditEvent } from '../types/nexops';
-import { exportAuditLogsCsv, formatDateTime } from '../utils/storage';
+import {
+  exportAuditLogsCsv,
+  formatDateTime,
+  isPrivateCommsAuditEvent,
+  maskEmailForLog,
+  maskSensitiveIdentifiers,
+} from '../utils/storage';
 
 interface AuditLogsViewProps {
   logs: AuditEvent[];
@@ -27,8 +33,8 @@ const ACTION_TYPES: (AuditActionType | 'All')[] = [
   'Notice Deleted',
   'Vault Updated',
   'Subtask Updated',
-  'Mail Sent',
   'Meet Session Logged',
+  'Security Alert',
 ];
 
 export function AuditLogsView({
@@ -40,8 +46,9 @@ export function AuditLogsView({
   const [actionFilter, setActionFilter] = useState<AuditActionType | 'All'>('All');
 
   const normalized = search.trim().toLowerCase();
+  const visibleLogs = logs.filter((log) => !isPrivateCommsAuditEvent(log));
 
-  const filteredLogs = logs.filter((log) => {
+  const filteredLogs = visibleLogs.filter((log) => {
     const matchesAction = actionFilter === 'All' || log.actionType === actionFilter;
     const matchesSearch =
       !normalized ||
@@ -113,7 +120,7 @@ export function AuditLogsView({
           <span>Admin-Only Security Audit Trail</span>
         </span>
         <span className="font-mono tabular-nums">
-          Showing {filteredLogs.length} of {logs.length} immutable records
+          Showing {filteredLogs.length} of {visibleLogs.length} immutable records
         </span>
       </div>
 
@@ -154,7 +161,7 @@ export function AuditLogsView({
                         </p>
                         {log.actorEmail && (
                           <p className="font-mono text-[11px] text-indigo-700 dark:text-indigo-400">
-                            {log.actorEmail}
+                            {maskEmailForLog(log.actorEmail)}
                           </p>
                         )}
                         <p className="text-[11px] text-slate-500 dark:text-slate-400">
@@ -183,7 +190,7 @@ export function AuditLogsView({
                         )}
                       </td>
                       <td className="py-3.5 pr-5 pl-3 text-xs leading-relaxed text-slate-700 dark:text-slate-300">
-                        {log.details}
+                        {maskSensitiveIdentifiers(log.details)}
                       </td>
                     </tr>
                   );

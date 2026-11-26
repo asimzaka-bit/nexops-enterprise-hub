@@ -51,8 +51,10 @@ import {
 import {
   formatDateTime,
   getRequestSlaStatus,
+  isPrivateCommsAuditEvent,
   isRequestPendingOver24h,
   isSuperAdminEmail,
+  maskSensitiveIdentifiers,
   resolveLivePresenceOverride,
 } from '../utils/storage';
 import type { ViewportInfo } from '../hooks/useViewport';
@@ -440,10 +442,11 @@ export function TopBar({
         : []
     ).slice(0, 4);
 
+    const sanitizedAudits = auditLogs.filter((a) => !isPrivateCommsAuditEvent(a));
     const matchedAudits =
       activeRole === 'Admin'
         ? (q
-            ? auditLogs.filter(
+            ? sanitizedAudits.filter(
                 (a) =>
                   a.requestId.toLowerCase().includes(q) ||
                   a.actorName.toLowerCase().includes(q) ||
@@ -452,7 +455,7 @@ export function TopBar({
                   a.actionType.toLowerCase().includes(q) ||
                   a.details.toLowerCase().includes(q),
               )
-            : auditLogs
+            : sanitizedAudits
           ).slice(0, 4)
         : [];
 
@@ -790,7 +793,7 @@ export function TopBar({
                           </span>
                         </div>
                         <p className="truncate text-[11px] text-slate-600 dark:text-slate-400">
-                          {audit.actorName}: {audit.details}
+                          {audit.actorName}: {maskSensitiveIdentifiers(audit.details)}
                         </p>
                       </div>
                     </div>

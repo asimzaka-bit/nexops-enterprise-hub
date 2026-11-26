@@ -64,7 +64,7 @@ import {
   WorkspaceSavedLink,
   WorkspaceToolType,
 } from '../types/nexops';
-import { formatDateTime } from '../utils/storage';
+import { formatDateTime, isStrictWorkspaceEmailParticipant } from '../utils/storage';
 import {
   GmailColorIcon,
   GoogleDocsColorIcon,
@@ -344,6 +344,10 @@ export function WorkspaceToolsView({
   onNotify,
 }: WorkspaceToolsViewProps) {
   const isViewer = activeRole !== 'Admin';
+  const scopedEmails = useMemo(
+    () => emails.filter((e) => isStrictWorkspaceEmailParticipant(e, currentUser.email)),
+    [emails, currentUser.email],
+  );
 
   // =========================================================================
   // 1. GMAIL AUTHENTIC CLIENT STATE
@@ -531,7 +535,7 @@ export function WorkspaceToolsView({
       const seenSubjects = new Set(
         mappedGmail.map((m) => `${m.subject}::${m.to}`.toLowerCase()),
       );
-        const nexopsSent: UnifiedMailRow[] = emails
+      const nexopsSent: UnifiedMailRow[] = scopedEmails
         .filter((e) => !seenSubjects.has(`${e.subject}::${e.toRecipients}`.toLowerCase()))
         .map((e) => ({
           id: e.id,
@@ -568,7 +572,7 @@ export function WorkspaceToolsView({
       if (unreadOnly && !row.isUnread) return false;
       return true;
     });
-  }, [gmailFolder, gmailMessages, emails, starredIds, snoozedMap, gmailSearchSubmitted, unreadOnly]);
+  }, [gmailFolder, gmailMessages, scopedEmails, starredIds, snoozedMap, gmailSearchSubmitted, unreadOnly]);
 
   const handleOpenEmailRow = async (row: UnifiedMailRow) => {
     setOpenedMessage(row);
@@ -1194,7 +1198,7 @@ export function WorkspaceToolsView({
               const isSelected = activeTool === tab.id;
               const count =
                 tab.id === 'gmail'
-                  ? inboxUnreadCount || emails.length
+                  ? inboxUnreadCount || scopedEmails.length
                   : links.filter((l) => l.toolType === tab.id).length;
               return (
                 <button
@@ -1381,7 +1385,7 @@ export function WorkspaceToolsView({
                     id: 'sent' as const,
                     label: 'Sent',
                     icon: Send,
-                    badge: !googleToken && emails.length > 0 ? emails.length : undefined,
+                    badge: !googleToken && scopedEmails.length > 0 ? scopedEmails.length : undefined,
                   },
                   {
                     id: 'drafts' as const,

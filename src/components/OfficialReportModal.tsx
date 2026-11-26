@@ -1,5 +1,5 @@
-import { CheckSquare, Printer, Square, X } from 'lucide-react';
-import { useState } from 'react';
+import { CheckSquare, Download, Printer, ShieldCheck, Square, X } from 'lucide-react';
+import { useMemo, useState } from 'react';
 import {
   AttendanceLog,
   CompanyBrandingConfig,
@@ -8,12 +8,15 @@ import {
 } from '../types/nexops';
 import { NexOpsLogo } from './NexOpsLogo';
 import {
+  exportFilteredExecutiveReportCsv,
   formatCurrency,
   formatDateTime,
   formatShortDate,
   getOverdueDays,
   getTodayDateString,
   isRequestOverdue,
+  SUPER_ADMIN_EMAIL,
+  SUPER_ADMIN_EMPLOYEE_ID,
 } from '../utils/storage';
 import {
   AssetLinkBadge,
@@ -43,11 +46,47 @@ export function OfficialReportModal({
   onPrintTriggered,
 }: OfficialReportModalProps) {
   const [selectedScope, setSelectedScope] = useState<string>(initialRequestId || 'EXECUTIVE');
+  const [departmentFilter, setDepartmentFilter] = useState<string>('ALL');
+  const [fromDate, setFromDate] = useState<string>('');
+  const [toDate, setToDate] = useState<string>('');
 
   const generatedAt = new Date().toISOString();
 
-  const reportDepartments = Array.from(
-    new Set([...branding.departments, ...requests.map((r) => r.department).filter(Boolean)]),
+  const allDepartments = useMemo(
+    () =>
+      Array.from(
+        new Set([...branding.departments, ...requests.map((r) => r.department).filter(Boolean)]),
+      ),
+    [branding.departments, requests],
+  );
+
+  const filteredRequests = useMemo(
+    () =>
+      requests.filter((r) => {
+        if (departmentFilter !== 'ALL' && r.department !== departmentFilter) return false;
+        const createdDay = (r.createdAt || '').slice(0, 10);
+        if (fromDate && createdDay && createdDay < fromDate) return false;
+        if (toDate && createdDay && createdDay > toDate) return false;
+        return true;
+      }),
+    [requests, departmentFilter, fromDate, toDate],
+  );
+
+  const filteredAttendance = useMemo(
+    () =>
+      attendanceLogs.filter((a) => {
+        if (departmentFilter !== 'ALL' && a.department !== departmentFilter) return false;
+        if (fromDate && a.attendanceDate < fromDate) return false;
+        if (toDate && a.attendanceDate > toDate) return false;
+        return true;
+      }),
+    [attendanceLogs, departmentFilter, fromDate, toDate],
+  );
+
+  const reportDepartments = useMemo(
+    () =>
+      departmentFilter === 'ALL' ? allDepartments : allDepartments.filter((d) => d === departmentFilter),
+    [allDepartments, departmentFilter],
   );
 
   const targetRequest =
@@ -58,23 +97,39 @@ export function OfficialReportModal({
   const handlePrint = () => {
     const label = targetRequest
       ? `Official Dossier ${targetRequest.id}`
-      : 'Executive Operations Governance Report';
+      : `Executive Operations Governance Report (${departmentFilter === 'ALL' ? 'All Departments' : departmentFilter})`;
     onPrintTriggered(label);
     window.print();
   };
 
+  const handleExportCsv = () => {
+    const scopeReqs = targetRequest ? [targetRequest] : filteredRequests;
+    exportFilteredExecutiveReportCsv({
+      companyName: branding.companyName,
+      departmentFilter: departmentFilter === 'ALL' ? 'All Departments' : departmentFilter,
+      fromDate,
+      toDate,
+      preparedBy: `${currentUser.name} (${currentUser.employeeId})`,
+      requests: scopeReqs,
+      attendanceLogs: filteredAttendance,
+    });
+    onPrintTriggered(
+      `CSV Executive Report (${departmentFilter === 'ALL' ? 'All Departments' : departmentFilter})`,
+    );
+  };
+
   // Executive aggregate stats
   const todayStr = getTodayDateString();
-  const totalRequests = requests.length;
-  const approvedCount = requests.filter((r) => r.status === 'Approved').length;
-  const pendingCount = requests.filter(
+  const totalRequests = filteredRequests.length;
+  const approvedCount = filteredRequests.filter((r) => r.status === 'Approved').length;
+  const pendingCount = filteredRequests.filter(
     (r) => r.status === 'Draft' || r.status === 'Submitted',
   ).length;
-  const inProgressCount = requests.filter(
+  const inProgressCount = filteredRequests.filter(
     (r) => r.status === 'Under QA Review' || r.status === 'Revision Required',
   ).length;
-  const revisionCount = requests.filter((r) => r.status === 'Revision Required').length;
-  const overdueRequests = requests.filter((r) => isRequestOverdue(r));
+  const revisionCount = filteredRequests.filter((r) => r.status === 'Revision Required').length;
+  const overdueRequests = filteredRequests.filter((r) => isRequestOverdue(r));
 
   return (
     <div
@@ -85,47 +140,111 @@ export function OfficialReportModal({
     >
       <div className="print-report-dialog flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900">
         {/* Non-Printable Modal Action Bar */}
-        <div className="no-print flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 sm:px-6 sm:py-3.5 dark:border-slate-800 dark:bg-slate-950/60">
-          <div className="flex min-w-0 flex-wrap items-center gap-2.5 sm:gap-3">
-            <h2
-              id="official-report-heading"
-              className="font-display text-sm font-bold text-slate-900 dark:text-slate-100"
-            >
-              Official Governance Report Preview
-            </h2>
-            <select
-              aria-label="Select report scope"
-              value={selectedScope}
-              onChange={(e) => setSelectedScope(e.target.value)}
-              className="h-8 max-w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-800 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-            >
-              <option value="EXECUTIVE">Executive Portfolio Summary (All Requests)</option>
-              {requests.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.id} — {r.title}
-                </option>
-              ))}
-            </select>
+        <div className="no-print space-y-2.5 border-b border-slate-200 bg-slate-50 px-4 py-3 sm:px-6 sm:py-3.5 dark:border-slate-800 dark:bg-slate-950/60">
+          <div className="flex flex-wrap items-center justify-between gap-2.5">
+            <div className="flex min-w-0 flex-wrap items-center gap-2.5">
+              <h2
+                id="official-report-heading"
+                className="font-display text-sm font-bold text-slate-900 dark:text-slate-100"
+              >
+                Official Governance Report Preview
+              </h2>
+              <select
+                aria-label="Select report scope"
+                value={selectedScope}
+                onChange={(e) => setSelectedScope(e.target.value)}
+                className="h-8 max-w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-800 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+              >
+                <option value="EXECUTIVE">Executive Portfolio Summary</option>
+                {requests.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.id} — {r.title}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={handleExportCsv}
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-800 transition-colors hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 whitespace-nowrap dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+              >
+                <Download className="h-3.5 w-3.5" />
+                <span>Export CSV</span>
+              </button>
+              <button
+                type="button"
+                onClick={handlePrint}
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 text-xs font-semibold text-white transition-colors hover:bg-indigo-700 whitespace-nowrap"
+              >
+                <Printer className="h-3.5 w-3.5" />
+                <span>Print / Save as PDF</span>
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Close report preview"
+                className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-100"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={handlePrint}
-              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 text-xs font-semibold text-white transition-colors hover:bg-indigo-700 whitespace-nowrap"
-            >
-              <Printer className="h-3.5 w-3.5" />
-              <span>Print / Save as PDF</span>
-            </button>
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Close report preview"
-              className="rounded-lg border border-slate-200 bg-white p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-100"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
+          {!targetRequest && (
+            <div className="flex flex-wrap items-center gap-2 border-t border-slate-200/80 pt-2.5 text-xs dark:border-slate-800">
+              <label className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300">
+                <span className="font-semibold">Department:</span>
+                <select
+                  value={departmentFilter}
+                  onChange={(e) => setDepartmentFilter(e.target.value)}
+                  className="h-7 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-800 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                >
+                  <option value="ALL">All Departments</option>
+                  {allDepartments.map((dept) => (
+                    <option key={dept} value={dept}>
+                      {dept}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300">
+                <span className="font-semibold">From:</span>
+                <input
+                  type="date"
+                  value={fromDate}
+                  onChange={(e) => setFromDate(e.target.value)}
+                  className="h-7 rounded-md border border-slate-200 bg-white px-2 font-mono text-xs text-slate-800 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                />
+              </label>
+
+              <label className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300">
+                <span className="font-semibold">To:</span>
+                <input
+                  type="date"
+                  value={toDate}
+                  onChange={(e) => setToDate(e.target.value)}
+                  className="h-7 rounded-md border border-slate-200 bg-white px-2 font-mono text-xs text-slate-800 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                />
+              </label>
+
+              {(departmentFilter !== 'ALL' || fromDate || toDate) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDepartmentFilter('ALL');
+                    setFromDate('');
+                    setToDate('');
+                  }}
+                  className="h-7 rounded-md border border-slate-200 bg-white px-2 text-[11px] font-semibold text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                >
+                  Reset Filters
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Printable Document Body (kept crisp white paper for WYSIWYG print/PDF fidelity) */}
@@ -148,6 +267,12 @@ export function OfficialReportModal({
                 <p className="font-semibold text-slate-900">
                   {targetRequest ? 'Official Request Approval Dossier' : 'Executive Portfolio Audit'}
                 </p>
+                {!targetRequest && (
+                  <p className="mt-0.5 text-[11px] font-medium text-indigo-700">
+                    Scope: {departmentFilter === 'ALL' ? 'All Departments' : departmentFilter} ·{' '}
+                    {fromDate || toDate ? `${fromDate || 'Start'} to ${toDate || 'Present'}` : 'All Dates'}
+                  </p>
+                )}
                 <p className="mt-0.5 font-mono text-[11px] text-slate-500 tabular-nums">
                   Generated: {formatDateTime(generatedAt)}
                 </p>
@@ -226,7 +351,7 @@ export function OfficialReportModal({
                     </thead>
                     <tbody className="divide-y divide-slate-200">
                       {reportDepartments.map((dept) => {
-                        const items = requests.filter((r) => r.department === dept);
+                        const items = filteredRequests.filter((r) => r.department === dept);
                         const app = items.filter((r) => r.status === 'Approved').length;
                         const pend = items.filter(
                           (r) =>
@@ -236,8 +361,10 @@ export function OfficialReportModal({
                             r.status === 'Revision Required',
                         ).length;
                         const over = items.filter((r) => isRequestOverdue(r)).length;
-                        const deptAtt = attendanceLogs.filter(
-                          (a) => a.attendanceDate === todayStr && a.department === dept,
+                        const deptAtt = filteredAttendance.filter(
+                          (a) =>
+                            a.department === dept &&
+                            (fromDate || toDate ? true : a.attendanceDate === todayStr),
                         ).length;
                         return (
                           <tr key={dept}>
@@ -268,9 +395,14 @@ export function OfficialReportModal({
                 {/* Individual Request Register with QA & Audit Summary */}
                 <section className="space-y-4">
                   <h3 className="font-display text-sm font-bold text-slate-900">
-                    03. Operational Request Register &amp; QA Verification Status
+                    03. Operational Request Register &amp; QA Verification Status ({filteredRequests.length})
                   </h3>
-                  {requests.map((req) => {
+                  {filteredRequests.length === 0 ? (
+                    <p className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-6 text-center text-xs text-slate-500">
+                      No operational requests match the selected department and date range filters.
+                    </p>
+                  ) : (
+                    filteredRequests.map((req) => {
                     const overdue = isRequestOverdue(req);
                     const verified = req.checklist.filter((c) => c.checked).length;
                     const latestEvent = [...req.auditTrail].sort(
@@ -324,17 +456,18 @@ export function OfficialReportModal({
                         )}
                       </div>
                     );
-                  })}
+                  })
+                  )}
                 </section>
               </div>
             )}
 
-            {/* Digital Approval Sign-Off Block & Official Footer */}
+            {/* Official Super Admin Verification & Digital Sign-Off Block */}
             <section className="print-avoid-break rounded-xl border border-slate-200 bg-slate-50/70 p-4">
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <div>
                   <p className="text-[11px] font-semibold tracking-wider text-slate-500">
-                    AUTHORIZED DIGITAL SIGN-OFF
+                    AUTHORIZED DIGITAL SIGN-OFF &amp; GOVERNANCE VERIFICATION
                   </p>
                   <p className="mt-1 font-display text-sm font-bold text-slate-900">
                     {currentUser.name}
@@ -349,8 +482,11 @@ export function OfficialReportModal({
                 <div className="text-right font-mono text-[11px] text-slate-600 tabular-nums">
                   <p>Employee ID: {currentUser.employeeId}</p>
                   <p className="mt-0.5">Signed Timestamp: {formatDateTime(generatedAt)}</p>
-                  <p className="mt-0.5 text-emerald-700 font-semibold">
-                    Verified Corporate Session
+                  <p className="mt-1 inline-flex items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-2 py-0.5 font-sans text-[11px] font-bold text-emerald-800">
+                    <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
+                    <span>
+                      Approved by Super Admin ({SUPER_ADMIN_EMPLOYEE_ID}) • {SUPER_ADMIN_EMAIL}
+                    </span>
                   </p>
                 </div>
               </div>

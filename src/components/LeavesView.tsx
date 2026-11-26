@@ -1,14 +1,20 @@
 import {
+  AlertTriangle,
   CalendarCheck2,
   CalendarClock,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   Clock,
   Download,
   FileCheck2,
+  Gauge,
   LogIn,
   LogOut,
   Plus,
+  Save,
   Search,
+  SlidersHorizontal,
   UserCheck,
   X,
   XCircle,
@@ -17,6 +23,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import {
   AttendanceLog,
   Department,
+  DepartmentShiftConfig,
   LeaveRequest,
   LeaveStatus,
   LeaveType,
@@ -25,10 +32,17 @@ import {
   TeamMember,
 } from '../types/nexops';
 import {
+  calculatePunctualityStats,
+  evaluateAttendanceTags,
   exportAttendanceLogsCsv,
   formatDateTime,
   formatShortDate,
+  formatTime12hFromHHMM,
+  getShiftForDepartment,
   getTodayDateString,
+  isLeavePendingOver24h,
+  isSuperAdminEmail,
+  normalizeShiftRosters,
 } from '../utils/storage';
 
 export interface CreateLeavePayload {
@@ -48,6 +62,8 @@ interface LeavesViewProps {
   departments: string[];
   teamMembers: TeamMember[];
   permissionMatrix: PermissionMatrix;
+  shiftRosters?: Record<string, DepartmentShiftConfig>;
+  onSaveShiftRosters?: (rosters: Record<string, DepartmentShiftConfig>) => void;
   onClockIn: () => void;
   onClockOut: (attendanceId: string) => void;
   onCreateLeave: (payload: CreateLeavePayload) => void;
@@ -90,17 +106,38 @@ export function LeavesView({
   departments,
   teamMembers,
   permissionMatrix,
+  shiftRosters,
+  onSaveShiftRosters,
   onClockIn,
   onClockOut,
   onCreateLeave,
   onDecisionLeave,
 }: LeavesViewProps) {
   const isAdmin = activeRole === 'Admin';
+  const isSuperAdmin = isAdmin && isSuperAdminEmail(currentUser.email);
   void permissionMatrix;
   const isViewer = !isAdmin;
   const canSubmitLeave = isAdmin;
-  const canClockAction = isAdmin;
+  const canClockAction = Boolean(currentUser.email.trim()) && currentUser.active !== false;
   const canApproveLeaves = isAdmin;
+
+  const normalizedRosters = useMemo(
+    () => normalizeShiftRosters(shiftRosters, departments),
+    [shiftRosters, departments],
+  );
+  const myShift = useMemo(
+    () => getShiftForDepartment(currentUser.department, normalizedRosters),
+    [currentUser.department, normalizedRosters],
+  );
+  const [rosterOpen, setRosterOpen] = useState(false);
+  const [draftRosters, setDraftRosters] = useState<Record<string, DepartmentShiftConfig>>(
+    normalizedRosters,
+  );
+  const [rosterSavedNotice, setRosterSavedNotice] = useState(false);
+
+  useEffect(() => {
+    setDraftRosters(normalizedRosters);
+  }, [normalizedRosters]);
 
   const [nowTick, setNowTick] = useState(() => new Date());
   useEffect(() => {
@@ -199,6 +236,40 @@ export function LeavesView({
     );
   }, [leaves, isAdmin, canApproveLeaves, currentUser.email, currentUser.employeeId, currentUser.name]);
 
+  const myAttendanceLogs = useMemo(() => {
+    const emailLower = currentUser.email.trim().toLowerCase();
+    return attendanceLogs.filter(
+      (log) =>
+        log.userId === currentUser.id ||
+        log.userEmail.trim().toLowerCase() === emailLower,
+    );
+  }, [attendanceLogs, currentUser.id, currentUser.email]);
+
+  const myPunctuality = useMemo(
+    () => calculatePunctualityStats(myAttendanceLogs, normalizedRosters),
+    [myAttendanceLogs, normalizedRosters],
+  );
+
+  const teamPunctuality = useMemo(
+    () => calculatePunctualityStats(attendanceLogs, normalizedRosters),
+    [attendanceLogs, normalizedRosters],
+  );
+
+  const employeePunctualityMap = useMemo(() => {
+    const grouped = new Map<string, AttendanceLog[]>();
+    for (const log of attendanceLogs) {
+      const key = (log.userEmail || log.userId || log.userName).trim().toLowerCase();
+      const arr = grouped.get(key) ?? [];
+      arr.push(log);
+      grouped.set(key, arr);
+    }
+    const result = new Map<string, ReturnType<typeof calculatePunctualityStats>>();
+    grouped.forEach((logs, key) => {
+      result.set(key, calculatePunctualityStats(logs, normalizedRosters));
+    });
+    return result;
+  }, [attendanceLogs, normalizedRosters]);
+
   const metrics = useMemo(() => {
     const pendingCount = scopedLeaves.filter((l) => l.status === 'Pending').length;
     const approvedCount = scopedLeaves.filter((l) => l.status === 'Approved').length;
@@ -213,19 +284,26 @@ export function LeavesView({
 
   const filteredLeaves = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    return scopedLeaves.filter((leave) => {
-      if (statusFilter !== 'All' && leave.status !== statusFilter) return false;
-      if (departmentFilter !== 'All' && leave.department !== departmentFilter) return false;
-      if (!q) return true;
-      return (
-        leave.code.toLowerCase().includes(q) ||
-        leave.employeeName.toLowerCase().includes(q) ||
-        leave.employeeId.toLowerCase().includes(q) ||
-        leave.leaveType.toLowerCase().includes(q) ||
-        leave.reason.toLowerCase().includes(q)
-      );
-    });
-  }, [scopedLeaves, searchQuery, statusFilter, departmentFilter]);
+    const nowMs = nowTick.getTime();
+    return scopedLeaves
+      .filter((leave) => {
+        if (statusFilter !== 'All' && leave.status !== statusFilter) return false;
+        if (departmentFilter !== 'All' && leave.department !== departmentFilter) return false;
+        if (!q) return true;
+        return (
+          leave.code.toLowerCase().includes(q) ||
+          leave.employeeName.toLowerCase().includes(q) ||
+          leave.employeeId.toLowerCase().includes(q) ||
+          leave.leaveType.toLowerCase().includes(q) ||
+          leave.reason.toLowerCase().includes(q)
+        );
+      })
+      .sort((a, b) => {
+        const aOver = isLeavePendingOver24h(a, nowMs) ? 1 : 0;
+        const bOver = isLeavePendingOver24h(b, nowMs) ? 1 : 0;
+        return bOver - aOver;
+      });
+  }, [scopedLeaves, searchQuery, statusFilter, departmentFilter, nowTick]);
 
   const handleOpenCreate = () => {
     setLeaveType('Casual');
@@ -347,7 +425,11 @@ export function LeavesView({
             )}
           </div>
           <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-            {formatShortDate(today)} · Office cutoff 09:30 AM · Live time:{' '}
+            {formatShortDate(today)} · {myShift.department} Shift:{' '}
+            <span className="font-mono font-semibold text-slate-700 dark:text-slate-300">
+              {formatTime12hFromHHMM(myShift.startTime)} – {formatTime12hFromHHMM(myShift.endTime)}
+            </span>{' '}
+            ({myShift.graceMinutes}m grace) · Live time:{' '}
             <span className="font-mono font-semibold text-slate-800 tabular-nums dark:text-slate-200">
               {nowTick.toLocaleTimeString('en-US', {
                 hour: '2-digit',
@@ -416,14 +498,159 @@ export function LeavesView({
             )
           ) : (
             <span className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
-              Read-only mode (Viewer)
+              Account inactive — Clock-in disabled
             </span>
           )}
         </div>
       </div>
 
+      {/* Department Shift Roster & Grace Period Panel */}
+      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+        <button
+          type="button"
+          onClick={() => setRosterOpen((prev) => !prev)}
+          aria-expanded={rosterOpen}
+          className="flex w-full flex-wrap items-center justify-between gap-2 px-5 py-3.5 text-left transition-colors hover:bg-slate-50/70 dark:hover:bg-slate-800/40"
+        >
+          <div className="flex min-w-0 items-center gap-2.5">
+            <SlidersHorizontal className="h-4 w-4 shrink-0 text-slate-700 dark:text-indigo-400" />
+            <div className="min-w-0">
+              <p className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                Department Shift Roster &amp; Grace Period
+              </p>
+              <p className="truncate text-[11px] text-slate-500 dark:text-slate-400">
+                {isSuperAdmin
+                  ? 'Configure start/end shift times and grace periods per department (auto-tags On Time, Late, Early Out)'
+                  : `Your ${myShift.department} shift: ${formatTime12hFromHHMM(myShift.startTime)} – ${formatTime12hFromHHMM(myShift.endTime)} (${myShift.graceMinutes}m grace)`}
+              </p>
+            </div>
+          </div>
+          <span className="inline-flex shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+            <span>{rosterOpen ? 'Hide Roster' : isSuperAdmin ? 'Configure Shifts' : 'View Roster'}</span>
+            {rosterOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+          </span>
+        </button>
+
+        {rosterOpen && (
+          <div className="border-t border-slate-200 px-5 py-4 dark:border-slate-800">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {Object.values(draftRosters).map((cfg) => (
+                <div
+                  key={cfg.department}
+                  className="rounded-xl border border-slate-200 bg-slate-50/70 p-3.5 dark:border-slate-800 dark:bg-slate-950/60"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                      {cfg.department}
+                    </span>
+                    <span className="rounded border border-slate-200 bg-white px-1.5 py-0.5 font-mono text-[10px] font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                      {formatTime12hFromHHMM(cfg.startTime)} – {formatTime12hFromHHMM(cfg.endTime)}
+                    </span>
+                  </div>
+                  <div className="mt-2.5 grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400">
+                        Start
+                      </label>
+                      <input
+                        type="time"
+                        disabled={!isSuperAdmin}
+                        value={cfg.startTime}
+                        onChange={(e) =>
+                          setDraftRosters((prev) => ({
+                            ...prev,
+                            [cfg.department]: { ...cfg, startTime: e.target.value || '09:00' },
+                          }))
+                        }
+                        className="mt-1 h-8 w-full rounded-lg border border-slate-200 bg-white px-2 font-mono text-xs text-slate-900 disabled:opacity-70 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400">
+                        End
+                      </label>
+                      <input
+                        type="time"
+                        disabled={!isSuperAdmin}
+                        value={cfg.endTime}
+                        onChange={(e) =>
+                          setDraftRosters((prev) => ({
+                            ...prev,
+                            [cfg.department]: { ...cfg, endTime: e.target.value || '17:00' },
+                          }))
+                        }
+                        className="mt-1 h-8 w-full rounded-lg border border-slate-200 bg-white px-2 font-mono text-xs text-slate-900 disabled:opacity-70 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400">
+                        Grace (m)
+                      </label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={120}
+                        disabled={!isSuperAdmin}
+                        value={cfg.graceMinutes}
+                        onChange={(e) => {
+                          const num = Math.max(0, Math.min(120, Number(e.target.value) || 0));
+                          setDraftRosters((prev) => ({
+                            ...prev,
+                            [cfg.department]: { ...cfg, graceMinutes: num },
+                          }));
+                        }}
+                        className="mt-1 h-8 w-full rounded-lg border border-slate-200 bg-white px-2 font-mono text-xs text-slate-900 disabled:opacity-70 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {isSuperAdmin && onSaveShiftRosters && (
+              <div className="mt-4 flex flex-wrap items-center justify-end gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
+                {rosterSavedNotice && (
+                  <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+                    Shift roster updated!
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    onSaveShiftRosters(normalizeShiftRosters(draftRosters, departments));
+                    setRosterSavedNotice(true);
+                    window.setTimeout(() => setRosterSavedNotice(false), 3000);
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-slate-800 dark:bg-indigo-600 dark:hover:bg-indigo-500"
+                >
+                  <Save className="h-3.5 w-3.5" />
+                  <span>Save Shift Roster</span>
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* KPI Strip */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+              {isAdmin ? 'Team Punctuality Score' : 'My Punctuality Score'}
+            </span>
+            <Gauge className="h-4 w-4 text-indigo-600 dark:text-indigo-400" aria-hidden="true" />
+          </div>
+          <p className="mt-2 font-mono text-2xl font-bold text-slate-900 tabular-nums dark:text-slate-100">
+            {(isAdmin ? teamPunctuality : myPunctuality).score}%
+          </p>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+            {(isAdmin ? teamPunctuality : myPunctuality).totalCount === 0
+              ? 'No logs yet (100% baseline)'
+              : `${(isAdmin ? teamPunctuality : myPunctuality).onTimeCount}/${(isAdmin ? teamPunctuality : myPunctuality).totalCount} on-time · ${(isAdmin ? teamPunctuality : myPunctuality).earlyOutCount} early out`}
+          </p>
+        </div>
+
         <div className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Staff Checked In Today</span>
@@ -530,7 +757,7 @@ export function LeavesView({
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[780px] border-collapse text-left text-xs">
+            <table className="w-full min-w-[880px] border-collapse text-left text-xs">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50/80 font-semibold text-slate-500 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-400">
                   <th className="py-2.5 pr-3 pl-6">Date</th>
@@ -539,36 +766,87 @@ export function LeavesView({
                   <th className="px-3 py-2.5">Check-In</th>
                   <th className="px-3 py-2.5">Check-Out</th>
                   <th className="px-3 py-2.5">Working Hours</th>
-                  <th className="py-2.5 pr-6 pl-3 text-right">Status</th>
+                  <th className="px-3 py-2.5">Punctuality</th>
+                  <th className="py-2.5 pr-6 pl-3 text-right">Shift Tags &amp; Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {visibleAttendanceLogs.map((log) => (
-                  <tr key={log.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/50">
-                    <td className="py-3 pr-3 pl-6 font-mono font-semibold text-slate-800 tabular-nums whitespace-nowrap dark:text-slate-200">
-                      {log.attendanceDate}
-                    </td>
-                    <td className="px-3 py-3">
-                      <p className="font-semibold text-slate-900 dark:text-slate-100">{log.userName}</p>
-                      <p className="font-mono text-[10px] text-slate-400 dark:text-slate-500">
-                        {log.employeeId} · {log.userEmail}
-                      </p>
-                    </td>
-                    <td className="px-3 py-3 text-slate-600 dark:text-slate-400">{log.department}</td>
-                    <td className="px-3 py-3 font-mono text-slate-800 tabular-nums whitespace-nowrap dark:text-slate-200">
-                      {formatDateTime(log.checkInTime)}
-                    </td>
-                    <td className="px-3 py-3 font-mono text-slate-600 tabular-nums whitespace-nowrap dark:text-slate-400">
-                      {log.checkOutTime ? formatDateTime(log.checkOutTime) : 'Active Shift'}
-                    </td>
-                    <td className="px-3 py-3 font-mono font-bold text-indigo-700 tabular-nums whitespace-nowrap dark:text-indigo-400">
-                      {typeof log.totalHours === 'number' ? `${log.totalHours.toFixed(2)} hrs` : '—'}
-                    </td>
-                    <td className="py-3 pr-6 pl-3 text-right whitespace-nowrap">
-                      {getAttendanceStatusBadge(log.status)}
-                    </td>
-                  </tr>
-                ))}
+                {visibleAttendanceLogs.map((log) => {
+                  const deptShift = getShiftForDepartment(log.department, normalizedRosters);
+                  const tags = evaluateAttendanceTags(log, deptShift);
+                  const empKey = (log.userEmail || log.userId || log.userName).trim().toLowerCase();
+                  const empStats = employeePunctualityMap.get(empKey);
+                  return (
+                    <tr key={log.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/50">
+                      <td className="py-3 pr-3 pl-6 font-mono font-semibold text-slate-800 tabular-nums whitespace-nowrap dark:text-slate-200">
+                        {log.attendanceDate}
+                      </td>
+                      <td className="px-3 py-3">
+                        <p className="font-semibold text-slate-900 dark:text-slate-100">{log.userName}</p>
+                        <p className="font-mono text-[10px] text-slate-400 dark:text-slate-500">
+                          {log.employeeId} · {log.userEmail}
+                        </p>
+                      </td>
+                      <td className="px-3 py-3 text-slate-600 dark:text-slate-400">
+                        <p>{log.department}</p>
+                        <p className="font-mono text-[10px] text-slate-400 dark:text-slate-500">
+                          {formatTime12hFromHHMM(tags.shiftStartTime)} – {formatTime12hFromHHMM(tags.shiftEndTime)}
+                        </p>
+                      </td>
+                      <td className="px-3 py-3 font-mono text-slate-800 tabular-nums whitespace-nowrap dark:text-slate-200">
+                        {formatDateTime(log.checkInTime)}
+                      </td>
+                      <td className="px-3 py-3 font-mono text-slate-600 tabular-nums whitespace-nowrap dark:text-slate-400">
+                        {log.checkOutTime ? formatDateTime(log.checkOutTime) : 'Active Shift'}
+                      </td>
+                      <td className="px-3 py-3 font-mono font-bold text-indigo-700 tabular-nums whitespace-nowrap dark:text-indigo-400">
+                        {typeof log.totalHours === 'number' ? `${log.totalHours.toFixed(2)} hrs` : '—'}
+                      </td>
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        {empStats ? (
+                          <span
+                            className={`inline-flex items-center rounded border px-2 py-0.5 font-mono text-[11px] font-bold tabular-nums ${
+                              empStats.score >= 90
+                                ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/50 dark:text-emerald-300'
+                                : empStats.score >= 70
+                                  ? 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/50 dark:text-amber-300'
+                                  : 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/50 dark:text-rose-300'
+                            }`}
+                          >
+                            {empStats.score}%
+                          </span>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                      <td className="py-3 pr-6 pl-3 text-right whitespace-nowrap">
+                        <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
+                          <span
+                            className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-semibold ${
+                              tags.checkInTag === 'On Time'
+                                ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/50 dark:text-emerald-300'
+                                : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/50 dark:text-amber-300'
+                            }`}
+                          >
+                            {tags.checkInTag}
+                          </span>
+                          {tags.checkOutTag && (
+                            <span
+                              className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-semibold ${
+                                tags.checkOutTag === 'Early Out'
+                                  ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/50 dark:text-rose-300'
+                                  : 'border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                              }`}
+                            >
+                              {tags.checkOutTag === 'Early Out' ? 'Early Out' : 'Full Shift'}
+                            </span>
+                          )}
+                          {getAttendanceStatusBadge(log.status)}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -716,7 +994,18 @@ export function LeavesView({
                       )}
                     </td>
                     <td className="px-3 py-3.5 align-top whitespace-nowrap">
-                      {getStatusBadge(leave.status)}
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {getStatusBadge(leave.status)}
+                        {isLeavePendingOver24h(leave, nowTick.getTime()) && (
+                          <span
+                            title="Leave request pending review for more than 24 hours"
+                            className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-rose-50 px-2 py-0.5 text-[10px] font-bold text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/60 dark:text-rose-300"
+                          >
+                            <AlertTriangle className="h-3 w-3" />
+                            <span>SLA Overdue</span>
+                          </span>
+                        )}
+                      </div>
                       {leave.reviewerName && leave.status !== 'Pending' && (
                         <p className="mt-1 text-[10px] text-slate-500 dark:text-slate-400">By {leave.reviewerName}</p>
                       )}

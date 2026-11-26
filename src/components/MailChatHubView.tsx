@@ -8,6 +8,7 @@ import {
   Forward,
   Hash,
   Inbox,
+  Lock,
   Mail,
   MessageSquare,
   Plus,
@@ -41,6 +42,10 @@ import {
   buildDmRoomId,
   formatDateTime,
   formatPresenceStatus,
+  isDmParticipant,
+  isStrictChatParticipant,
+  isStrictMailParticipant,
+  isStrictMailRecipient,
   resolveLivePresenceOverride,
 } from '../utils/storage';
 import { GmailColorIcon, GoogleGColorIcon, GoogleMeetColorIcon } from './GoogleWorkspaceIcons';
@@ -354,27 +359,26 @@ export function MailChatHubView({
     [teamMembers, selfEmail],
   );
 
-  const isMailAddressedToSelf = (mail: CorporateMailMessage) => {
-    const recipients = [...mail.toEmails, ...mail.ccEmails].map((e) => e.trim().toLowerCase());
-    return (
-      recipients.includes(selfEmail) ||
-      recipients.includes('all@nexops.company') ||
-      recipients.includes(`dept:${currentUser.department.toLowerCase()}@nexops.company`)
-    );
-  };
+  const isMailAddressedToSelf = (mail: CorporateMailMessage) =>
+    isStrictMailRecipient(mail, selfEmail);
 
   const inboxMails = useMemo(
     () =>
       corporateMails
-        .filter((m) => m.status === 'sent' && isMailAddressedToSelf(m))
+        .filter((m) => isStrictMailRecipient(m, selfEmail))
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
-    [corporateMails, selfEmail, currentUser.department],
+    [corporateMails, selfEmail],
   );
 
   const sentMails = useMemo(
     () =>
       corporateMails
-        .filter((m) => m.status === 'sent' && m.fromEmail.trim().toLowerCase() === selfEmail)
+        .filter(
+          (m) =>
+            m.status === 'sent' &&
+            m.fromEmail.trim().toLowerCase() === selfEmail &&
+            isStrictMailParticipant(m, selfEmail),
+        )
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
     [corporateMails, selfEmail],
   );
@@ -422,9 +426,14 @@ export function MailChatHubView({
   const selectedThreadMessages = useMemo(() => {
     if (!selectedMail) return [];
     return corporateMails
-      .filter((m) => m.status === 'sent' && m.threadId === selectedMail.threadId)
+      .filter(
+        (m) =>
+          m.status === 'sent' &&
+          m.threadId === selectedMail.threadId &&
+          isStrictMailParticipant(m, selfEmail),
+      )
       .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-  }, [corporateMails, selectedMail]);
+  }, [corporateMails, selectedMail, selfEmail]);
 
   useEffect(() => {
     if (
@@ -594,9 +603,7 @@ export function MailChatHubView({
 
     let method: CorporateMailMessage['deliveryMethod'] = 'NexOps Mail';
     if (alsoSendViaGmailApi && googleToken) {
-      const externalRecipients = toEmails.filter(
-        (e) => e !== 'all@nexops.company' && !e.startsWith('dept:'),
-      );
+      const externalRecipients = toEmails.filter((e) => e.includes('@'));
       if (externalRecipients.length > 0) {
         setSendingExternalGmail(true);
         try {
@@ -604,7 +611,7 @@ export function MailChatHubView({
             fromEmail: googleEmail || currentUser.email,
             fromName: currentUser.name,
             to: externalRecipients.join(', '),
-            cc: ccEmails.filter((e) => !e.startsWith('dept:')).join(', '),
+            cc: ccEmails.filter((e) => e.includes('@')).join(', '),
             subject: subjectInput.trim(),
             body: bodyInput.trim(),
           });
@@ -736,6 +743,7 @@ export function MailChatHubView({
   const roomUnreadCounts = useMemo(() => {
     const map = new Map<string, number>();
     for (const msg of chatMessages) {
+      if (!isStrictChatParticipant(msg, selfEmail)) continue;
       const senderLower = msg.senderEmail.trim().toLowerCase();
       if (senderLower === selfEmail) continue;
       if (!msg.readBy.some((e) => e.trim().toLowerCase() === selfEmail)) {
@@ -756,9 +764,12 @@ export function MailChatHubView({
   const activeRoomMessages = useMemo(
     () =>
       chatMessages
-        .filter((m) => m.roomId === activeRoomMeta.roomId)
+        .filter(
+          (m) =>
+            m.roomId === activeRoomMeta.roomId && isStrictChatParticipant(m, selfEmail),
+        )
         .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()),
-    [chatMessages, activeRoomMeta.roomId],
+    [chatMessages, activeRoomMeta.roomId, selfEmail],
   );
 
   // Mark messages in the active room read automatically when chat panel is open
@@ -801,6 +812,9 @@ export function MailChatHubView({
   const handleSendChat = () => {
     const clean = chatDraft.trim();
     if (!clean) return;
+    if (activeRoomMeta.roomType === 'dm' && !isDmParticipant(activeRoomMeta.roomId, selfEmail)) {
+      return;
+    }
     onSendChatMessage({
       roomId: activeRoomMeta.roomId,
       roomType: activeRoomMeta.roomType,
@@ -842,22 +856,19 @@ export function MailChatHubView({
       meetInvite: invite,
     });
 
-    const attendees =
-      activeRoomMeta.roomType === 'dm' && activeRoomMeta.peer
-        ? [currentUser.name, activeRoomMeta.peer.name]
-        : [currentUser.name, `${activeRoomMeta.rawLabel} Team`];
-
-    onStartGoogleMeetSession({
-      title: meetingTitle,
-      department:
-        activeRoomMeta.peer?.department ||
-        (activeRoomMeta.rawLabel !== 'General'
-          ? activeRoomMeta.rawLabel
-          : currentUser.department),
-      attendees,
-      meetUrl,
-      sourceLabel: `Chat (${activeRoomMeta.label})`,
-    });
+    if (activeRoomMeta.roomType !== 'dm') {
+      const attendees = [currentUser.name, `${activeRoomMeta.rawLabel} Team`];
+      onStartGoogleMeetSession({
+        title: meetingTitle,
+        department:
+          activeRoomMeta.rawLabel !== 'General'
+            ? activeRoomMeta.rawLabel
+            : currentUser.department,
+        attendees,
+        meetUrl,
+        sourceLabel: `Chat (${activeRoomMeta.label})`,
+      });
+    }
   };
 
   // =========================================================================
@@ -1471,59 +1482,67 @@ export function MailChatHubView({
         {/* Active Chat Feed & Composer */}
         <section className="flex flex-col lg:col-span-8 lg:max-h-[650px]">
           {/* Chat Room Header with Start Google Meet Button */}
-          <div className="flex flex-wrap items-center justify-between gap-2.5 border-b border-slate-200 px-4 py-3 dark:border-slate-800">
-            <div className="flex min-w-0 items-center gap-2.5">
-              {activeRoomMeta.roomType === 'dm' && activeRoomMeta.peer ? (
-                <UserAvatar
-                  name={activeRoomMeta.peer.name}
-                  avatarUrl={activeRoomMeta.peer.avatarUrl}
-                  sizeClass="h-8 w-8"
-                  textClass="text-xs"
-                  roundedClass="rounded-lg"
-                />
-              ) : (
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300">
-                  <Hash className="h-4 w-4" />
-                </span>
-              )}
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <h3 className="truncate text-sm font-bold text-slate-900 dark:text-slate-100">
-                    {activeRoomMeta.label}
-                  </h3>
-                  {peerPresence && (
-                    <span
-                      className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${
-                        peerPresence.isOnline
-                          ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
-                          : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
-                      }`}
-                    >
+          <div className="border-b border-slate-200 dark:border-slate-800">
+            <div className="flex flex-wrap items-center justify-between gap-2.5 px-4 py-3">
+              <div className="flex min-w-0 items-center gap-2.5">
+                {activeRoomMeta.roomType === 'dm' && activeRoomMeta.peer ? (
+                  <UserAvatar
+                    name={activeRoomMeta.peer.name}
+                    avatarUrl={activeRoomMeta.peer.avatarUrl}
+                    sizeClass="h-8 w-8"
+                    textClass="text-xs"
+                    roundedClass="rounded-lg"
+                  />
+                ) : (
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300">
+                    <Hash className="h-4 w-4" />
+                  </span>
+                )}
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <h3 className="truncate text-sm font-bold text-slate-900 dark:text-slate-100">
+                      {activeRoomMeta.label}
+                    </h3>
+                    {peerPresence && (
                       <span
-                        className={`h-1.5 w-1.5 rounded-full ${
-                          peerPresence.isOnline ? 'bg-emerald-500' : 'bg-slate-400'
+                        className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${
+                          peerPresence.isOnline
+                            ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                            : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
                         }`}
-                      />
-                      <span>{peerPresence.isOnline ? 'Online' : peerPresence.label}</span>
-                    </span>
-                  )}
+                      >
+                        <span
+                          className={`h-1.5 w-1.5 rounded-full ${
+                            peerPresence.isOnline ? 'bg-emerald-500' : 'bg-slate-400'
+                          }`}
+                        />
+                        <span>{peerPresence.isOnline ? 'Online' : peerPresence.label}</span>
+                      </span>
+                    )}
+                  </div>
+                  <p className="truncate text-[11px] text-slate-500 dark:text-slate-400">
+                    {activeRoomMeta.peer
+                      ? `${activeRoomMeta.peer.department} · ${activeRoomMeta.peer.email}`
+                      : 'Real-time departmental collaboration channel'}
+                  </p>
                 </div>
-                <p className="truncate text-[11px] text-slate-500 dark:text-slate-400">
-                  {activeRoomMeta.peer
-                    ? `${activeRoomMeta.peer.department} · ${activeRoomMeta.peer.email}`
-                    : 'Real-time departmental collaboration channel'}
-                </p>
               </div>
-            </div>
 
-            <button
-              type="button"
-              onClick={handleStartGoogleMeetInChat}
-              className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-800 transition-colors hover:bg-emerald-100 focus-visible:outline-2 focus-visible:outline-emerald-600 dark:border-emerald-800/70 dark:bg-emerald-950/50 dark:text-emerald-200 dark:hover:bg-emerald-900/60"
-            >
-              <GoogleMeetColorIcon className="h-4 w-4 shrink-0" />
-              <span>Start Google Meet</span>
-            </button>
+              <button
+                type="button"
+                onClick={handleStartGoogleMeetInChat}
+                className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-800 transition-colors hover:bg-emerald-100 focus-visible:outline-2 focus-visible:outline-emerald-600 dark:border-emerald-800/70 dark:bg-emerald-950/50 dark:text-emerald-200 dark:hover:bg-emerald-900/60"
+              >
+                <GoogleMeetColorIcon className="h-4 w-4 shrink-0" />
+                <span>Start Google Meet</span>
+              </button>
+            </div>
+            <div className="flex items-center gap-2 border-t border-slate-100 bg-[#0F172A] px-4 py-1.5 text-[11px] font-medium text-slate-100 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
+              <Lock className="h-3.5 w-3.5 shrink-0 text-emerald-400" aria-hidden="true" />
+              <span className="truncate">
+                End-to-End Participant Private • Visible only to sender &amp; recipient
+              </span>
+            </div>
           </div>
 
           {/* Messages Scroll Area */}
@@ -1808,13 +1827,6 @@ export function MailChatHubView({
 
                 {showRecipientPicker && (
                   <div className="flex flex-wrap gap-1.5 rounded-lg border border-slate-200 bg-slate-50 p-2 dark:border-slate-800 dark:bg-slate-950">
-                    <button
-                      type="button"
-                      onClick={() => appendRecipientEmail('all@nexops.company')}
-                      className="rounded-md border border-indigo-200 bg-indigo-50 px-2 py-1 text-[11px] font-bold text-indigo-700 hover:bg-indigo-100 dark:border-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300"
-                    >
-                      All Team (all@nexops.company)
-                    </button>
                     {activeTeammates.map((tm) => (
                       <button
                         key={tm.id}

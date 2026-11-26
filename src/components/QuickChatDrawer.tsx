@@ -1,6 +1,7 @@
 import {
   ExternalLink,
   Hash,
+  Lock,
   Maximize2,
   MessageSquare,
   Send,
@@ -13,6 +14,8 @@ import {
   buildChannelRoomId,
   buildDmRoomId,
   formatPresenceStatus,
+  isDmParticipant,
+  isStrictChatParticipant,
   resolveLivePresenceOverride,
 } from '../utils/storage';
 import type { ViewportInfo } from '../hooks/useViewport';
@@ -95,6 +98,7 @@ export function QuickChatDrawer({
   const unreadByRoom = useMemo(() => {
     const map = new Map<string, number>();
     for (const m of chatMessages) {
+      if (!isStrictChatParticipant(m, selfEmail)) continue;
       if (m.senderEmail.trim().toLowerCase() === selfEmail) continue;
       if (!m.readBy.some((e) => e.trim().toLowerCase() === selfEmail)) {
         map.set(m.roomId, (map.get(m.roomId) ?? 0) + 1);
@@ -144,9 +148,11 @@ export function QuickChatDrawer({
   const roomMessages = useMemo(
     () =>
       chatMessages
-        .filter((m) => m.roomId === activeRoom.roomId)
+        .filter(
+          (m) => m.roomId === activeRoom.roomId && isStrictChatParticipant(m, selfEmail),
+        )
         .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()),
-    [chatMessages, activeRoom.roomId],
+    [chatMessages, activeRoom.roomId, selfEmail],
   );
 
   useEffect(() => {
@@ -165,6 +171,7 @@ export function QuickChatDrawer({
   const handleSend = () => {
     const clean = draft.trim();
     if (!clean) return;
+    if (activeRoom.roomType === 'dm' && !isDmParticipant(activeRoom.roomId, selfEmail)) return;
     onSendChatMessage({
       roomId: activeRoom.roomId,
       roomType: activeRoom.roomType,
@@ -202,15 +209,15 @@ export function QuickChatDrawer({
       body: `Started a Google Meet video call for ${activeRoom.label}.`,
       meetInvite: invite,
     });
-    onStartGoogleMeetSession({
-      title,
-      department: activeRoom.peer?.department || currentUser.department,
-      attendees: activeRoom.peer
-        ? [currentUser.name, activeRoom.peer.name]
-        : [currentUser.name, `${activeRoom.rawLabel} Team`],
-      meetUrl,
-      sourceLabel: `Quick Chat (${activeRoom.label})`,
-    });
+    if (activeRoom.roomType !== 'dm') {
+      onStartGoogleMeetSession({
+        title,
+        department: currentUser.department,
+        attendees: [currentUser.name, `${activeRoom.rawLabel} Team`],
+        meetUrl,
+        sourceLabel: `Quick Chat (${activeRoom.label})`,
+      });
+    }
   };
 
   return (
@@ -239,43 +246,51 @@ export function QuickChatDrawer({
           aria-label="Quick Team Chat Drawer"
         >
           {/* Drawer Header */}
-          <div className="flex items-center justify-between border-b border-slate-200 bg-slate-900 px-3.5 py-2.5 text-white dark:border-slate-800">
-            <div className="flex min-w-0 items-center gap-2">
-              <MessageSquare className="h-4 w-4 shrink-0 text-indigo-400" />
-              <div className="min-w-0">
-                <p className="truncate text-xs font-bold">Quick Team Chat</p>
-                <p className="truncate text-[10px] text-slate-300">{activeRoom.label}</p>
+          <div className="border-b border-slate-200 bg-[#0F172A] text-white dark:border-slate-800">
+            <div className="flex items-center justify-between px-3.5 py-2.5">
+              <div className="flex min-w-0 items-center gap-2">
+                <MessageSquare className="h-4 w-4 shrink-0 text-indigo-400" />
+                <div className="min-w-0">
+                  <p className="truncate text-xs font-bold">Quick Team Chat</p>
+                  <p className="truncate text-[10px] text-slate-300">{activeRoom.label}</p>
+                </div>
+              </div>
+              <div className="flex shrink-0 items-center gap-1">
+                <button
+                  type="button"
+                  onClick={handleStartMeet}
+                  title="Start Google Meet"
+                  className="inline-flex items-center gap-1 rounded-md bg-emerald-600 px-2 py-1 text-[11px] font-bold text-white hover:bg-emerald-700"
+                >
+                  <GoogleMeetColorIcon className="h-3.5 w-3.5 shrink-0" />
+                  <span>Meet</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpen(false);
+                    onOpenFullHub();
+                  }}
+                  title="Open Full Mail & Chat Hub"
+                  className="rounded-md p-1.5 text-slate-300 hover:bg-slate-800 hover:text-white"
+                >
+                  <Maximize2 className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOpen(false)}
+                  aria-label="Close Quick Chat Drawer"
+                  className="rounded-md p-1.5 text-slate-300 hover:bg-slate-800 hover:text-white"
+                >
+                  <X className="h-4 w-4" />
+                </button>
               </div>
             </div>
-            <div className="flex shrink-0 items-center gap-1">
-              <button
-                type="button"
-                onClick={handleStartMeet}
-                title="Start Google Meet"
-                className="inline-flex items-center gap-1 rounded-md bg-emerald-600 px-2 py-1 text-[11px] font-bold text-white hover:bg-emerald-700"
-              >
-                <GoogleMeetColorIcon className="h-3.5 w-3.5 shrink-0" />
-                <span>Meet</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setOpen(false);
-                  onOpenFullHub();
-                }}
-                title="Open Full Mail & Chat Hub"
-                className="rounded-md p-1.5 text-slate-300 hover:bg-slate-800 hover:text-white"
-              >
-                <Maximize2 className="h-3.5 w-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                aria-label="Close Quick Chat Drawer"
-                className="rounded-md p-1.5 text-slate-300 hover:bg-slate-800 hover:text-white"
-              >
-                <X className="h-4 w-4" />
-              </button>
+            <div className="flex items-center gap-1.5 border-t border-slate-800/80 bg-slate-950/70 px-3.5 py-1 text-[10px] font-medium text-slate-300">
+              <Lock className="h-3 w-3 shrink-0 text-emerald-400" aria-hidden="true" />
+              <span className="truncate">
+                End-to-End Participant Private • Visible only to sender &amp; recipient
+              </span>
             </div>
           </div>
 

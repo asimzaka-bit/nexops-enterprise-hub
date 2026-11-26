@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Clock, RefreshCw, ShieldAlert, WifiOff } from 'lucide-react';
 import { AnnouncementBanner } from './components/AnnouncementBanner';
 import { AssetsInventoryView } from './components/AssetsInventoryView';
 import { AuditLogsView } from './components/AuditLogsView';
@@ -21,16 +22,17 @@ import { OfficialReportModal } from './components/OfficialReportModal';
 import { PendingApprovalScreen } from './components/PendingApprovalScreen';
 import { ProjectsDirectoryView } from './components/ProjectsDirectoryView';
 import { QuickChatDrawer } from './components/QuickChatDrawer';
+import { QuickLaunchBar } from './components/QuickLaunchBar';
 import { RequestDetailDrawer } from './components/RequestDetailDrawer';
 import { RequestsQueueView } from './components/RequestsQueueView';
 import { Sidebar } from './components/Sidebar';
-import { SopVaultView } from './components/SopVaultView';
+import { SopRevisionPayload, SopVaultView } from './components/SopVaultView';
 import { TeamSettingsView } from './components/TeamSettingsView';
 import { ToastContainer } from './components/ToastContainer';
 import { TopBar } from './components/TopBar';
 import { UserProfileModal } from './components/UserProfileModal';
 import { UserSettingsView } from './components/UserSettingsView';
-import { DocumentVaultView } from './components/DocumentVaultView';
+import { DocumentVaultView, VaultNewVersionPayload } from './components/DocumentVaultView';
 import { WorkspaceSkeleton } from './components/WorkspaceSkeleton';
 import { WorkspaceToolsView } from './components/WorkspaceToolsView';
 import { useViewport } from './hooks/useViewport';
@@ -55,10 +57,15 @@ import {
   DEFAULT_SLA_POLICY,
   DEFAULT_USER_PREFERENCES,
   Department,
+  DepartmentShiftConfig,
+  DigitalApprovalStamp,
+  DocumentSignOffRequest,
   DocumentVaultItem,
+  DocumentVersionEntry,
   EditorChangePayload,
   LeaveRequest,
   MeetingActionItem,
+  MeetingActionStatus,
   MeetingMinute,
   NavSection,
   NexOpsState,
@@ -69,6 +76,8 @@ import {
   PendingEditorChangeModule,
   PermissionMatrix,
   Priority,
+  QuickBookmark,
+  RecycleBinItem,
   RequestStatus,
   Role,
   SopAcknowledgment,
@@ -106,18 +115,39 @@ import {
 } from './services/googleWorkspaceService';
 import {
   applyUserPreferencesToDom,
+  createRecycleBinExpiry,
   downloadSystemBackupJson,
+  evaluateAttendanceTags,
+  extractDmPeerEmail,
   formatCurrency,
   generateNextRequestId,
+  getDocumentExpiryInfo,
+  getShiftForDepartment,
   getTodayDateString,
+  isActionItemOpen,
   isAssetAlert,
+  isDmParticipant,
+  isPrivateCommsAuditEvent,
+  isStrictChatParticipant,
+  isStrictMailParticipant,
+  isStrictMailRecipient,
+  isStrictWorkspaceEmailParticipant,
   isSuperAdminEmail,
   isSuperAdminEmployeeId,
+  loadQuickBookmarks,
   loadUserPreferences,
+  maskEmailForLog,
+  normalizeActionItemStatus,
   normalizePermissionMatrix,
+  normalizePrivateChatMessage,
   normalizeRole,
+  normalizeShiftRosters,
+  pruneExpiredRecycleBin,
   requiresTwoTierApproval,
   resolveEffectiveReviewer,
+  sanitizePostgrestEmailFilter,
+  sanitizeQuickBookmarks,
+  saveQuickBookmarks,
   saveUserPreferences,
   SUPER_ADMIN_EMPLOYEE_ID,
 } from './utils/storage';
@@ -213,6 +243,30 @@ export default function App() {
     applyUserPreferencesToDom(loaded);
   }, [authSession?.userEmail]);
 
+  const [quickBookmarks, setQuickBookmarks] = useState<QuickBookmark[]>(() => {
+    const email = authSession?.userEmail || '';
+    const role: Role = authSession?.userRole ?? 'Viewer';
+    return loadQuickBookmarks(email, role, isSuperAdminEmail(email) && role === 'Admin');
+  });
+
+  useEffect(() => {
+    const email = authSession?.userEmail || '';
+    const role: Role = authSession?.userRole ?? 'Viewer';
+    setQuickBookmarks(loadQuickBookmarks(email, role, isSuperAdminEmail(email) && role === 'Admin'));
+  }, [authSession?.userEmail, authSession?.userRole]);
+
+  const handleUpdateQuickBookmarks = useCallback(
+    (next: QuickBookmark[]) => {
+      const email = authSession?.userEmail || '';
+      const role: Role = authSession?.userRole ?? 'Viewer';
+      const isSuper = isSuperAdminEmail(email) && role === 'Admin';
+      const sanitized = sanitizeQuickBookmarks(next, role, isSuper);
+      saveQuickBookmarks(email, sanitized);
+      setQuickBookmarks(sanitized);
+    },
+    [authSession?.userEmail, authSession?.userRole],
+  );
+
   // Queue filters & search
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<RequestStatus | 'All'>('All');
@@ -276,8 +330,46 @@ export default function App() {
   );
   const [googleConnecting, setGoogleConnecting] = useState(false);
 
+  // Network Resilience & 30-Minute Session Idle Timeout State
+  const [isOnline, setIsOnline] = useState<boolean>(() =>
+    typeof navigator !== 'undefined' ? navigator.onLine : true,
+  );
+  const [pendingSyncCount, setPendingSyncCount] = useState<number>(() => {
+    try {
+      const raw = localStorage.getItem('nexops_pending_sync_count_v1');
+      const parsed = raw ? parseInt(raw, 10) : 0;
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+    } catch {
+      return 0;
+    }
+  });
+  const [idleWarningSecondsLeft, setIdleWarningSecondsLeft] = useState<number | null>(null);
+  const lastActivityRef = useRef<number>(Date.now());
+  const idleWarningActiveRef = useRef<boolean>(false);
+  const hasMountedStateRef = useRef<boolean>(false);
+  const isOnlineRef = useRef<boolean>(isOnline);
+
+  useEffect(() => {
+    isOnlineRef.current = isOnline;
+  }, [isOnline]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('nexops_pending_sync_count_v1', String(pendingSyncCount));
+    } catch {
+      // Ignore storage quota errors
+    }
+  }, [pendingSyncCount]);
+
   useEffect(() => {
     dataService.saveStateSync(state);
+    if (!hasMountedStateRef.current) {
+      hasMountedStateRef.current = true;
+      return;
+    }
+    if (!isOnlineRef.current) {
+      setPendingSyncCount((prev) => prev + 1);
+    }
   }, [state]);
 
   useEffect(() => {
@@ -331,6 +423,12 @@ export default function App() {
       const message = extractSupabaseErrorMessage(err);
       console.error('[NexOps Cloud Sync Error]', message, err);
       setLastSyncError(message);
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        setIsOnline(false);
+        setDbConnected(false);
+        setPendingSyncCount((prev) => prev + 1);
+        return;
+      }
       pushToast('Cloud Sync Warning', message, 'warning');
     },
     [pushToast],
@@ -450,6 +548,10 @@ export default function App() {
             : matchingSaved?.userTitle || member.title,
         avatarUrl: matchingSaved?.avatarUrl || member.avatarUrl,
         identityVerified: preservedIdentityVerified,
+        lastLoginAt:
+          (sbUser as { last_sign_in_at?: string }).last_sign_in_at ??
+          matchingSaved?.lastLoginAt ??
+          new Date().toISOString(),
       };
       dataService.auth.saveSessionSync(nextSession);
       setAuthSession(nextSession);
@@ -474,6 +576,13 @@ export default function App() {
         if (isSigningInRef.current) return;
         applySupabaseUser(session.user, false);
       } else if (event === 'SIGNED_OUT') {
+        dataService.comms.purgeLocalCache();
+        setState((prev) => ({
+          ...prev,
+          corporateMails: [],
+          chatMessages: [],
+          workspaceEmails: [],
+        }));
         setAuthSession((prev) => {
           if (prev?.authProvider === 'supabase') {
             dataService.auth.clearSessionSync();
@@ -524,15 +633,32 @@ export default function App() {
       setIsSyncing(true);
 
       try {
-        const remote = await dataService.fetchFullWorkspaceState();
+        const activeEmail = sanitizePostgrestEmailFilter(
+          dataService.auth.loadSessionSync()?.userEmail,
+        );
+        const remote = await dataService.fetchFullWorkspaceState(activeEmail);
         setState((prev) => ({
           ...remote.state,
-          corporateMails: mergeCorporateMails(
-            remote.state.corporateMails,
-            prev.corporateMails,
-            deletedMailIdsRef.current,
+          globalAuditLogs: remote.state.globalAuditLogs.filter(
+            (a) => !isPrivateCommsAuditEvent(a),
           ),
-          chatMessages: mergeChatMessages(remote.state.chatMessages, prev.chatMessages),
+          workspaceEmails: activeEmail
+            ? remote.state.workspaceEmails.filter((e) =>
+                isStrictWorkspaceEmailParticipant(e, activeEmail),
+              )
+            : [],
+          corporateMails: activeEmail
+            ? mergeCorporateMails(
+                remote.state.corporateMails,
+                prev.corporateMails,
+                deletedMailIdsRef.current,
+              ).filter((m) => isStrictMailParticipant(m, activeEmail))
+            : [],
+          chatMessages: activeEmail
+            ? mergeChatMessages(remote.state.chatMessages, prev.chatMessages).filter((m) =>
+                isStrictChatParticipant(m, activeEmail),
+              )
+            : [],
           meetings: mergeMeetings(remote.state.meetings, prev.meetings),
           calendarEvents: mergeCalendarEvents(
             remote.state.calendarEvents,
@@ -622,7 +748,7 @@ export default function App() {
   const handleRunHealthCheck = useCallback(async () => {
     setIsCheckingHealth(true);
     try {
-      const results = await dataService.diagnostics.checkAllTables(state);
+      const results = await dataService.diagnostics.checkAllTables(state, currentUser.email);
       setTableDiagnostics(results);
       const connectedCount = results.filter((r) => r.status === 'connected').length;
       const anyConnected = connectedCount > 0;
@@ -644,6 +770,63 @@ export default function App() {
       setIsCheckingHealth(false);
     }
   }, [pushToast, state]);
+
+  const handleForceCloudSync = useCallback(async () => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      setIsOnline(false);
+      pushToast('Offline Mode', 'Changes remain queued locally until internet returns.', 'warning');
+      return;
+    }
+    setIsSyncing(true);
+    try {
+      if (pendingSyncCount > 0 && dataService.isSupabaseConfigured()) {
+        await dataService.restoreWorkspaceBackup(state, branding);
+      }
+      await syncFromSupabase(true, false);
+      setPendingSyncCount(0);
+    } catch (err) {
+      handleCloudWriteError(err);
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [branding, handleCloudWriteError, pendingSyncCount, pushToast, state, syncFromSupabase]);
+
+  const latestSyncRef = useRef({ pendingSyncCount, state, branding, syncFromSupabase, pushToast });
+  useEffect(() => {
+    latestSyncRef.current = { pendingSyncCount, state, branding, syncFromSupabase, pushToast };
+  }, [pendingSyncCount, state, branding, syncFromSupabase, pushToast]);
+
+  useEffect(() => {
+    const onOffline = () => {
+      setIsOnline(false);
+      setDbConnected(false);
+    };
+    const onOnline = () => {
+      setIsOnline(true);
+      const { pendingSyncCount: queued, state: curState, branding: curBranding, syncFromSupabase: doSync, pushToast: notify } =
+        latestSyncRef.current;
+      void (async () => {
+        try {
+          if (queued > 0 && dataService.isSupabaseConfigured()) {
+            await dataService.restoreWorkspaceBackup(curState, curBranding);
+          }
+          await doSync(false, false);
+          setPendingSyncCount(0);
+          if (queued > 0) {
+            notify('Back Online · Synced', `Auto-synced ${queued} queued local change${queued === 1 ? '' : 's'}.`, 'success');
+          }
+        } catch {
+          // Next manual sync or diagnostics check will retry
+        }
+      })();
+    };
+    window.addEventListener('offline', onOffline);
+    window.addEventListener('online', onOnline);
+    return () => {
+      window.removeEventListener('offline', onOffline);
+      window.removeEventListener('online', onOnline);
+    };
+  }, []);
 
   const currentUser: TeamMember = useMemo(() => {
     if (authSession) {
@@ -1244,7 +1427,24 @@ export default function App() {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'nexops_system_state' },
-        () => {
+        (payload) => {
+          const record = (payload.new ?? payload.old) as { state_key?: string } | undefined;
+          const key = record?.state_key ?? '';
+          const selfLower = (authSession?.userEmail ?? '').trim().toLowerCase();
+          if (
+            key === 'nexops_mails' ||
+            key === 'nexops_chats' ||
+            key === 'corporate_mails' ||
+            key === 'chat_messages'
+          ) {
+            return;
+          }
+          if (
+            (key.startsWith('nexops_user_mails:') || key.startsWith('nexops_user_chats:')) &&
+            (!selfLower || !key.endsWith(`:${selfLower}`))
+          ) {
+            return;
+          }
           scheduleRealtimeRefresh();
         },
       )
@@ -1258,7 +1458,24 @@ export default function App() {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'nexops_workspace_emails' },
-        () => {
+        (payload) => {
+          const row = (payload.new ?? payload.old) as
+            | { sender_email?: string; to_recipients?: string; cc_recipients?: string }
+            | undefined;
+          const selfLower = (authSession?.userEmail ?? '').trim().toLowerCase();
+          if (
+            row &&
+            !isStrictWorkspaceEmailParticipant(
+              {
+                senderEmail: row.sender_email ?? '',
+                toRecipients: row.to_recipients ?? '',
+                ccRecipients: row.cc_recipients ?? '',
+              },
+              selfLower,
+            )
+          ) {
+            return;
+          }
           scheduleRealtimeRefresh();
         },
       )
@@ -1352,16 +1569,20 @@ export default function App() {
         config: { broadcast: { self: false } },
       })
       .on('broadcast', { event: 'chat:message' }, ({ payload }) => {
-        const incoming = payload as TeamChatMessage | undefined;
-        if (!incoming?.id) return;
+        const rawIncoming = payload as TeamChatMessage | undefined;
+        if (!rawIncoming?.id) return;
+        const incoming = normalizePrivateChatMessage(rawIncoming);
+        const selfLower = (authSession?.userEmail ?? '').trim().toLowerCase();
+        if (!isStrictChatParticipant(incoming, selfLower)) {
+          return;
+        }
         setState((prev) => ({
           ...prev,
           chatMessages: mergeChatMessages(prev.chatMessages, [incoming]),
         }));
         if (
           userPrefsRef.current.teamChatAlerts &&
-          incoming.senderEmail.trim().toLowerCase() !==
-            (authSession?.userEmail ?? '').trim().toLowerCase()
+          incoming.senderEmail.trim().toLowerCase() !== selfLower
         ) {
           pushToast(
             `Team Chat · ${incoming.senderName}`,
@@ -1373,6 +1594,8 @@ export default function App() {
       .on('broadcast', { event: 'mail:upsert' }, ({ payload }) => {
         const incoming = payload as CorporateMailMessage | undefined;
         if (!incoming?.id || incoming.status !== 'sent') return;
+        const selfLower = (authSession?.userEmail ?? '').trim().toLowerCase();
+        if (!isStrictMailParticipant(incoming, selfLower)) return;
         setState((prev) => ({
           ...prev,
           corporateMails: mergeCorporateMails(
@@ -1381,11 +1604,7 @@ export default function App() {
             deletedMailIdsRef.current,
           ),
         }));
-        const selfLower = (authSession?.userEmail ?? '').trim().toLowerCase();
-        const isRecipient =
-          selfLower &&
-          (incoming.toEmails.some((e) => e.trim().toLowerCase() === selfLower) ||
-            incoming.ccEmails.some((e) => e.trim().toLowerCase() === selfLower));
+        const isRecipient = isStrictMailRecipient(incoming, selfLower);
         if (
           userPrefsRef.current.mailNotifications &&
           isRecipient &&
@@ -1520,7 +1739,7 @@ export default function App() {
   const openActionItemsCount = useMemo(
     () =>
       state.meetings.reduce(
-        (sum, m) => sum + m.actionItems.filter((a) => a.status === 'Open').length,
+        (sum, m) => sum + m.actionItems.filter((a) => isActionItemOpen(a.status)).length,
         0,
       ),
     [state.meetings],
@@ -1531,28 +1750,83 @@ export default function App() {
     return state.calendarEvents.filter((ev) => ev.date >= todayIso).length;
   }, [state.calendarEvents]);
 
+  // Daily Document Vault Expiry & Renewal Alerts
+  useEffect(() => {
+    if (isHydrating || !isApprovedUser || !currentUser.email.trim()) return;
+    const today = getTodayDateString();
+    const existingIds = new Set(state.notifications.map((n) => n.id));
+    const pendingExpiryNotifs: AppNotification[] = [];
+    const nowIso = new Date().toISOString();
+
+    for (const doc of state.vaultDocuments) {
+      if (doc.accessTag === 'Admin Restricted' && currentUser.role !== 'Admin') continue;
+      const info = getDocumentExpiryInfo(doc.expiryDate, today);
+      if (info.status !== 'expired' && info.status !== 'expiring_soon') continue;
+      const notifId = `notif-vault-exp-${doc.id}-${today}`;
+      if (existingIds.has(notifId)) continue;
+      existingIds.add(notifId);
+      pendingExpiryNotifs.push({
+        id: notifId,
+        title:
+          info.status === 'expired'
+            ? `Document Expired: ${doc.title}`
+            : `Document Expiring Soon: ${doc.title}`,
+        message: `${doc.title} (${doc.folder} · ${doc.department}) — ${info.label}.`,
+        timestamp: nowIso,
+        read: false,
+        targetSection: 'vault',
+        recipientRole: doc.accessTag === 'Admin Restricted' ? 'Admin' : 'all',
+        category: 'vault_expiry',
+        severity: info.status === 'expired' ? 'danger' : 'warning',
+      });
+    }
+
+    if (pendingExpiryNotifs.length === 0) return;
+
+    setState((prev) => {
+      const prevIds = new Set(prev.notifications.map((n) => n.id));
+      const fresh = pendingExpiryNotifs.filter((n) => !prevIds.has(n.id));
+      if (fresh.length === 0) return prev;
+      return {
+        ...prev,
+        notifications: [...fresh, ...prev.notifications],
+      };
+    });
+
+    if (dataService.isSupabaseConfigured()) {
+      for (const notif of pendingExpiryNotifs) {
+        void dataService.notifications.create(notif).catch(() => {});
+      }
+    }
+  }, [
+    isHydrating,
+    isApprovedUser,
+    currentUser.email,
+    currentUser.role,
+    state.vaultDocuments,
+    state.notifications,
+  ]);
+
   const unreadCommsCount = useMemo(() => {
     const selfEmailLower = currentUser.email.trim().toLowerCase();
-    const deptAlias = `dept:${currentUser.department.toLowerCase()}@nexops.company`;
+    if (!selfEmailLower) return 0;
     const unreadMail = state.corporateMails.filter((m) => {
-      if (m.status !== 'sent') return false;
-      const recipients = [...m.toEmails, ...m.ccEmails].map((e) => e.trim().toLowerCase());
-      const addressed =
-        recipients.includes(selfEmailLower) ||
-        recipients.includes('all@nexops.company') ||
-        recipients.includes(deptAlias);
-      if (!addressed) return false;
+      if (!isStrictMailRecipient(m, selfEmailLower)) return false;
       return !m.readBy.some((e) => e.trim().toLowerCase() === selfEmailLower);
     }).length;
 
-    const unreadChat = state.chatMessages.filter(
-      (msg) =>
+    const unreadChat = state.chatMessages.filter((msg) => {
+      if (!isStrictChatParticipant(msg, selfEmailLower)) {
+        return false;
+      }
+      return (
         msg.senderEmail.trim().toLowerCase() !== selfEmailLower &&
-        !msg.readBy.some((e) => e.trim().toLowerCase() === selfEmailLower),
-    ).length;
+        !msg.readBy.some((e) => e.trim().toLowerCase() === selfEmailLower)
+      );
+    }).length;
 
     return unreadMail + unreadChat;
-  }, [state.corporateMails, state.chatMessages, currentUser.email, currentUser.department]);
+  }, [state.corporateMails, state.chatMessages, currentUser.email]);
 
   const pendingAssignedCount = useMemo(
     () =>
@@ -1991,7 +2265,7 @@ export default function App() {
     return { status: 'signed_in' };
   };
 
-  const handleSignOut = () => {
+  const handleSignOut = useCallback(() => {
     if (currentUser.id !== 'unauthenticated') {
       void presenceChannelRef.current?.untrack();
       dataService.team.sendPresenceBeacon({
@@ -2000,6 +2274,15 @@ export default function App() {
         name: currentUser.name,
       });
     }
+    dataService.comms.purgeLocalCache();
+    setState((prev) => ({
+      ...prev,
+      corporateMails: [],
+      chatMessages: [],
+      workspaceEmails: [],
+    }));
+    setIdleWarningSecondsLeft(null);
+    idleWarningActiveRef.current = false;
     setOnlinePresenceKeys(new Set());
     setGoogleToken(null);
     setGoogleEmail(null);
@@ -2017,7 +2300,159 @@ export default function App() {
     pushToast('Signed Out', 'Corporate session closed securely.', 'info');
     void dataService.auth.signOut().catch(() => {});
     void disconnectGoogleWorkspace().catch(() => {});
+  }, [currentUser.email, currentUser.id, currentUser.name, pushToast]);
+
+  const handleSignOutAllDevices = async () => {
+    const masked = maskEmailForLog(currentUser.email || 'account');
+    const auditEntry = createAuditEvent(
+      'AUTH-SESSION-REVOKE',
+      'Security Alert',
+      `Global session revocation triggered by ${currentUser.name} (${masked}). Invalidated all active sessions.`,
+    );
+    setState((prev) => ({
+      ...prev,
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+    }));
+    await dataService.auditLogs.append(auditEntry).catch(() => {});
+    dataService.comms.purgeLocalCache();
+    try {
+      await dataService.auth.signOutAllDevices();
+    } catch (err) {
+      handleCloudWriteError(err);
+    }
+    setState((prev) => ({
+      ...prev,
+      corporateMails: [],
+      chatMessages: [],
+      workspaceEmails: [],
+    }));
+    setIdleWarningSecondsLeft(null);
+    idleWarningActiveRef.current = false;
+    setOnlinePresenceKeys(new Set());
+    setGoogleToken(null);
+    setGoogleEmail(null);
+    setGoogleDisplayName(null);
+    setGooglePhotoUrl(null);
+    setAuthSession(null);
+    setSelectedRequestId(null);
+    setCreateModalOpen(false);
+    setImportModalOpen(false);
+    setTemplateSource(null);
+    setEditingRequest(null);
+    setProfileModalOpen(false);
+    setReportModalState({ open: false, requestId: null });
+    setMobileMenuOpen(false);
+    pushToast('All Devices Signed Out', 'Revoked all active sessions securely.', 'success');
+    void disconnectGoogleWorkspace().catch(() => {});
   };
+
+  const handleLogBruteForceLockout = useCallback(
+    (email: string, attempts: number) => {
+      const masked = maskEmailForLog(email || 'unknown');
+      const auditEntry: AuditEvent = {
+        id: `aud-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        requestId: 'AUTH-LOCKOUT',
+        timestamp: new Date().toISOString(),
+        actorName: masked,
+        actorEmail: email || undefined,
+        actorRole: 'Viewer',
+        actorSignOffTitle: 'Authentication Guard',
+        actionType: 'Security Alert',
+        details: `Brute-force protection activated for ${masked} after ${attempts} consecutive failed sign-in attempts (60s lockout).`,
+      };
+      setState((prev) => ({
+        ...prev,
+        globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+      }));
+      void dataService.auditLogs.append(auditEntry).catch(() => {});
+      pushToast(
+        'Login Temporarily Locked',
+        `Too many failed attempts for ${masked}. Wait 60 seconds before retrying.`,
+        'warning',
+      );
+    },
+    [pushToast],
+  );
+
+  const handleStaySignedIn = useCallback(() => {
+    lastActivityRef.current = Date.now();
+    idleWarningActiveRef.current = false;
+    setIdleWarningSecondsLeft(null);
+  }, []);
+
+  // 30-Minute Session Idle Timeout with 60-Second Warning Banner
+  useEffect(() => {
+    if (!authSession?.isAuthenticated) {
+      idleWarningActiveRef.current = false;
+      setIdleWarningSecondsLeft(null);
+      return;
+    }
+    const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
+    const WARNING_WINDOW_MS = 60 * 1000;
+    lastActivityRef.current = Date.now();
+    idleWarningActiveRef.current = false;
+    setIdleWarningSecondsLeft(null);
+
+    let lastTouch = 0;
+    const bumpActivity = () => {
+      if (idleWarningActiveRef.current) return;
+      const now = Date.now();
+      if (now - lastTouch > 2000) {
+        lastTouch = now;
+        lastActivityRef.current = now;
+      }
+    };
+
+    const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'] as const;
+    events.forEach((evt) => window.addEventListener(evt, bumpActivity, { passive: true }));
+
+    const timer = window.setInterval(() => {
+      const elapsed = Date.now() - lastActivityRef.current;
+      if (elapsed >= IDLE_TIMEOUT_MS) {
+        const masked = maskEmailForLog(currentUser.email || authSession.userEmail || 'session');
+        const timeoutAudit: AuditEvent = {
+          id: `aud-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          requestId: 'AUTH-IDLE-TIMEOUT',
+          timestamp: new Date().toISOString(),
+          actorName: currentUser.name || masked,
+          actorEmail: currentUser.email || authSession.userEmail,
+          actorRole: currentUser.role || 'Viewer',
+          actorSignOffTitle: currentUser.signOffTitle || currentUser.title,
+          actionType: 'Security Alert',
+          details: `Session automatically signed out for ${masked} after 30 minutes of inactivity.`,
+        };
+        setState((prev) => ({
+          ...prev,
+          globalAuditLogs: [timeoutAudit, ...prev.globalAuditLogs],
+        }));
+        void dataService.auditLogs.append(timeoutAudit).catch(() => {});
+        handleSignOut();
+        return;
+      }
+      if (elapsed >= IDLE_TIMEOUT_MS - WARNING_WINDOW_MS) {
+        const secs = Math.max(1, Math.ceil((IDLE_TIMEOUT_MS - elapsed) / 1000));
+        idleWarningActiveRef.current = true;
+        setIdleWarningSecondsLeft(secs);
+      } else if (idleWarningActiveRef.current) {
+        idleWarningActiveRef.current = false;
+        setIdleWarningSecondsLeft(null);
+      }
+    }, 1000);
+
+    return () => {
+      window.clearInterval(timer);
+      events.forEach((evt) => window.removeEventListener(evt, bumpActivity));
+    };
+  }, [
+    authSession?.isAuthenticated,
+    authSession?.userEmail,
+    currentUser.email,
+    currentUser.name,
+    currentUser.role,
+    currentUser.signOffTitle,
+    currentUser.title,
+    handleSignOut,
+  ]);
 
   const handleGoogleWorkspaceSignIn = async () => {
     setGoogleConnecting(true);
@@ -3746,9 +4181,114 @@ export default function App() {
     );
   };
 
+  const buildDigitalApprovalStamp = (): DigitalApprovalStamp => ({
+    stampedBy: currentUser.name,
+    stampedByEmail: currentUser.email,
+    stampedByEmployeeId: SUPER_ADMIN_EMPLOYEE_ID,
+    stampedAt: new Date().toISOString(),
+    badgeLabel: 'VERIFIED & APPROVED • Super Admin (Employee 1)',
+  });
+
+  const handleReviseSop = (sopId: string, patch: SopRevisionPayload) => {
+    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    const target = state.sops.find((s) => s.id === sopId);
+    if (!target) return;
+    const now = new Date().toISOString();
+    const priorEntry: DocumentVersionEntry = {
+      version: target.version,
+      updatedAt: target.updatedAt,
+      updatedBy: target.authorName,
+      changeNote: patch.changeNote || `Archived version ${target.version}`,
+      purpose: target.purpose,
+      scope: target.scope,
+      procedureSteps: target.procedureSteps,
+      complianceRules: target.complianceRules,
+    };
+    const nextVersions = [priorEntry, ...(target.versions ?? [])];
+    const updatedSop: SopDocument = {
+      ...target,
+      version: patch.version.trim() || target.version,
+      effectiveDate: patch.effectiveDate || target.effectiveDate,
+      purpose: patch.purpose.trim() || target.purpose,
+      scope: patch.scope.trim() || target.scope,
+      procedureSteps: patch.procedureSteps.length > 0 ? patch.procedureSteps : target.procedureSteps,
+      complianceRules: patch.complianceRules.length > 0 ? patch.complianceRules : target.complianceRules,
+      authorName: currentUser.name,
+      versions: nextVersions,
+      approvalStamp: undefined,
+      updatedAt: now,
+    };
+    const auditEntry = createAuditEvent(
+      target.code,
+      'Team Updated',
+      `Published revision ${updatedSop.version} for ${target.code} ("${target.title}") — Note: ${patch.changeNote}.`,
+    );
+    const nextSops = state.sops.map((s) => (s.id === sopId ? updatedSop : s));
+    setState((prev) => ({
+      ...prev,
+      sops: prev.sops.map((s) => (s.id === sopId ? updatedSop : s)),
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+    }));
+    void dataService.sops
+      .upsert(updatedSop, auditEntry, nextSops)
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      })
+      .catch(handleCloudWriteError);
+    pushToast(`SOP Revised · ${target.code}`, `Updated to ${updatedSop.version}.`, 'success');
+  };
+
+  const handleStampSop = (sopId: string) => {
+    if (!isSuperAdminOperator) {
+      pushToast('Super Admin Required', 'Only the verified Super Admin can digitally stamp SOPs.', 'error');
+      return;
+    }
+    const target = state.sops.find((s) => s.id === sopId);
+    if (!target) return;
+    const stamp = buildDigitalApprovalStamp();
+    const updatedSop: SopDocument = {
+      ...target,
+      approvalStamp: stamp,
+      updatedAt: stamp.stampedAt,
+    };
+    const auditEntry = createAuditEvent(
+      target.code,
+      'Team Updated',
+      `Applied Super Admin Digital Approval Stamp to ${target.code} ${target.version} ("${target.title}").`,
+    );
+    const notif: AppNotification = {
+      id: `notif-sop-stamp-${Date.now()}`,
+      title: `SOP Digitally Stamped: ${target.code}`,
+      message: `${currentUser.name} verified & approved ${target.code} (${target.version}).`,
+      timestamp: stamp.stampedAt,
+      read: false,
+      targetSection: 'sops',
+      recipientRole: 'all',
+      actorEmail: currentUser.email,
+      category: 'system',
+      severity: 'success',
+    };
+    const nextSops = state.sops.map((s) => (s.id === sopId ? updatedSop : s));
+    setState((prev) => ({
+      ...prev,
+      sops: prev.sops.map((s) => (s.id === sopId ? updatedSop : s)),
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+      notifications: [notif, ...prev.notifications],
+    }));
+    void Promise.all([
+      dataService.sops.upsert(updatedSop, auditEntry, nextSops),
+      dataService.notifications.create(notif),
+    ])
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      })
+      .catch(handleCloudWriteError);
+    pushToast('Verified & Stamped', `${target.code} stamped by Super Admin (Employee 1).`, 'success');
+  };
+
   // Staff Attendance (Clock-In / Clock-Out) & Leave Management Handlers
   const handleClockIn = () => {
-    if (currentUser.role !== 'Admin') return;
+    if (!isApprovedUser || !currentUser.email.trim()) return;
     const today = getTodayDateString();
     const existing = state.attendanceLogs.find(
       (log) =>
@@ -3763,9 +4303,17 @@ export default function App() {
 
     const nowDate = new Date();
     const nowIso = nowDate.toISOString();
-    const hour = nowDate.getHours();
-    const minute = nowDate.getMinutes();
-    const isLate = hour > 9 || (hour === 9 && minute > 30);
+    const deptShift = getShiftForDepartment(currentUser.department, branding.shiftRosters);
+    const shiftTags = evaluateAttendanceTags(
+      {
+        checkInTime: nowIso,
+        status: 'Present',
+        shiftStartTime: deptShift.startTime,
+        shiftEndTime: deptShift.endTime,
+      },
+      deptShift,
+    );
+    const isLate = shiftTags.checkInTag === 'Late';
     const status = isLate ? 'Late' : 'Present';
 
     const newLog: AttendanceLog = {
@@ -3778,6 +4326,9 @@ export default function App() {
       attendanceDate: today,
       checkInTime: nowIso,
       status,
+      checkInTag: shiftTags.checkInTag,
+      shiftStartTime: deptShift.startTime,
+      shiftEndTime: deptShift.endTime,
       createdAt: nowIso,
       updatedAt: nowIso,
     };
@@ -3785,7 +4336,7 @@ export default function App() {
     const auditEntry = createAuditEvent(
       `ATT-${today}`,
       'Attendance Logged',
-      `${currentUser.name} (${currentUser.email}) clocked in at ${nowDate.toLocaleTimeString()} — Status: ${status}.`,
+      `${currentUser.name} (${maskEmailForLog(currentUser.email)}) clocked in at ${nowDate.toLocaleTimeString()} — ${shiftTags.checkInTag} (Shift ${deptShift.startTime}–${deptShift.endTime}, +${deptShift.graceMinutes}m grace).`,
     );
 
     setState((prev) => ({
@@ -3801,32 +4352,56 @@ export default function App() {
       })
       .catch(handleCloudWriteError);
 
-    pushToast(`Clocked In · ${status}`, `Recorded check-in for ${today}.`, isLate ? 'warning' : 'success');
+    pushToast(
+      `Clocked In · ${shiftTags.checkInTag}`,
+      `Recorded check-in for ${today} (Shift ${deptShift.startTime}).`,
+      isLate ? 'warning' : 'success',
+    );
   };
 
   const handleClockOut = (attendanceId: string) => {
-    if (currentUser.role !== 'Admin') return;
+    if (!isApprovedUser || !currentUser.email.trim()) return;
     const target = state.attendanceLogs.find((a) => a.id === attendanceId);
     if (!target || target.checkOutTime) return;
+    if (target.userEmail.trim().toLowerCase() !== currentUser.email.trim().toLowerCase()) {
+      pushToast('Personal Attendance Only', 'You can only clock out your own attendance record.', 'warning');
+      return;
+    }
 
     const nowDate = new Date();
     const nowIso = nowDate.toISOString();
     const inMs = new Date(target.checkInTime).getTime();
     const outMs = nowDate.getTime();
     const totalHours = Number(Math.max(0, (outMs - inMs) / 3600000).toFixed(2));
+    const deptShift = getShiftForDepartment(target.department, branding.shiftRosters);
+    const shiftTags = evaluateAttendanceTags(
+      {
+        checkInTime: target.checkInTime,
+        checkOutTime: nowIso,
+        status: target.status,
+        checkInTag: target.checkInTag,
+        shiftStartTime: target.shiftStartTime ?? deptShift.startTime,
+        shiftEndTime: target.shiftEndTime ?? deptShift.endTime,
+      },
+      deptShift,
+    );
 
     const updatedLog: AttendanceLog = {
       ...target,
       checkOutTime: nowIso,
       totalHours,
       status: 'Completed',
+      checkInTag: target.checkInTag ?? shiftTags.checkInTag,
+      checkOutTag: shiftTags.checkOutTag,
+      shiftStartTime: target.shiftStartTime ?? deptShift.startTime,
+      shiftEndTime: target.shiftEndTime ?? deptShift.endTime,
       updatedAt: nowIso,
     };
 
     const auditEntry = createAuditEvent(
       `ATT-${target.attendanceDate}`,
       'Attendance Logged',
-      `${target.userName} (${target.userEmail}) clocked out at ${nowDate.toLocaleTimeString()} — Total Worked: ${totalHours.toFixed(2)}h.`,
+      `${target.userName} (${maskEmailForLog(target.userEmail)}) clocked out at ${nowDate.toLocaleTimeString()} — Total Worked: ${totalHours.toFixed(2)}h (${shiftTags.checkOutTag}).`,
     );
 
     setState((prev) => ({
@@ -3842,7 +4417,11 @@ export default function App() {
       })
       .catch(handleCloudWriteError);
 
-    pushToast('Clocked Out', `Completed shift (${totalHours.toFixed(2)} hrs logged).`, 'success');
+    pushToast(
+      `Clocked Out · ${shiftTags.checkOutTag}`,
+      `Completed shift (${totalHours.toFixed(2)} hrs logged).`,
+      shiftTags.checkOutTag === 'Early Out' ? 'warning' : 'success',
+    );
   };
 
   // Leave & Time-Off Approvals Handlers (`leave_requests` + `nexops_leaves`)
@@ -4672,16 +5251,21 @@ export default function App() {
     );
   };
 
-  // Company Notice Board & Announcements Handlers (Admin Only)
+  // Company Notice Board & Announcements Handlers (Sole Super Admin Only)
   const handlePublishAnnouncement = (payload: {
     title: string;
     message: string;
     severity: AnnouncementSeverity;
     priorityTag: AnnouncementPriorityTag;
     pinned: boolean;
+    expiresAt?: string;
   }) => {
-    if (currentUser.role !== 'Admin') return;
+    if (!isSuperAdminOperator) {
+      pushToast('Super Admin Required', 'Only the Super Admin can publish official announcements.', 'error');
+      return;
+    }
     const now = new Date().toISOString();
+    const cleanExpiresAt = payload.expiresAt?.trim() || undefined;
     const notice: CompanyAnnouncement = {
       id: `ann-${Date.now()}`,
       title: payload.title,
@@ -4689,6 +5273,7 @@ export default function App() {
       severity: payload.severity,
       priorityTag: payload.priorityTag,
       pinned: payload.pinned,
+      expiresAt: cleanExpiresAt,
       publishedBy: currentUser.name,
       publishedByEmail: currentUser.email,
       publishedByRole: currentUser.role,
@@ -4699,16 +5284,31 @@ export default function App() {
     const auditEntry = createAuditEvent(
       'EXEC-CIRCULAR',
       'Notice Posted',
-      `Posted company notice [${payload.priorityTag}${payload.pinned ? ' · Pinned' : ''}]: "${payload.title}".`,
+      `Posted company notice [${payload.priorityTag}${payload.pinned ? ' · Pinned' : ''}]: "${payload.title}"${cleanExpiresAt ? ` (expires ${cleanExpiresAt})` : ''}.`,
     );
+    const circularNotif: AppNotification = {
+      id: `notif-circ-${Date.now()}`,
+      title: `Official Circular: ${payload.title}`,
+      message: `${currentUser.name} published [${payload.priorityTag}]: ${payload.message.slice(0, 120)}`,
+      timestamp: now,
+      read: false,
+      targetSection: 'dashboard',
+      recipientRole: 'all',
+      actorEmail: currentUser.email,
+      category: 'system',
+      severity: payload.severity === 'urgent' ? 'danger' : payload.severity === 'warning' ? 'warning' : 'info',
+    };
     const nextAnnouncements = [notice, ...state.announcements];
     setState((prev) => ({
       ...prev,
       announcements: nextAnnouncements,
       globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+      notifications: [circularNotif, ...prev.notifications],
     }));
-    void dataService.announcements
-      .upsert(notice, nextAnnouncements, auditEntry)
+    void Promise.all([
+      dataService.announcements.upsert(notice, nextAnnouncements, auditEntry),
+      dataService.notifications.create(circularNotif),
+    ])
       .then(() => {
         if (dataService.isSupabaseConfigured()) setDbConnected(true);
       })
@@ -4717,7 +5317,7 @@ export default function App() {
   };
 
   const handleEditAnnouncement = (updatedNotice: CompanyAnnouncement) => {
-    if (currentUser.role !== 'Admin') return;
+    if (!isSuperAdminOperator) return;
     const now = new Date().toISOString();
     const nextNotice: CompanyAnnouncement = {
       ...updatedNotice,
@@ -4746,7 +5346,7 @@ export default function App() {
   };
 
   const handleTogglePinAnnouncement = (announcementId: string) => {
-    if (currentUser.role !== 'Admin') return;
+    if (!isSuperAdminOperator) return;
     const target = state.announcements.find((a) => a.id === announcementId);
     if (!target) return;
     const nextPinned = !target.pinned;
@@ -4776,31 +5376,47 @@ export default function App() {
   };
 
   const handleDeleteAnnouncement = (announcementId: string) => {
-    if (currentUser.role !== 'Admin') return;
+    if (!isSuperAdminOperator) return;
     const target = state.announcements.find((a) => a.id === announcementId);
     if (!target) return;
+    const nowIso = new Date().toISOString();
+    const binEntry: RecycleBinItem = {
+      id: `bin-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      itemType: 'announcement',
+      itemId: target.id,
+      title: target.title,
+      deletedBy: currentUser.name,
+      deletedByEmail: currentUser.email,
+      deletedAt: nowIso,
+      expiresAt: createRecycleBinExpiry(nowIso),
+      payload: target,
+    };
+    const nextRecycleBin = pruneExpiredRecycleBin([binEntry, ...(state.recycleBin ?? [])]);
     const auditEntry = createAuditEvent(
       'EXEC-CIRCULAR',
       'Notice Deleted',
-      `Deleted company notice "${target.title}".`,
+      `Moved company notice "${target.title}" to 30-day Recycle Bin.`,
     );
     const nextAnnouncements = state.announcements.filter((a) => a.id !== announcementId);
     setState((prev) => ({
       ...prev,
       announcements: nextAnnouncements,
+      recycleBin: nextRecycleBin,
       globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
     }));
-    void dataService.announcements
-      .remove(announcementId, nextAnnouncements, currentUser.name, auditEntry)
+    void Promise.all([
+      dataService.announcements.remove(announcementId, nextAnnouncements, currentUser.name, auditEntry),
+      dataService.recycleBin.saveAll(nextRecycleBin, currentUser.name),
+    ])
       .then(() => {
         if (dataService.isSupabaseConfigured()) setDbConnected(true);
       })
       .catch(handleCloudWriteError);
-    pushToast('Notice Deleted', target.title, 'info');
+    pushToast('Moved to Recycle Bin', `${target.title} (30-day retention).`, 'info');
   };
 
   const handleArchiveAnnouncement = (announcementId: string) => {
-    if (currentUser.role !== 'Admin') return;
+    if (!isSuperAdminOperator) return;
     const target = state.announcements.find((a) => a.id === announcementId);
     if (!target) return;
     const nextNotice: CompanyAnnouncement = {
@@ -4828,7 +5444,7 @@ export default function App() {
   };
 
   const handleRestoreAnnouncement = (announcementId: string) => {
-    if (currentUser.role !== 'Admin') return;
+    if (!isSuperAdminOperator) return;
     const target = state.announcements.find((a) => a.id === announcementId);
     if (!target) return;
     const nextNotice: CompanyAnnouncement = {
@@ -4876,12 +5492,13 @@ export default function App() {
       decisions: payload.decisions,
       actionItems: payload.actionItems.map((item, idx) => ({
         id: `act-${Date.now()}-${idx + 1}`,
+        title: item.title?.trim() || undefined,
         description: item.description,
         ownerName: item.ownerName,
         department: item.department,
         priority: item.priority,
         dueDate: item.dueDate,
-        status: 'Open',
+        status: item.status ?? 'Todo',
       })),
       createdAt: now,
       updatedAt: now,
@@ -4933,24 +5550,28 @@ export default function App() {
   const handleAddMeetingActionItem = (
     meetingId: string,
     item: {
+      title?: string;
       description: string;
       ownerName: string;
       department: Department;
       priority: Priority;
       dueDate: string;
+      status?: MeetingActionStatus;
     },
   ) => {
     if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
     const meeting = state.meetings.find((m) => m.id === meetingId);
     if (!meeting) return;
+    const actionLabel = item.title?.trim() || item.description;
     const newAction: MeetingActionItem = {
       id: `act-${Date.now()}`,
+      title: item.title?.trim() || undefined,
       description: item.description,
       ownerName: item.ownerName,
       department: item.department,
       priority: item.priority,
       dueDate: item.dueDate,
-      status: 'Open',
+      status: item.status ?? 'Todo',
     };
 
     if (currentUser.role === 'Editor') {
@@ -4960,10 +5581,11 @@ export default function App() {
         action: 'update',
         targetId: meetingId,
         itemLabel: `${meeting.code} · New Action Item`,
-        summary: `Add action item to ${meeting.code}: "${item.description}" (Owner: ${item.ownerName})`,
+        summary: `Add action item to ${meeting.code}: "${actionLabel}" (Owner: ${item.ownerName})`,
         diffs: [
-          { field: 'Action Item', before: '—', after: item.description },
+          { field: 'Action Item', before: '—', after: actionLabel },
           { field: 'Owner', before: '—', after: item.ownerName },
+          { field: 'Status', before: '—', after: newAction.status },
           { field: 'Priority / Due', before: '—', after: `${item.priority} · ${item.dueDate}` },
         ],
         payload: {
@@ -4978,7 +5600,7 @@ export default function App() {
     const auditEntry = createAuditEvent(
       meeting.code,
       'Team Updated',
-      `Added MoM action item to ${meeting.code}: "${item.description}" (Owner: ${item.ownerName}).`,
+      `Added MoM action item to ${meeting.code}: "${actionLabel}" (Owner: ${item.ownerName}, Status: ${newAction.status}).`,
     );
     const now = new Date().toISOString();
     const updatedMeeting: MeetingMinute = {
@@ -4997,7 +5619,70 @@ export default function App() {
         if (dataService.isSupabaseConfigured()) setDbConnected(true);
       })
       .catch(handleCloudWriteError);
-    pushToast(`Action Item Added · ${meeting.code}`, item.description, 'success');
+    pushToast(`Action Item Added · ${meeting.code}`, actionLabel, 'success');
+  };
+
+  const handleUpdateMeetingActionStatus = (
+    meetingId: string,
+    actionItemId: string,
+    nextStatus: MeetingActionStatus,
+  ) => {
+    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    const meeting = state.meetings.find((m) => m.id === meetingId);
+    const actionItem = meeting?.actionItems.find((a) => a.id === actionItemId);
+    if (!meeting || !actionItem) return;
+    const actionLabel = actionItem.title || actionItem.description;
+
+    if (currentUser.role === 'Editor') {
+      submitEditorChangeProposal({
+        module: 'meetings',
+        moduleLabel: 'Meetings & MoM',
+        action: 'update',
+        targetId: meetingId,
+        itemLabel: `${meeting.code} · Action Status`,
+        summary: `Update MoM action item in ${meeting.code} ("${actionLabel}") to ${nextStatus}`,
+        diffs: [
+          {
+            field: actionLabel,
+            before: normalizeActionItemStatus(actionItem.status),
+            after: nextStatus,
+          },
+        ],
+        payload: {
+          op: 'meeting_update_action_status',
+          meetingId,
+          actionItemId,
+          nextStatus,
+        },
+      });
+      return;
+    }
+
+    const auditEntry = createAuditEvent(
+      meeting.code,
+      'Team Updated',
+      `Updated MoM action item status in ${meeting.code} ("${actionLabel}") to ${nextStatus}.`,
+    );
+    const now = new Date().toISOString();
+    const updatedMeeting: MeetingMinute = {
+      ...meeting,
+      updatedAt: now,
+      actionItems: meeting.actionItems.map((a) =>
+        a.id === actionItemId ? { ...a, status: nextStatus } : a,
+      ),
+    };
+    setState((prev) => ({
+      ...prev,
+      meetings: prev.meetings.map((m) => (m.id === meetingId ? updatedMeeting : m)),
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+    }));
+    void dataService.meetings
+      .upsert(updatedMeeting, auditEntry)
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      })
+      .catch(handleCloudWriteError);
+    pushToast(`Action Updated · ${nextStatus}`, actionLabel, 'success');
   };
 
   const handleConvertActionToRequest = (meetingId: string, actionItemId: string) => {
@@ -5176,6 +5861,94 @@ export default function App() {
     pushToast(`Action Completed · ${meeting.code}`, actionItem.description, 'success');
   };
 
+  const handleStampMeeting = (meetingId: string) => {
+    if (!isSuperAdminOperator) {
+      pushToast('Super Admin Required', 'Only the verified Super Admin can digitally stamp MoMs.', 'error');
+      return;
+    }
+    const target = state.meetings.find((m) => m.id === meetingId);
+    if (!target) return;
+    const stamp = buildDigitalApprovalStamp();
+    const updatedMeeting: MeetingMinute = {
+      ...target,
+      approvalStamp: stamp,
+      updatedAt: stamp.stampedAt,
+    };
+    const auditEntry = createAuditEvent(
+      target.code,
+      'Team Updated',
+      `Applied Super Admin Digital Approval Stamp to Meeting Minutes ${target.code} ("${target.title}").`,
+    );
+    const notif: AppNotification = {
+      id: `notif-mom-stamp-${Date.now()}`,
+      title: `MoM Digitally Stamped: ${target.code}`,
+      message: `${currentUser.name} verified & approved ${target.title}.`,
+      timestamp: stamp.stampedAt,
+      read: false,
+      targetSection: 'meetings',
+      recipientRole: 'all',
+      actorEmail: currentUser.email,
+      category: 'system',
+      severity: 'success',
+    };
+    setState((prev) => ({
+      ...prev,
+      meetings: prev.meetings.map((m) => (m.id === meetingId ? updatedMeeting : m)),
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+      notifications: [notif, ...prev.notifications],
+    }));
+    void Promise.all([
+      dataService.meetings.upsert(updatedMeeting, auditEntry),
+      dataService.notifications.create(notif),
+    ])
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      })
+      .catch(handleCloudWriteError);
+    pushToast('MoM Verified & Stamped', `${target.code} digitally signed by Super Admin.`, 'success');
+  };
+
+  const handleDeleteMeeting = (meetingId: string) => {
+    if (currentUser.role !== 'Admin') return;
+    const target = state.meetings.find((m) => m.id === meetingId);
+    if (!target) return;
+    const nowIso = new Date().toISOString();
+    const binEntry: RecycleBinItem = {
+      id: `bin-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      itemType: 'meeting',
+      itemId: target.id,
+      title: `${target.code} · ${target.title}`,
+      department: target.department,
+      deletedBy: currentUser.name,
+      deletedByEmail: currentUser.email,
+      deletedAt: nowIso,
+      expiresAt: createRecycleBinExpiry(nowIso),
+      payload: target,
+    };
+    const nextRecycleBin = pruneExpiredRecycleBin([binEntry, ...(state.recycleBin ?? [])]);
+    const remainingMeetings = state.meetings.filter((m) => m.id !== meetingId);
+    const auditEntry = createAuditEvent(
+      target.code,
+      'Team Updated',
+      `Moved Meeting Minutes ${target.code} ("${target.title}") to 30-day Recycle Bin.`,
+    );
+    setState((prev) => ({
+      ...prev,
+      meetings: remainingMeetings,
+      recycleBin: nextRecycleBin,
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+    }));
+    void Promise.all([
+      dataService.meetings.remove(meetingId, remainingMeetings, currentUser.name, auditEntry),
+      dataService.recycleBin.saveAll(nextRecycleBin, currentUser.name),
+    ])
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      })
+      .catch(handleCloudWriteError);
+    pushToast('Moved to Recycle Bin', `${target.code} (30-day retention).`, 'info');
+  };
+
   const handleUpdateUserPreferences = useCallback(
     (patch: Partial<UserPreferences>, feedbackLabel?: string) => {
       setUserPreferences((prev) => {
@@ -5302,20 +6075,15 @@ export default function App() {
   // Workspace Tools Handlers (Gmail, Google Docs, Google Sheets, Google Forms)
   const handleSaveEmailLog = (emailLog: WorkspaceEmailLog) => {
     if (!isApprovedUser) return;
-    const auditEntry = createAuditEvent(
-      'WORKSPACE-GMAIL',
-      'Team Updated',
-      `Sent corporate email via ${emailLog.deliveryMethod} to ${emailLog.toRecipients} ("${emailLog.subject}").`,
-    );
+    if (!isStrictWorkspaceEmailParticipant(emailLog, currentUser.email)) return;
 
     setState((prev) => ({
       ...prev,
       workspaceEmails: [emailLog, ...prev.workspaceEmails],
-      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
     }));
 
     void dataService.workspaceEmails
-      .append(emailLog, auditEntry)
+      .append(emailLog)
       .then(() => {
         if (dataService.isSupabaseConfigured()) setDbConnected(true);
       })
@@ -5328,11 +6096,17 @@ export default function App() {
     );
   };
 
-  // Unified Mail, Live Team Chat & Google Meet Hub Handlers (Available to ALL Signed-In Users)
+  // Unified Mail, Live Team Chat & Google Meet Hub Handlers (Zero-Knowledge Participant-Only)
   const handleSendCorporateMail = (payload: SendCorporateMailPayload) => {
     if (!isApprovedUser) return;
     const now = new Date().toISOString();
     const selfEmailLower = currentUser.email.trim().toLowerCase();
+    const sanitizedTo = payload.toEmails
+      .map((e) => e.trim().toLowerCase())
+      .filter((e) => Boolean(e) && e.includes('@') && e !== 'all@nexops.company' && !e.startsWith('dept:'));
+    const sanitizedCc = payload.ccEmails
+      .map((e) => e.trim().toLowerCase())
+      .filter((e) => Boolean(e) && e.includes('@') && e !== 'all@nexops.company' && !e.startsWith('dept:'));
     const messageId =
       payload.draftId || `mail-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const newMail: CorporateMailMessage = {
@@ -5342,8 +6116,9 @@ export default function App() {
       fromUserId: currentUser.id,
       fromName: currentUser.name,
       fromEmail: currentUser.email,
-      toEmails: payload.toEmails,
-      ccEmails: payload.ccEmails,
+      receiverEmail: sanitizedTo.length === 1 ? sanitizedTo[0] : undefined,
+      toEmails: sanitizedTo,
+      ccEmails: sanitizedCc,
       subject: payload.subject,
       body: payload.body,
       status: 'sent',
@@ -5354,22 +6129,11 @@ export default function App() {
       updatedAt: now,
     };
 
-    const auditEntry = createAuditEvent(
-      'MAIL-HUB',
-      'Mail Sent',
-      `${currentUser.name} (${currentUser.role}) sent email "${payload.subject}" to ${payload.toEmails.join(', ')} via ${payload.deliveryMethod}.`,
-    );
-
-    const nextMails = mergeCorporateMails(
-      state.corporateMails,
-      [newMail],
-      deletedMailIdsRef.current,
-    );
-
     setState((prev) => ({
       ...prev,
-      corporateMails: mergeCorporateMails(prev.corporateMails, [newMail], deletedMailIdsRef.current),
-      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+      corporateMails: mergeCorporateMails(prev.corporateMails, [newMail], deletedMailIdsRef.current).filter(
+        (m) => isStrictMailParticipant(m, selfEmailLower),
+      ),
     }));
 
     void commsChannelRef.current?.send({
@@ -5379,7 +6143,14 @@ export default function App() {
     });
 
     void dataService.comms
-      .saveCorporateMails(nextMails, currentUser.name, auditEntry, Array.from(deletedMailIdsRef.current))
+      .saveCorporateMails(
+        [newMail],
+        currentUser.name,
+        undefined,
+        Array.from(deletedMailIdsRef.current),
+        currentUser.email,
+        true,
+      )
       .then((syncedMails) => {
         if (dataService.isSupabaseConfigured()) {
           setDbConnected(true);
@@ -5391,12 +6162,12 @@ export default function App() {
             syncedMails,
             prev.corporateMails,
             deletedMailIdsRef.current,
-          ),
+          ).filter((m) => isStrictMailParticipant(m, selfEmailLower)),
         }));
       })
       .catch(handleCloudWriteError);
 
-    pushToast('Email Sent', `"${payload.subject}" delivered to ${payload.toEmails.join(', ')}`, 'success');
+    pushToast('Email Sent', `"${payload.subject}" delivered to ${sanitizedTo.join(', ')}`, 'success');
   };
 
   const handleSaveCorporateDraft = (payload: SaveCorporateDraftPayload) => {
@@ -5425,19 +6196,23 @@ export default function App() {
       updatedAt: now,
     };
     deletedMailIdsRef.current.delete(draftId);
-    const nextMails = mergeCorporateMails(
-      state.corporateMails,
-      [draft],
-      deletedMailIdsRef.current,
-    );
 
     setState((prev) => ({
       ...prev,
-      corporateMails: mergeCorporateMails(prev.corporateMails, [draft], deletedMailIdsRef.current),
+      corporateMails: mergeCorporateMails(prev.corporateMails, [draft], deletedMailIdsRef.current).filter(
+        (m) => isStrictMailParticipant(m, selfEmailLower),
+      ),
     }));
 
     void dataService.comms
-      .saveCorporateMails(nextMails, currentUser.name, undefined, Array.from(deletedMailIdsRef.current))
+      .saveCorporateMails(
+        [draft],
+        currentUser.name,
+        undefined,
+        Array.from(deletedMailIdsRef.current),
+        currentUser.email,
+        false,
+      )
       .then(() => {
         if (dataService.isSupabaseConfigured()) {
           setDbConnected(true);
@@ -5451,14 +6226,26 @@ export default function App() {
 
   const handleDeleteCorporateDraft = (draftId: string) => {
     if (!isApprovedUser) return;
+    const target = state.corporateMails.find((m) => m.id === draftId);
+    const selfLower = currentUser.email.trim().toLowerCase();
+    if (!target || target.status !== 'draft' || target.fromEmail.trim().toLowerCase() !== selfLower) {
+      pushToast('Access Restricted', 'You can only delete your own personal mail drafts.', 'warning');
+      return;
+    }
     deletedMailIdsRef.current.add(draftId);
-    const nextMails = state.corporateMails.filter((m) => m.id !== draftId);
     setState((prev) => ({
       ...prev,
       corporateMails: prev.corporateMails.filter((m) => m.id !== draftId),
     }));
     void dataService.comms
-      .saveCorporateMails(nextMails, currentUser.name, undefined, Array.from(deletedMailIdsRef.current))
+      .saveCorporateMails(
+        [],
+        currentUser.name,
+        undefined,
+        Array.from(deletedMailIdsRef.current),
+        currentUser.email,
+        false,
+      )
       .then(() => {
         if (dataService.isSupabaseConfigured()) {
           setDbConnected(true);
@@ -5473,25 +6260,26 @@ export default function App() {
     (mailId: string) => {
       const selfEmailLower = currentUser.email.trim().toLowerCase();
       if (!selfEmailLower) return;
-      let changed = false;
-      let nextSnapshot: CorporateMailMessage[] = [];
+      let changedMail: CorporateMailMessage | null = null;
       setState((prev) => {
         const nextMails = prev.corporateMails.map((m) => {
           if (m.id !== mailId) return m;
+          if (!isStrictMailParticipant(m, selfEmailLower)) return m;
           if (m.readBy.some((e) => e.trim().toLowerCase() === selfEmailLower)) return m;
-          changed = true;
-          return { ...m, readBy: [...m.readBy, selfEmailLower] };
+          changedMail = { ...m, readBy: [...m.readBy, selfEmailLower] };
+          return changedMail;
         });
-        nextSnapshot = nextMails;
-        return changed ? { ...prev, corporateMails: nextMails } : prev;
+        return changedMail ? { ...prev, corporateMails: nextMails } : prev;
       });
-      if (changed) {
+      if (changedMail) {
         void dataService.comms
           .saveCorporateMails(
-            nextSnapshot,
+            [changedMail],
             currentUser.name,
             undefined,
             Array.from(deletedMailIdsRef.current),
+            currentUser.email,
+            false,
           )
           .catch(() => {});
       }
@@ -5501,8 +6289,16 @@ export default function App() {
 
   const handleSendChatMessage = (payload: SendChatMessagePayload) => {
     if (!isApprovedUser) return;
+    if (payload.roomType === 'dm' && !isDmParticipant(payload.roomId, currentUser.email)) {
+      pushToast('Private DM Restricted', 'You cannot post in a private conversation you are not part of.', 'warning');
+      return;
+    }
     const now = new Date().toISOString();
     const selfEmailLower = currentUser.email.trim().toLowerCase();
+    const receiverEmail =
+      payload.roomType === 'dm'
+        ? extractDmPeerEmail(payload.roomId, selfEmailLower)
+        : undefined;
     const msg: TeamChatMessage = {
       id: `chat-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       roomId: payload.roomId,
@@ -5511,6 +6307,7 @@ export default function App() {
       senderId: currentUser.id,
       senderName: currentUser.name,
       senderEmail: currentUser.email,
+      receiverEmail,
       senderRole: currentUser.role,
       senderDepartment: currentUser.department,
       body: payload.body,
@@ -5519,10 +6316,15 @@ export default function App() {
       createdAt: now,
     };
 
-    const nextMessages = mergeChatMessages(state.chatMessages, [msg]);
+    if (!isStrictChatParticipant(msg, selfEmailLower)) {
+      return;
+    }
+
     setState((prev) => ({
       ...prev,
-      chatMessages: mergeChatMessages(prev.chatMessages, [msg]),
+      chatMessages: mergeChatMessages(prev.chatMessages, [msg]).filter((m) =>
+        isStrictChatParticipant(m, selfEmailLower),
+      ),
     }));
 
     void commsChannelRef.current?.send({
@@ -5532,7 +6334,7 @@ export default function App() {
     });
 
     void dataService.comms
-      .saveChatMessages(nextMessages, currentUser.name)
+      .saveChatMessages([msg], currentUser.name, currentUser.email, true)
       .then((syncedMessages) => {
         if (dataService.isSupabaseConfigured()) {
           setDbConnected(true);
@@ -5540,7 +6342,9 @@ export default function App() {
         }
         setState((prev) => ({
           ...prev,
-          chatMessages: mergeChatMessages(syncedMessages, prev.chatMessages),
+          chatMessages: mergeChatMessages(syncedMessages, prev.chatMessages).filter((m) =>
+            isStrictChatParticipant(m, selfEmailLower),
+          ),
         }));
       })
       .catch(handleCloudWriteError);
@@ -5550,21 +6354,21 @@ export default function App() {
     (roomId: string) => {
       const selfEmailLower = currentUser.email.trim().toLowerCase();
       if (!selfEmailLower) return;
-      let changed = false;
-      let nextSnapshot: TeamChatMessage[] = [];
+      const changedMessages: TeamChatMessage[] = [];
       setState((prev) => {
         const nextMessages = prev.chatMessages.map((msg) => {
           if (msg.roomId !== roomId) return msg;
+          if (!isStrictChatParticipant(msg, selfEmailLower)) return msg;
           if (msg.readBy.some((e) => e.trim().toLowerCase() === selfEmailLower)) return msg;
-          changed = true;
-          return { ...msg, readBy: [...msg.readBy, selfEmailLower] };
+          const updated = { ...msg, readBy: [...msg.readBy, selfEmailLower] };
+          changedMessages.push(updated);
+          return updated;
         });
-        nextSnapshot = nextMessages;
-        return changed ? { ...prev, chatMessages: nextMessages } : prev;
+        return changedMessages.length > 0 ? { ...prev, chatMessages: nextMessages } : prev;
       });
-      if (changed) {
+      if (changedMessages.length > 0) {
         void dataService.comms
-          .saveChatMessages(nextSnapshot, currentUser.name)
+          .saveChatMessages(changedMessages, currentUser.name, currentUser.email, false)
           .catch(() => {});
       }
     },
@@ -5945,24 +6749,314 @@ export default function App() {
       });
       return;
     }
+    const nowIso = new Date().toISOString();
     const auditEntry = createAuditEvent(
       'DOC-VAULT',
       'Vault Updated',
       `Added "${item.title}" to ${item.folder} (${item.accessTag}, ${item.department}).`,
     );
+    const vaultNotif: AppNotification = {
+      id: `notif-vault-${Date.now()}`,
+      title: `Document Uploaded: ${item.title}`,
+      message: `${currentUser.name} uploaded "${item.title}" to ${item.folder}.`,
+      timestamp: nowIso,
+      read: false,
+      targetSection: 'vault',
+      recipientRole: 'all',
+      actorEmail: currentUser.email,
+      category: 'system',
+      severity: 'info',
+    };
     const nextVaultDocs = [item, ...state.vaultDocuments];
     setState((prev) => ({
       ...prev,
       vaultDocuments: [item, ...prev.vaultDocuments],
       globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+      notifications: [vaultNotif, ...prev.notifications],
     }));
-    void dataService.documentVault
-      .upsert(item, auditEntry, nextVaultDocs)
+    void Promise.all([
+      dataService.documentVault.upsert(item, auditEntry, nextVaultDocs),
+      dataService.notifications.create(vaultNotif),
+    ])
       .then(() => {
         if (dataService.isSupabaseConfigured()) setDbConnected(true);
       })
       .catch(handleCloudWriteError);
     pushToast('Document Added to Vault', `${item.title} (${item.folder})`, 'success');
+  };
+
+  const handleUploadVaultNewVersion = (docId: string, versionMeta: VaultNewVersionPayload) => {
+    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    const target = state.vaultDocuments.find((d) => d.id === docId);
+    if (!target) return;
+    const nowIso = new Date().toISOString();
+    const priorVersionEntry: DocumentVersionEntry = {
+      version: target.currentVersion || 'v1.0',
+      updatedAt: target.updatedAt,
+      updatedBy: target.uploadedBy,
+      updatedByEmail: target.uploadedByEmail,
+      changeNote: versionMeta.changeNote || `Superseded by ${versionMeta.version}`,
+      url: target.url,
+      fileName: target.fileName,
+      fileSize: target.fileSize,
+      mimeType: target.mimeType,
+      fileDataUrl: target.fileDataUrl,
+      storageBucket: target.storageBucket,
+      storagePath: target.storagePath,
+    };
+    const updatedDoc: DocumentVaultItem = {
+      ...target,
+      currentVersion: versionMeta.version.trim() || 'v1.1',
+      sourceType: versionMeta.sourceType,
+      expiryDate:
+        versionMeta.expiryDate !== undefined
+          ? versionMeta.expiryDate.trim() || undefined
+          : target.expiryDate,
+      url: versionMeta.url ?? target.url,
+      fileName: versionMeta.fileName ?? target.fileName,
+      fileSize: versionMeta.fileSize ?? target.fileSize,
+      mimeType: versionMeta.mimeType ?? target.mimeType,
+      fileDataUrl: versionMeta.fileDataUrl ?? target.fileDataUrl,
+      storageBucket: versionMeta.storageBucket ?? target.storageBucket,
+      storagePath: versionMeta.storagePath ?? target.storagePath,
+      storageProvider: versionMeta.storageProvider ?? target.storageProvider,
+      uploadedBy: currentUser.name,
+      uploadedByEmail: currentUser.email,
+      versions: [priorVersionEntry, ...(target.versions ?? [])],
+      approvalStamp: undefined,
+      updatedAt: nowIso,
+    };
+    const auditEntry = createAuditEvent(
+      'DOC-VAULT',
+      'Vault Updated',
+      `Uploaded ${updatedDoc.currentVersion} of "${target.title}" (${versionMeta.changeNote || 'Version update'}).`,
+    );
+    const notif: AppNotification = {
+      id: `notif-vault-ver-${Date.now()}`,
+      title: `New Version: ${target.title}`,
+      message: `${currentUser.name} published ${updatedDoc.currentVersion} in ${target.folder}.`,
+      timestamp: nowIso,
+      read: false,
+      targetSection: 'vault',
+      recipientRole: 'all',
+      actorEmail: currentUser.email,
+      category: 'system',
+      severity: 'info',
+    };
+    const nextVaultDocs = state.vaultDocuments.map((d) => (d.id === docId ? updatedDoc : d));
+    setState((prev) => ({
+      ...prev,
+      vaultDocuments: nextVaultDocs,
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+      notifications: [notif, ...prev.notifications],
+    }));
+    void Promise.all([
+      dataService.documentVault.upsert(updatedDoc, auditEntry, nextVaultDocs),
+      dataService.notifications.create(notif),
+    ])
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      })
+      .catch(handleCloudWriteError);
+    pushToast('New Version Published', `${target.title} (${updatedDoc.currentVersion})`, 'success');
+  };
+
+  const handleRequestVaultSignOff = (
+    docId: string,
+    reviewers: { email: string; name: string }[],
+    note?: string,
+  ) => {
+    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    const target = state.vaultDocuments.find((d) => d.id === docId);
+    if (!target || reviewers.length === 0) return;
+
+    const nowIso = new Date().toISOString();
+    const existingPendingEmails = new Set(
+      (target.signOffRequests ?? [])
+        .filter((r) => r.status === 'Pending')
+        .map((r) => r.reviewerEmail.trim().toLowerCase()),
+    );
+    const cleanNote = note?.trim() || undefined;
+    const newEntries: DocumentSignOffRequest[] = [];
+    for (let idx = 0; idx < reviewers.length; idx += 1) {
+      const r = reviewers[idx];
+      const email = r.email.trim().toLowerCase();
+      if (!email || existingPendingEmails.has(email)) continue;
+      existingPendingEmails.add(email);
+      newEntries.push({
+        id: `signoff-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
+        reviewerEmail: email,
+        reviewerName: r.name.trim() || email,
+        requestedBy: currentUser.name,
+        requestedByEmail: currentUser.email,
+        requestedAt: nowIso,
+        status: 'Pending',
+        note: cleanNote,
+      });
+    }
+
+    if (newEntries.length === 0) {
+      pushToast('Already Pending', 'Selected reviewers already have pending sign-off requests.', 'info');
+      return;
+    }
+
+    const updatedDoc: DocumentVaultItem = {
+      ...target,
+      signOffRequests: [...newEntries, ...(target.signOffRequests ?? [])],
+      updatedAt: nowIso,
+    };
+
+    const auditEntry = createAuditEvent(
+      'DOC-VAULT',
+      'Vault Updated',
+      `Requested sign-off on "${target.title}" from ${newEntries.map((r) => r.reviewerName).join(', ')}${cleanNote ? ` (${cleanNote})` : ''}.`,
+    );
+
+    const signOffNotifs: AppNotification[] = newEntries.map((entry, idx) => ({
+      id: `notif-signoff-req-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
+      title: `Sign-Off Requested: ${target.title}`,
+      message: `${currentUser.name} requested your review & sign-off on "${target.title}" (${target.folder})${cleanNote ? ` — "${cleanNote}"` : ''}.`,
+      timestamp: nowIso,
+      read: false,
+      targetSection: 'vault',
+      recipientEmail: entry.reviewerEmail,
+      actorEmail: currentUser.email,
+      category: 'signoff',
+      severity: 'warning',
+    }));
+
+    const nextVaultDocs = state.vaultDocuments.map((d) => (d.id === docId ? updatedDoc : d));
+    setState((prev) => ({
+      ...prev,
+      vaultDocuments: nextVaultDocs,
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+      notifications: [...signOffNotifs, ...prev.notifications],
+    }));
+
+    void Promise.all([
+      dataService.documentVault.upsert(updatedDoc, auditEntry, nextVaultDocs),
+      ...signOffNotifs.map((n) => dataService.notifications.create(n)),
+    ])
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      })
+      .catch(handleCloudWriteError);
+
+    pushToast(
+      'Sign-Off Requested',
+      `Notified ${newEntries.length} reviewer${newEntries.length === 1 ? '' : 's'} for "${target.title}".`,
+      'success',
+    );
+  };
+
+  const handleAcknowledgeVaultSignOff = (docId: string, signOffId: string) => {
+    if (!isApprovedUser || !currentUser.email.trim()) return;
+    const target = state.vaultDocuments.find((d) => d.id === docId);
+    const req = target?.signOffRequests?.find((r) => r.id === signOffId);
+    if (!target || !req || req.status === 'Acknowledged') return;
+
+    const selfEmail = currentUser.email.trim().toLowerCase();
+    if (req.reviewerEmail.trim().toLowerCase() !== selfEmail && !isSuperAdminOperator) {
+      pushToast('Assigned Reviewer Only', 'Only the assigned reviewer can sign off this request.', 'warning');
+      return;
+    }
+
+    const nowIso = new Date().toISOString();
+    const updatedDoc: DocumentVaultItem = {
+      ...target,
+      signOffRequests: (target.signOffRequests ?? []).map((r) =>
+        r.id === signOffId ? { ...r, status: 'Acknowledged', signedOffAt: nowIso } : r,
+      ),
+      updatedAt: nowIso,
+    };
+
+    const auditEntry = createAuditEvent(
+      'DOC-VAULT',
+      'Vault Updated',
+      `${currentUser.name} (${currentUser.employeeId}) signed off document "${target.title}" (${target.currentVersion || 'v1.0'}).`,
+    );
+
+    const notif: AppNotification = {
+      id: `notif-signoff-done-${Date.now()}`,
+      title: `Document Signed Off: ${target.title}`,
+      message: `${currentUser.name} completed sign-off on "${target.title}" (${target.folder}).`,
+      timestamp: nowIso,
+      read: false,
+      targetSection: 'vault',
+      recipientEmail: req.requestedByEmail || undefined,
+      recipientRole: req.requestedByEmail ? undefined : 'Admin',
+      actorEmail: currentUser.email,
+      category: 'signoff',
+      severity: 'success',
+    };
+
+    const nextVaultDocs = state.vaultDocuments.map((d) => (d.id === docId ? updatedDoc : d));
+    setState((prev) => ({
+      ...prev,
+      vaultDocuments: nextVaultDocs,
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+      notifications: [notif, ...prev.notifications],
+    }));
+
+    void Promise.all([
+      dataService.documentVault.upsert(updatedDoc, auditEntry, nextVaultDocs),
+      dataService.notifications.create(notif),
+    ])
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      })
+      .catch(handleCloudWriteError);
+
+    pushToast('Document Signed Off', `Recorded sign-off for "${target.title}".`, 'success');
+  };
+
+  const handleStampVaultDocument = (docId: string) => {
+    if (!isSuperAdminOperator) {
+      pushToast('Super Admin Required', 'Only the verified Super Admin can digitally stamp Vault files.', 'error');
+      return;
+    }
+    const target = state.vaultDocuments.find((d) => d.id === docId);
+    if (!target) return;
+    const stamp = buildDigitalApprovalStamp();
+    const updatedDoc: DocumentVaultItem = {
+      ...target,
+      approvalStamp: stamp,
+      updatedAt: stamp.stampedAt,
+    };
+    const auditEntry = createAuditEvent(
+      'DOC-VAULT',
+      'Vault Updated',
+      `Applied Super Admin Digital Approval Stamp to "${target.title}" (${target.currentVersion || 'v1.0'}).`,
+    );
+    const notif: AppNotification = {
+      id: `notif-vault-stamp-${Date.now()}`,
+      title: `Document Stamped: ${target.title}`,
+      message: `${currentUser.name} verified & approved "${target.title}".`,
+      timestamp: stamp.stampedAt,
+      read: false,
+      targetSection: 'vault',
+      recipientEmail: target.uploadedByEmail || undefined,
+      recipientRole: target.uploadedByEmail ? undefined : 'all',
+      actorEmail: currentUser.email,
+      category: 'system',
+      severity: 'success',
+    };
+    const nextVaultDocs = state.vaultDocuments.map((d) => (d.id === docId ? updatedDoc : d));
+    setState((prev) => ({
+      ...prev,
+      vaultDocuments: nextVaultDocs,
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+      notifications: [notif, ...prev.notifications],
+    }));
+    void Promise.all([
+      dataService.documentVault.upsert(updatedDoc, auditEntry, nextVaultDocs),
+      dataService.notifications.create(notif),
+    ])
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      })
+      .catch(handleCloudWriteError);
+    pushToast('Document Verified & Stamped', `${target.title} signed by Super Admin.`, 'success');
   };
 
   const handleDeleteVaultDocument = (itemId: string) => {
@@ -5991,24 +7085,167 @@ export default function App() {
       });
       return;
     }
+    const nowIso = new Date().toISOString();
+    const binEntry: RecycleBinItem = {
+      id: `bin-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      itemType: 'vault',
+      itemId: target.id,
+      title: target.title,
+      department: target.department,
+      deletedBy: currentUser.name,
+      deletedByEmail: currentUser.email,
+      deletedAt: nowIso,
+      expiresAt: createRecycleBinExpiry(nowIso),
+      payload: target,
+    };
+    const nextRecycleBin = pruneExpiredRecycleBin([binEntry, ...(state.recycleBin ?? [])]);
     const auditEntry = createAuditEvent(
       'DOC-VAULT',
       'Vault Updated',
-      `Removed "${target.title}" from ${target.folder}.`,
+      `Moved "${target.title}" from ${target.folder} to 30-day Recycle Bin.`,
     );
     const remainingVaultDocs = state.vaultDocuments.filter((d) => d.id !== itemId);
     setState((prev) => ({
       ...prev,
-      vaultDocuments: prev.vaultDocuments.filter((d) => d.id !== itemId),
+      vaultDocuments: remainingVaultDocs,
+      recycleBin: nextRecycleBin,
       globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
     }));
-    void dataService.documentVault
-      .remove(itemId, auditEntry, target, remainingVaultDocs)
+    void Promise.all([
+      dataService.documentVault.remove(itemId, auditEntry, undefined, remainingVaultDocs),
+      dataService.recycleBin.saveAll(nextRecycleBin, currentUser.name),
+    ])
       .then(() => {
         if (dataService.isSupabaseConfigured()) setDbConnected(true);
       })
       .catch(handleCloudWriteError);
-    pushToast('Document Removed', target.title, 'info');
+    pushToast('Moved to Recycle Bin', `${target.title} (30-day retention).`, 'info');
+  };
+
+  const handleRestoreRecycleItem = (binId: string) => {
+    if (!isSuperAdminOperator) {
+      pushToast('Super Admin Required', 'Only the verified Super Admin can restore Recycle Bin items.', 'error');
+      return;
+    }
+    const binEntry = (state.recycleBin ?? []).find((b) => b.id === binId);
+    if (!binEntry) return;
+    const nowIso = new Date().toISOString();
+    const nextRecycleBin = (state.recycleBin ?? []).filter((b) => b.id !== binId);
+    const auditEntry = createAuditEvent(
+      'SYS-RECYCLE-BIN',
+      'Team Updated',
+      `Restored ${binEntry.itemType} item "${binEntry.title}" from 30-day Recycle Bin.`,
+    );
+    const cloudTasks: Promise<unknown>[] = [
+      dataService.recycleBin.saveAll(nextRecycleBin, currentUser.name, auditEntry),
+    ];
+
+    let nextVaultDocs = state.vaultDocuments;
+    let nextAnnouncements = state.announcements;
+    let nextCalendarEvents = state.calendarEvents;
+    let nextMeetings = state.meetings;
+
+    if (binEntry.itemType === 'vault') {
+      const restoredDoc: DocumentVaultItem = {
+        ...(binEntry.payload as DocumentVaultItem),
+        updatedAt: nowIso,
+      };
+      nextVaultDocs = state.vaultDocuments.some((d) => d.id === restoredDoc.id)
+        ? state.vaultDocuments
+        : [restoredDoc, ...state.vaultDocuments];
+      cloudTasks.push(dataService.documentVault.upsert(restoredDoc, undefined, nextVaultDocs));
+    } else if (binEntry.itemType === 'announcement') {
+      const restoredAnn: CompanyAnnouncement = {
+        ...(binEntry.payload as CompanyAnnouncement),
+        updatedAt: nowIso,
+      };
+      nextAnnouncements = state.announcements.some((a) => a.id === restoredAnn.id)
+        ? state.announcements
+        : [restoredAnn, ...state.announcements];
+      cloudTasks.push(dataService.announcements.upsert(restoredAnn, nextAnnouncements));
+    } else if (binEntry.itemType === 'calendar') {
+      const restoredEv: CalendarEvent = {
+        ...(binEntry.payload as CalendarEvent),
+        updatedAt: nowIso,
+      };
+      deletedCalendarIdsRef.current.delete(restoredEv.id);
+      nextCalendarEvents = mergeCalendarEvents(
+        state.calendarEvents,
+        [restoredEv],
+        deletedCalendarIdsRef.current,
+      );
+      cloudTasks.push(
+        dataService.calendar.saveEvents(
+          nextCalendarEvents,
+          currentUser.name,
+          undefined,
+          Array.from(deletedCalendarIdsRef.current),
+        ),
+      );
+    } else if (binEntry.itemType === 'meeting') {
+      const restoredMom: MeetingMinute = {
+        ...(binEntry.payload as MeetingMinute),
+        updatedAt: nowIso,
+      };
+      nextMeetings = mergeMeetings(state.meetings, [restoredMom]);
+      cloudTasks.push(dataService.meetings.upsert(restoredMom));
+    }
+
+    setState((prev) => ({
+      ...prev,
+      vaultDocuments: nextVaultDocs,
+      announcements: nextAnnouncements,
+      calendarEvents: nextCalendarEvents,
+      meetings: nextMeetings,
+      recycleBin: nextRecycleBin,
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+    }));
+
+    void Promise.all(cloudTasks)
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      })
+      .catch(handleCloudWriteError);
+    pushToast('Item Restored', `"${binEntry.title}" restored to workspace.`, 'success');
+  };
+
+  const handlePurgeRecycleItem = (binId: string) => {
+    if (!isSuperAdminOperator) {
+      pushToast('Super Admin Required', 'Only the verified Super Admin can permanently purge Recycle Bin items.', 'error');
+      return;
+    }
+    const binEntry = (state.recycleBin ?? []).find((b) => b.id === binId);
+    if (!binEntry) return;
+    const nextRecycleBin = (state.recycleBin ?? []).filter((b) => b.id !== binId);
+    const auditEntry = createAuditEvent(
+      'SYS-RECYCLE-BIN',
+      'Team Updated',
+      `Permanently purged ${binEntry.itemType} item "${binEntry.title}" from Recycle Bin.`,
+    );
+    const cloudTasks: Promise<unknown>[] = [
+      dataService.recycleBin.saveAll(nextRecycleBin, currentUser.name, auditEntry),
+    ];
+    if (binEntry.itemType === 'vault') {
+      cloudTasks.push(
+        dataService.documentVault.remove(
+          binEntry.itemId,
+          undefined,
+          binEntry.payload as DocumentVaultItem,
+          state.vaultDocuments,
+        ),
+      );
+    }
+    setState((prev) => ({
+      ...prev,
+      recycleBin: nextRecycleBin,
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+    }));
+    void Promise.all(cloudTasks)
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      })
+      .catch(handleCloudWriteError);
+    pushToast('Permanently Purged', `"${binEntry.title}" deleted permanently.`, 'info');
   };
 
   const getScopedNotificationIds = () => {
@@ -6302,6 +7539,7 @@ export default function App() {
     let nextMeetings = state.meetings;
     let nextSubtasks = state.subtasks;
     let nextTaskComments = state.taskComments;
+    let nextRecycleBin = state.recycleBin ?? [];
     const extraNotifications: AppNotification[] = [editorNotif];
     const cloudTasks: Promise<unknown>[] = [
       dataService.editorChanges.saveAll(nextPendingChanges, currentUser.name, approvalAudit),
@@ -6640,7 +7878,23 @@ export default function App() {
       case 'vault_delete': {
         const target = state.vaultDocuments.find((d) => d.id === p.documentId);
         nextVault = state.vaultDocuments.filter((d) => d.id !== p.documentId);
-        cloudTasks.push(dataService.documentVault.remove(p.documentId, approvalAudit, target, nextVault));
+        if (target) {
+          const binEntry: RecycleBinItem = {
+            id: `bin-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            itemType: 'vault',
+            itemId: target.id,
+            title: target.title,
+            department: target.department,
+            deletedBy: chg.editorName,
+            deletedByEmail: chg.editorEmail,
+            deletedAt: now,
+            expiresAt: createRecycleBinExpiry(now),
+            payload: target,
+          };
+          nextRecycleBin = pruneExpiredRecycleBin([binEntry, ...nextRecycleBin]);
+          cloudTasks.push(dataService.recycleBin.saveAll(nextRecycleBin, currentUser.name));
+        }
+        cloudTasks.push(dataService.documentVault.remove(p.documentId, approvalAudit, undefined, nextVault));
         break;
       }
       case 'meeting_create': {
@@ -6737,6 +7991,21 @@ export default function App() {
         }
         break;
       }
+      case 'meeting_update_action_status': {
+        const target = state.meetings.find((m) => m.id === p.meetingId);
+        if (target) {
+          const updatedMeeting: MeetingMinute = {
+            ...target,
+            updatedAt: now,
+            actionItems: target.actionItems.map((a) =>
+              a.id === p.actionItemId ? { ...a, status: p.nextStatus } : a,
+            ),
+          };
+          nextMeetings = state.meetings.map((m) => (m.id === p.meetingId ? updatedMeeting : m));
+          cloudTasks.push(dataService.meetings.upsert(updatedMeeting, approvalAudit));
+        }
+        break;
+      }
     }
 
     setState((prev) => ({
@@ -6749,6 +8018,7 @@ export default function App() {
       meetings: nextMeetings,
       subtasks: nextSubtasks,
       taskComments: nextTaskComments,
+      recycleBin: nextRecycleBin,
       pendingEditorChanges: nextPendingChanges,
       globalAuditLogs: [approvalAudit, ...prev.globalAuditLogs],
       notifications: [...extraNotifications, ...prev.notifications],
@@ -6881,18 +8151,25 @@ export default function App() {
     );
     const mergedState: NexOpsState = {
       ...restoredState,
-      globalAuditLogs: [restoreEvent, ...restoredState.globalAuditLogs],
+      workspaceEmails: state.workspaceEmails,
+      corporateMails: state.corporateMails,
+      chatMessages: state.chatMessages,
+      globalAuditLogs: [
+        restoreEvent,
+        ...restoredState.globalAuditLogs.filter((a) => !isPrivateCommsAuditEvent(a)),
+      ],
     };
     try {
-      await dataService.restoreWorkspaceBackup(mergedState, branding);
+      const persisted = await dataService.restoreWorkspaceBackup(mergedState, branding);
       if (dataService.isSupabaseConfigured()) {
         setDbConnected(true);
         void handleRunHealthCheck();
       }
+      setState(persisted);
     } catch (err) {
       handleCloudWriteError(err);
+      setState(mergedState);
     }
-    setState(mergedState);
     setSelectedRequestId(null);
     setSearchQuery('');
     setStatusFilter('All');
@@ -6948,6 +8225,41 @@ export default function App() {
     );
   };
 
+  const handleSaveShiftRosters = (nextRosters: Record<string, DepartmentShiftConfig>) => {
+    if (!isSuperAdminOperator) {
+      pushToast('Super Admin Required', 'Only the verified Super Admin can edit department shift rosters.', 'error');
+      return;
+    }
+    const normalizedRosters = normalizeShiftRosters(nextRosters, branding.departments);
+    const saved = dataService.branding.saveSync({
+      ...branding,
+      shiftRosters: normalizedRosters,
+    });
+    setBranding(saved);
+    const auditEntry = createAuditEvent(
+      'SYS-SHIFT-ROSTER',
+      'Team Updated',
+      `Updated department shift rosters & grace periods across ${saved.departments.length} departments.`,
+    );
+    setState((prev) => ({
+      ...prev,
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+    }));
+    void Promise.all([
+      dataService.auditLogs.append(auditEntry),
+      dataService.branding.saveCloud(saved, currentUser.name),
+    ])
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      })
+      .catch(handleCloudWriteError);
+    pushToast(
+      'Shift Rosters Saved',
+      'Department shift start/end times and grace periods updated.',
+      'success',
+    );
+  };
+
   const handleUpdatePermissionMatrix = (nextMatrix: PermissionMatrix) => {
     if (currentUser.role !== 'Admin') return;
     const normalized = normalizePermissionMatrix(nextMatrix);
@@ -6998,6 +8310,18 @@ export default function App() {
       'Team Updated',
       `${isEdit ? 'Updated' : 'Scheduled'} ${event.type} calendar event "${event.title}" on ${event.date} at ${event.time} (${event.department}).`,
     );
+    const calNotif: AppNotification = {
+      id: `notif-cal-${Date.now()}`,
+      title: isEdit ? `Calendar Updated: ${event.title}` : `Event Scheduled: ${event.title}`,
+      message: `${currentUser.name} ${isEdit ? 'updated' : 'scheduled'} ${event.type} on ${event.date} at ${event.time}.`,
+      timestamp: new Date().toISOString(),
+      read: false,
+      targetSection: 'calendar',
+      recipientRole: 'all',
+      actorEmail: currentUser.email,
+      category: 'system',
+      severity: 'info',
+    };
 
     setState((prev) => ({
       ...prev,
@@ -7007,6 +8331,7 @@ export default function App() {
         deletedCalendarIdsRef.current,
       ),
       globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+      notifications: [calNotif, ...prev.notifications],
     }));
 
     if (commsChannelRef.current) {
@@ -7017,14 +8342,16 @@ export default function App() {
       });
     }
 
-    void dataService.calendar
-      .saveEvents(
+    void Promise.all([
+      dataService.calendar.saveEvents(
         nextEvents,
         currentUser.name,
         auditEntry,
         Array.from(deletedCalendarIdsRef.current),
-      )
-      .then((synced) => {
+      ),
+      dataService.notifications.create(calNotif),
+    ])
+      .then(([synced]) => {
         if (dataService.isSupabaseConfigured()) setDbConnected(true);
         setLastSyncError(null);
         setState((prev) => ({
@@ -7052,17 +8379,32 @@ export default function App() {
     }
     const target = state.calendarEvents.find((ev) => ev.id === eventId);
     if (!target) return;
+    const nowIso = new Date().toISOString();
+    const binEntry: RecycleBinItem = {
+      id: `bin-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      itemType: 'calendar',
+      itemId: target.id,
+      title: `${target.title} (${target.date})`,
+      department: target.department,
+      deletedBy: currentUser.name,
+      deletedByEmail: currentUser.email,
+      deletedAt: nowIso,
+      expiresAt: createRecycleBinExpiry(nowIso),
+      payload: target,
+    };
+    const nextRecycleBin = pruneExpiredRecycleBin([binEntry, ...(state.recycleBin ?? [])]);
     deletedCalendarIdsRef.current.add(eventId);
     const remaining = state.calendarEvents.filter((ev) => ev.id !== eventId);
     const auditEntry = createAuditEvent(
       eventId,
       'Team Updated',
-      `Removed calendar event "${target.title}" (${target.date}).`,
+      `Moved calendar event "${target.title}" (${target.date}) to 30-day Recycle Bin.`,
     );
 
     setState((prev) => ({
       ...prev,
       calendarEvents: prev.calendarEvents.filter((ev) => ev.id !== eventId),
+      recycleBin: nextRecycleBin,
       globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
     }));
 
@@ -7074,14 +8416,16 @@ export default function App() {
       });
     }
 
-    void dataService.calendar
-      .saveEvents(
+    void Promise.all([
+      dataService.calendar.saveEvents(
         remaining,
         currentUser.name,
         auditEntry,
         Array.from(deletedCalendarIdsRef.current),
-      )
-      .then((synced) => {
+      ),
+      dataService.recycleBin.saveAll(nextRecycleBin, currentUser.name),
+    ])
+      .then(([synced]) => {
         if (dataService.isSupabaseConfigured()) setDbConnected(true);
         setLastSyncError(null);
         setState((prev) => ({
@@ -7091,7 +8435,7 @@ export default function App() {
       })
       .catch(handleCloudWriteError);
 
-    pushToast('Calendar Event Deleted', `${target.title} removed from schedule.`, 'info');
+    pushToast('Moved to Recycle Bin', `${target.title} (30-day retention).`, 'info');
   };
 
   // Step 1 Guard: unauthenticated users (or active password recovery redirect) see Login / Recovery screen
@@ -7111,6 +8455,7 @@ export default function App() {
           onResetPassword={handleResetPassword}
           onCompletePasswordReset={handleCompletePasswordReset}
           onRegisterInitialAdmin={handleRegisterInitialAdmin}
+          onBruteForceLockout={handleLogBruteForceLockout}
         />
         <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       </>
@@ -7200,7 +8545,7 @@ export default function App() {
             recentlyOfflineKeys={recentlyOfflineKeys}
             departments={branding.departments}
             requests={state.requests}
-            auditLogs={state.globalAuditLogs}
+            auditLogs={state.globalAuditLogs.filter((a) => !isPrivateCommsAuditEvent(a))}
             pendingEditorChanges={state.pendingEditorChanges}
             dbConnected={dbConnected}
             lastSyncError={lastSyncError}
@@ -7237,10 +8582,71 @@ export default function App() {
           <AnnouncementBanner
             announcements={state.announcements}
             activeRole={currentUser.role}
+            currentUserEmail={currentUser.email}
             onPublishAnnouncement={handlePublishAnnouncement}
             onArchiveAnnouncement={handleArchiveAnnouncement}
             onRestoreAnnouncement={handleRestoreAnnouncement}
           />
+
+          <div className="mx-auto w-full min-w-0 max-w-[1360px] px-3 pt-3 sm:px-6 lg:px-8">
+            <QuickLaunchBar
+              bookmarks={quickBookmarks}
+              activeSection={activeSection}
+              activeRole={currentUser.role}
+              isSuperAdmin={isSuperAdminOperator}
+              onSelectSection={setActiveSection}
+              onUpdateBookmarks={handleUpdateQuickBookmarks}
+            />
+          </div>
+
+          {!isOnline && (
+            <div className="mx-3 mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 text-xs text-amber-900 shadow-xs sm:mx-6 lg:mx-8 dark:border-amber-700/70 dark:bg-amber-950/60 dark:text-amber-200">
+              <div className="flex min-w-0 items-center gap-2 font-medium">
+                <WifiOff className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                <span>
+                  Offline Mode — Changes queued locally and will auto-sync when reconnected
+                  {pendingSyncCount > 0 ? ` (${pendingSyncCount} pending)` : ''}.
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleForceCloudSync()}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-amber-400/70 bg-white px-2.5 py-1 text-[11px] font-semibold text-amber-900 transition hover:bg-amber-100 dark:border-amber-700 dark:bg-slate-900 dark:text-amber-200 dark:hover:bg-amber-900/40"
+              >
+                <RefreshCw className="h-3 w-3" />
+                Retry Sync
+              </button>
+            </div>
+          )}
+
+          {idleWarningSecondsLeft !== null && (
+            <div className="mx-3 mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-rose-300 bg-rose-50 px-4 py-2.5 text-xs text-rose-900 shadow-xs sm:mx-6 lg:mx-8 dark:border-rose-700/70 dark:bg-rose-950/70 dark:text-rose-200">
+              <div className="flex min-w-0 items-center gap-2 font-medium">
+                <ShieldAlert className="h-4 w-4 shrink-0 text-rose-600 dark:text-rose-400" />
+                <span className="flex items-center gap-1.5">
+                  <Clock className="h-3.5 w-3.5 shrink-0" />
+                  Session inactivity timeout: automatically signing out in{' '}
+                  <strong className="font-bold tabular-nums">{idleWarningSecondsLeft}s</strong>.
+                </span>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleStaySignedIn}
+                  className="rounded-lg bg-slate-900 px-3 py-1 text-[11px] font-semibold text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
+                >
+                  Stay Signed In
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSignOut}
+                  className="rounded-lg border border-rose-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-rose-700 transition hover:bg-rose-100 dark:border-rose-700 dark:bg-slate-900 dark:text-rose-300 dark:hover:bg-rose-900/40"
+                >
+                  Sign Out Now
+                </button>
+              </div>
+            </div>
+          )}
 
           <main className="mx-auto w-full min-w-0 max-w-[1360px] flex-1 overflow-x-hidden px-3 py-4 sm:px-6 sm:py-6 lg:px-8">
             {isHydrating ? (
@@ -7380,6 +8786,8 @@ export default function App() {
                     onPublishSop={handlePublishSop}
                     onToggleMandatory={handleToggleSopMandatory}
                     onAcknowledgeSop={handleAcknowledgeSop}
+                    onReviseSop={handleReviseSop}
+                    onStampSop={handleStampSop}
                   />
                 )}
 
@@ -7389,9 +8797,17 @@ export default function App() {
                     departments={branding.departments}
                     activeRole={currentUser.role}
                     currentUser={currentUser}
+                    teamMembers={state.teamMembers}
                     pendingEditorChanges={state.pendingEditorChanges}
+                    recycleBin={state.recycleBin}
                     onAddDocument={handleAddVaultDocument}
+                    onUploadNewVersion={handleUploadVaultNewVersion}
+                    onStampDocument={handleStampVaultDocument}
                     onDeleteDocument={handleDeleteVaultDocument}
+                    onRequestSignOff={handleRequestVaultSignOff}
+                    onAcknowledgeSignOff={handleAcknowledgeVaultSignOff}
+                    onRestoreRecycleItem={handleRestoreRecycleItem}
+                    onPurgeRecycleItem={handlePurgeRecycleItem}
                   />
                 )}
 
@@ -7404,6 +8820,8 @@ export default function App() {
                     departments={branding.departments}
                     teamMembers={state.teamMembers}
                     permissionMatrix={state.permissionMatrix}
+                    shiftRosters={branding.shiftRosters}
+                    onSaveShiftRosters={handleSaveShiftRosters}
                     onClockIn={handleClockIn}
                     onClockOut={handleClockOut}
                     onCreateLeave={handleCreateLeave}
@@ -7421,9 +8839,12 @@ export default function App() {
                     pendingEditorChanges={state.pendingEditorChanges}
                     onCreateMeeting={handleCreateMeeting}
                     onAddActionItem={handleAddMeetingActionItem}
+                    onUpdateActionItemStatus={handleUpdateMeetingActionStatus}
                     onConvertActionToRequest={handleConvertActionToRequest}
                     onCompleteActionItem={handleCompleteMeetingActionItem}
                     onInspectRequest={handleInspectRequestById}
+                    onStampMeeting={handleStampMeeting}
+                    onDeleteMeeting={handleDeleteMeeting}
                   />
                 )}
 
@@ -7433,6 +8854,7 @@ export default function App() {
                     meetings={state.meetings}
                     leaves={state.leaves}
                     departments={branding.departments}
+                    teamMembers={state.teamMembers}
                     activeRole={currentUser.role}
                     currentUser={currentUser}
                     onSaveEvent={handleSaveCalendarEvent}
@@ -7442,7 +8864,7 @@ export default function App() {
 
                 {activeSection === 'audit' && isSuperAdminOperator && (
                   <AuditLogsView
-                    logs={state.globalAuditLogs}
+                    logs={state.globalAuditLogs.filter((a) => !isPrivateCommsAuditEvent(a))}
                     onInspectRequest={handleInspectRequestById}
                     onExportSuccess={(count) =>
                       pushToast(
@@ -7462,8 +8884,12 @@ export default function App() {
                     departments={branding.departments}
                     onlinePresenceKeys={onlinePresenceKeys}
                     recentlyOfflineKeys={recentlyOfflineKeys}
-                    corporateMails={state.corporateMails}
-                    chatMessages={state.chatMessages}
+                    corporateMails={state.corporateMails.filter((m) =>
+                      isStrictMailParticipant(m, currentUser.email),
+                    )}
+                    chatMessages={state.chatMessages.filter((msg) =>
+                      isStrictChatParticipant(msg, currentUser.email),
+                    )}
                     googleToken={googleToken}
                     googleEmail={googleEmail}
                     googleConnecting={googleConnecting}
@@ -7487,7 +8913,9 @@ export default function App() {
                     currentUser={currentUser}
                     teamMembers={state.teamMembers}
                     departments={branding.departments}
-                    emails={state.workspaceEmails}
+                    emails={state.workspaceEmails.filter((e) =>
+                      isStrictWorkspaceEmailParticipant(e, currentUser.email),
+                    )}
                     links={state.workspaceLinks}
                     googleToken={googleToken}
                     googleEmail={googleEmail}
@@ -7521,6 +8949,8 @@ export default function App() {
                     onSaveSignOffTitle={handleSaveSignOffTitle}
                     onUpdateDepartment={handleUpdateMemberDepartment}
                     onUpdatePassword={handleUpdatePassword}
+                    authSession={authSession}
+                    onSignOutAllDevices={handleSignOutAllDevices}
                     viewport={viewport}
                   />
                 )}
@@ -7537,14 +8967,20 @@ export default function App() {
                     onlinePresenceKeys={onlinePresenceKeys}
                     recentlyOfflineKeys={recentlyOfflineKeys}
                     requests={state.requests}
-                    auditLogs={state.globalAuditLogs}
+                    auditLogs={state.globalAuditLogs.filter((a) => !isPrivateCommsAuditEvent(a))}
                     notificationsCount={state.notifications.length}
                     vaultDocuments={state.vaultDocuments}
+                    recycleBin={state.recycleBin}
+                    isOnline={isOnline}
+                    pendingSyncCount={pendingSyncCount}
                     dbConnected={dbConnected}
                     onUpdateBranding={handleUpdateBranding}
                     onResetBranding={handleResetBranding}
                     onUpdatePermissionMatrix={handleUpdatePermissionMatrix}
                     onRunHealthCheck={() => void handleRunHealthCheck()}
+                    onForceCloudSync={() => void handleForceCloudSync()}
+                    onRestoreRecycleItem={handleRestoreRecycleItem}
+                    onPurgeRecycleItem={handlePurgeRecycleItem}
                     onUpdateMemberRole={handleUpdateMemberRole}
                     onUpdateMemberDepartment={handleUpdateMemberDepartment}
                     onToggleMemberActive={handleToggleMemberActive}
@@ -7658,7 +9094,9 @@ export default function App() {
             departments={branding.departments}
             onlinePresenceKeys={onlinePresenceKeys}
             recentlyOfflineKeys={recentlyOfflineKeys}
-            chatMessages={state.chatMessages}
+            chatMessages={state.chatMessages.filter((msg) =>
+              isStrictChatParticipant(msg, currentUser.email),
+            )}
             onSendChatMessage={handleSendChatMessage}
             onMarkChatRoomRead={handleMarkChatRoomRead}
             onStartGoogleMeetSession={handleStartGoogleMeetSession}
