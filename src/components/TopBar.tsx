@@ -874,7 +874,7 @@ export function TopBar({
                         subtitle: mod.subtitle,
                       })
                     }
-                    className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left transition-colors ${
+                    className={`flex w-full min-w-0 items-center justify-between gap-3 overflow-hidden rounded-lg px-3 py-2 text-left transition-colors ${
                       isHighlighted
                         ? 'bg-indigo-50 text-indigo-950 dark:bg-indigo-950/60 dark:text-indigo-100'
                         : 'hover:bg-slate-50 dark:hover:bg-slate-800/70'
@@ -915,7 +915,7 @@ export function TopBar({
                     key={req.id}
                     type="button"
                     onClick={() => executeCommandItem({ kind: 'request', request: req })}
-                    className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left transition-colors ${
+                    className={`flex w-full min-w-0 items-center justify-between gap-3 overflow-hidden rounded-lg px-3 py-2 text-left transition-colors ${
                       isHighlighted
                         ? 'bg-indigo-50 text-indigo-950 dark:bg-indigo-950/60 dark:text-indigo-100'
                         : 'hover:bg-slate-50 dark:hover:bg-slate-800/70'
@@ -928,7 +928,7 @@ export function TopBar({
                           <span className="shrink-0 text-xs font-bold text-indigo-700 tabular-nums dark:text-indigo-400">
                             {req.id}
                           </span>
-                          <span className="truncate text-xs font-semibold text-slate-900 dark:text-slate-100">
+                          <span className="min-w-0 flex-1 truncate text-xs font-semibold text-slate-900 dark:text-slate-100">
                             {req.title}
                           </span>
                         </div>
@@ -1229,7 +1229,7 @@ export function TopBar({
                         count: d.count,
                       })
                     }
-                    className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left transition-colors ${
+                    className={`flex w-full min-w-0 items-center justify-between gap-3 overflow-hidden rounded-lg px-3 py-2 text-left transition-colors ${
                       isHighlighted
                         ? 'bg-indigo-50 text-indigo-950 dark:bg-indigo-950/60 dark:text-indigo-100'
                         : 'hover:bg-slate-50 dark:hover:bg-slate-800/70'
@@ -1237,7 +1237,7 @@ export function TopBar({
                   >
                     <div className="flex min-w-0 flex-1 items-center gap-2.5">
                       <Building2 className="h-4 w-4 shrink-0 text-slate-500 dark:text-slate-400" />
-                      <span className="truncate text-xs font-semibold text-slate-900 dark:text-slate-100">
+                      <span className="min-w-0 flex-1 truncate text-xs font-semibold text-slate-900 dark:text-slate-100">
                         {d.department} Department
                       </span>
                     </div>
@@ -1265,7 +1265,7 @@ export function TopBar({
                     key={member.id}
                     type="button"
                     onClick={() => executeCommandItem({ kind: 'user', member })}
-                    className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left transition-colors ${
+                    className={`flex w-full min-w-0 items-center justify-between gap-3 overflow-hidden rounded-lg px-3 py-2 text-left transition-colors ${
                       isHighlighted
                         ? 'bg-indigo-50 text-indigo-950 dark:bg-indigo-950/60 dark:text-indigo-100'
                         : 'hover:bg-slate-50 dark:hover:bg-slate-800/70'
@@ -1275,7 +1275,7 @@ export function TopBar({
                       <UserAvatar
                         name={member.name}
                         avatarUrl={member.avatarUrl}
-                        sizeClass="h-7 w-7"
+                        sizeClass="h-7 w-7 shrink-0"
                         textClass="text-[11px]"
                         roundedClass="rounded-lg"
                       />
@@ -1321,7 +1321,7 @@ export function TopBar({
                     key={audit.id}
                     type="button"
                     onClick={() => executeCommandItem({ kind: 'audit', audit })}
-                    className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left transition-colors ${
+                    className={`flex w-full min-w-0 items-center justify-between gap-3 overflow-hidden rounded-lg px-3 py-2 text-left transition-colors ${
                       isHighlighted
                         ? 'bg-indigo-50 text-indigo-950 dark:bg-indigo-950/60 dark:text-indigo-100'
                         : 'hover:bg-slate-50 dark:hover:bg-slate-800/70'
@@ -1331,10 +1331,10 @@ export function TopBar({
                       <FileSpreadsheet className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
                       <div className="min-w-0 flex-1">
                         <div className="flex min-w-0 items-center gap-2">
-                          <span className="shrink-0 text-[11px] font-bold text-slate-700 tabular-nums dark:text-slate-300">
+                          <span className="max-w-[45%] shrink-0 truncate text-[11px] font-bold text-slate-700 tabular-nums dark:text-slate-300">
                             {audit.requestId}
                           </span>
-                          <span className="truncate text-xs font-semibold text-slate-900 dark:text-slate-100">
+                          <span className="min-w-0 flex-1 truncate text-xs font-semibold text-slate-900 dark:text-slate-100">
                             {audit.actionType}
                           </span>
                         </div>
@@ -1362,7 +1362,7 @@ export function TopBar({
   return (
     <>
     <header className="gpu-accelerated sticky top-0 z-30 w-full max-w-full border-b border-slate-200 bg-white/95 backdrop-blur-xs dark:border-slate-800 dark:bg-slate-900/95">
-      <div className="mx-auto flex h-16 w-full min-w-0 max-w-[1680px] items-center justify-between gap-1.5 overflow-x-clip px-2.5 sm:gap-3 sm:px-6 lg:px-8 2xl:px-10">
+      <div className="mx-auto flex h-16 w-full min-w-0 max-w-[1680px] items-center justify-between gap-1.5 px-2.5 sm:gap-3 sm:px-6 lg:px-8 2xl:px-10">
         {/* Left: Mobile/Tablet Menu + Breadcrumb / Page Title */}
         <div className="flex min-w-0 flex-1 items-center gap-1.5 sm:gap-3">
           <button
@@ -1386,7 +1386,7 @@ export function TopBar({
         {/* Center: Live Instant Jump Search (Tablet/Desktop) */}
         <div
           ref={desktopSearchRef}
-          className="relative hidden shrink-0 md:block md:w-44 lg:w-56 xl:w-64 2xl:w-72"
+          className="relative z-40 hidden shrink-0 md:block md:w-44 lg:w-56 xl:w-64 2xl:w-72"
         >
           <div className="flex h-8 w-full min-w-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 focus-within:border-indigo-500 focus-within:bg-white dark:border-slate-700 dark:bg-slate-950 dark:focus-within:bg-slate-900">
             <Search className="h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-slate-500" aria-hidden="true" />
@@ -1408,7 +1408,7 @@ export function TopBar({
               aria-expanded={commandOpen}
               className="min-w-0 flex-1 bg-transparent text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none dark:text-slate-100 dark:placeholder:text-slate-500"
             />
-            {commandQuery ? (
+            {commandQuery && (
               <button
                 type="button"
                 onClick={() => {
@@ -1420,10 +1420,6 @@ export function TopBar({
               >
                 <X className="h-3 w-3" />
               </button>
-            ) : (
-              <span className="hidden shrink-0 rounded border border-slate-200 bg-white px-1 py-0.5 font-mono text-[9px] font-semibold text-slate-400 lg:inline dark:border-slate-700 dark:bg-slate-900 dark:text-slate-500">
-                Ctrl+K
-              </span>
             )}
           </div>
 
@@ -1431,11 +1427,11 @@ export function TopBar({
             <div
               role="dialog"
               aria-label="Instant Workspace Jump Search"
-              className="fixed top-[68px] right-3 z-50 w-[min(640px,calc(100vw-24px))] max-w-[calc(100vw-24px)] overflow-hidden rounded-2xl border border-slate-200 bg-white font-sans shadow-2xl md:absolute md:top-10 md:right-auto md:left-1/2 md:-translate-x-1/2 dark:border-slate-800 dark:bg-slate-900"
+              className="absolute top-[calc(100%+6px)] left-0 z-40 min-w-full w-[min(460px,calc(100vw-32px))] lg:w-[min(540px,calc(100vw-32px))] max-w-[min(540px,calc(100vw-32px))] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900"
             >
               {renderCommandResultsBody()}
               <div className="flex items-center justify-between gap-2 border-t border-slate-100 bg-slate-50/90 px-3.5 py-2 text-[11px] text-slate-500 dark:border-slate-800 dark:bg-slate-950/90 dark:text-slate-400">
-                <span className="truncate font-semibold text-slate-600 dark:text-slate-300">
+                <span className="min-w-0 truncate font-semibold text-slate-600 dark:text-slate-300">
                   Instant Jump Search · Modules, Records &amp; People
                 </span>
                 <span className="shrink-0 whitespace-nowrap">↑↓ · Enter · Esc</span>
@@ -2160,46 +2156,58 @@ export function TopBar({
       {mobileSearchOpen && (
         <div
           ref={mobileSearchRef}
-          className="border-t border-slate-200 bg-white px-2.5 py-2 md:hidden dark:border-slate-800 dark:bg-slate-900"
+          className="relative z-40 border-t border-slate-200 bg-white px-2.5 py-2 md:hidden dark:border-slate-800 dark:bg-slate-900"
         >
-          <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 focus-within:border-indigo-500 focus-within:bg-white dark:border-slate-700 dark:bg-slate-950">
-            <Search className="h-4 w-4 shrink-0 text-slate-400 dark:text-slate-500" />
-            <input
-              ref={mobileInputRef}
-              type="search"
-              value={commandQuery}
-              onChange={(e) => handleSearchInputChange(e.target.value)}
-              onKeyDown={handleSearchKeyDown}
-              placeholder="Search workspace..."
-              aria-label="Mobile workspace search"
-              className="min-w-0 flex-1 bg-transparent text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none dark:text-slate-100 dark:placeholder:text-slate-500"
-            />
-            {commandQuery && (
+          <div className="relative z-40">
+            <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 focus-within:border-indigo-500 focus-within:bg-white dark:border-slate-700 dark:bg-slate-950">
+              <Search className="h-4 w-4 shrink-0 text-slate-400 dark:text-slate-500" />
+              <input
+                ref={mobileInputRef}
+                type="search"
+                value={commandQuery}
+                onChange={(e) => handleSearchInputChange(e.target.value)}
+                onKeyDown={handleSearchKeyDown}
+                placeholder="Search workspace..."
+                aria-label="Mobile workspace search"
+                className="min-w-0 flex-1 bg-transparent text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none dark:text-slate-100 dark:placeholder:text-slate-500"
+              />
+              {commandQuery && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleSearchInputChange('');
+                    mobileInputRef.current?.focus();
+                  }}
+                  className="shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                >
+                  Clear
+                </button>
+              )}
               <button
                 type="button"
-                onClick={() => {
-                  handleSearchInputChange('');
-                  mobileInputRef.current?.focus();
-                }}
-                className="shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                onClick={closeCommandPalette}
+                aria-label="Close mobile search"
+                className="shrink-0 rounded p-1 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
               >
-                Clear
+                <X className="h-3.5 w-3.5" />
               </button>
-            )}
-            <button
-              type="button"
-              onClick={closeCommandPalette}
-              aria-label="Close mobile search"
-              className="shrink-0 rounded p-1 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          </div>
-          {commandOpen && (
-            <div className="mt-2 max-h-[70dvh] w-full max-w-[calc(100vw-20px)] overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-900">
-              {renderCommandResultsBody()}
             </div>
-          )}
+            {commandOpen && (
+              <div
+                role="dialog"
+                aria-label="Instant Workspace Jump Search"
+                className="absolute top-[calc(100%+6px)] left-0 z-40 min-w-full w-full max-w-[min(540px,calc(100vw-32px))] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-900"
+              >
+                {renderCommandResultsBody()}
+                <div className="flex items-center justify-between gap-2 border-t border-slate-100 bg-slate-50/90 px-3.5 py-2 text-[11px] text-slate-500 dark:border-slate-800 dark:bg-slate-950/90 dark:text-slate-400">
+                  <span className="min-w-0 truncate font-semibold text-slate-600 dark:text-slate-300">
+                    Instant Jump Search · Modules, Records &amp; People
+                  </span>
+                  <span className="shrink-0 whitespace-nowrap">↑↓ · Enter · Esc</span>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </header>
