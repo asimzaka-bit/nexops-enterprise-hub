@@ -169,7 +169,7 @@ export function QuickLaunchBar({
   };
 
   return (
-    <div className="relative flex w-full max-w-full min-w-0 flex-wrap items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 py-2 shadow-xs dark:border-slate-800 dark:bg-slate-900">
+    <div className="relative flex w-full max-w-full min-w-0 flex-wrap items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2 py-1.5 shadow-xs sm:px-2.5 sm:py-2 dark:border-slate-800 dark:bg-slate-900">
       <div className="mr-1 inline-flex shrink-0 items-center gap-1.5 text-[11px] font-bold tracking-wide text-slate-500 uppercase dark:text-slate-400">
         <Bookmark className="h-3.5 w-3.5 text-slate-700 dark:text-slate-300" />
         <span className="hidden sm:inline">Quick Launch</span>
@@ -262,7 +262,7 @@ export function QuickLaunchBar({
         </button>
 
         {menuOpen && (
-          <div className="absolute top-[calc(100%+6px)] right-0 z-40 w-80 max-w-[calc(100vw-24px)] rounded-xl border border-slate-200 bg-white p-3.5 shadow-xl dark:border-slate-700 dark:bg-slate-900">
+          <div className="absolute top-[calc(100%+6px)] right-0 z-40 max-h-[calc(100dvh-7rem)] w-72 max-w-[calc(100vw-20px)] overflow-y-auto rounded-xl border border-slate-200 bg-white p-3.5 shadow-xl sm:w-80 dark:border-slate-700 dark:bg-slate-900">
             <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-2 dark:border-slate-800">
               <div className="flex items-center gap-1.5">
                 <Bookmark className="h-3.5 w-3.5 text-slate-800 dark:text-slate-200" />

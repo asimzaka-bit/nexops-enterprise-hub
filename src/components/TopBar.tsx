@@ -811,13 +811,14 @@ export function TopBar({
   };
 
   const isCompactMobile = viewport ? viewport.isMobile : false;
+  const isXsMobile = viewport ? viewport.isXs : false;
 
   return (
     <>
     <header className="gpu-accelerated sticky top-0 z-30 w-full max-w-full border-b border-slate-200 bg-white/95 backdrop-blur-xs dark:border-slate-800 dark:bg-slate-900/95">
-      <div className="flex h-16 w-full min-w-0 max-w-full items-center justify-between gap-2 overflow-x-clip px-3 sm:gap-3 sm:px-6">
+      <div className="mx-auto flex h-16 w-full min-w-0 max-w-[1680px] items-center justify-between gap-1.5 overflow-x-clip px-2.5 sm:gap-3 sm:px-6 lg:px-8 2xl:px-10">
         {/* Left: Mobile/Tablet Menu + Breadcrumb / Page Title */}
-        <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
+        <div className="flex min-w-0 flex-1 items-center gap-1.5 sm:gap-3">
           <button
             type="button"
             onClick={onOpenMobileMenu}
@@ -972,11 +973,13 @@ export function TopBar({
               type="button"
               onClick={onOpenCreateModal}
               aria-label="New Request"
-              className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg bg-indigo-600 px-2 text-xs font-semibold whitespace-nowrap text-white transition-colors hover:bg-indigo-700 focus-visible:outline-2 focus-visible:outline-indigo-600 sm:h-9 sm:gap-1.5 sm:px-3 md:h-8 md:px-2.5"
+              className={`inline-flex h-8 shrink-0 items-center gap-1 rounded-lg bg-indigo-600 text-xs font-semibold whitespace-nowrap text-white transition-colors hover:bg-indigo-700 focus-visible:outline-2 focus-visible:outline-indigo-600 sm:h-9 sm:gap-1.5 sm:px-3 md:h-8 md:px-2.5 ${
+                isXsMobile ? 'w-8 justify-center px-0' : 'px-2'
+              }`}
             >
               <Plus className="h-3.5 w-3.5 shrink-0" />
               <span className="hidden sm:inline">New Request</span>
-              <span className="sm:hidden">New</span>
+              {!isXsMobile && <span className="sm:hidden">New</span>}
             </button>
           )}
 
@@ -1055,7 +1058,7 @@ export function TopBar({
       {onSelectWorkspaceTool && workspaceMenuOpen && (
         <div
           ref={workspaceDropdownRef}
-          className="absolute top-[calc(100%+8px)] right-3 z-50 max-h-[calc(100vh-5.5rem)] w-72 max-w-[calc(100vw-24px)] overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 shadow-xl sm:right-6 sm:w-80 dark:border-slate-800 dark:bg-slate-900"
+          className="absolute top-[calc(100%+8px)] right-2.5 z-50 max-h-[calc(100dvh-5rem)] w-72 max-w-[calc(100vw-20px)] overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 shadow-xl sm:right-6 sm:w-80 dark:border-slate-800 dark:bg-slate-900"
         >
           <div className="border-b border-slate-100 px-2.5 py-2 dark:border-slate-800">
             <p className="text-xs font-bold text-slate-900 dark:text-slate-100">
@@ -1140,7 +1143,7 @@ export function TopBar({
       {notifOpen && (
         <div
           ref={notifMenuRef}
-          className="absolute top-[calc(100%+8px)] right-3 z-50 max-h-[calc(100vh-5.5rem)] w-80 max-w-[calc(100vw-24px)] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl sm:right-6 sm:w-96 dark:border-slate-800 dark:bg-slate-900"
+          className="absolute top-[calc(100%+8px)] right-2.5 z-50 max-h-[calc(100dvh-5rem)] w-80 max-w-[calc(100vw-20px)] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl sm:right-6 sm:w-96 dark:border-slate-800 dark:bg-slate-900"
         >
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-3.5 py-3 sm:px-4 dark:border-slate-800">
             <div className="min-w-0">
@@ -1369,7 +1372,7 @@ export function TopBar({
       {profileOpen && (
         <div
           ref={profileMenuRef}
-          className="absolute top-[calc(100%+8px)] right-3 z-50 max-h-[calc(100vh-5.5rem)] w-80 max-w-[calc(100vw-24px)] overflow-y-auto rounded-xl border border-slate-200 bg-white p-3.5 shadow-xl sm:right-6 sm:w-[340px] dark:border-slate-800 dark:bg-slate-900"
+          className="absolute top-[calc(100%+8px)] right-2.5 z-50 max-h-[calc(100dvh-5rem)] w-80 max-w-[calc(100vw-20px)] overflow-y-auto rounded-xl border border-slate-200 bg-white p-3.5 shadow-xl sm:right-6 sm:w-[340px] dark:border-slate-800 dark:bg-slate-900"
         >
           {/* Profile Identity Header */}
           <div className="flex min-w-0 items-start justify-between gap-2">
@@ -1570,12 +1573,12 @@ export function TopBar({
           onClick={(e) => {
             if (e.target === e.currentTarget) closeCommandPalette();
           }}
-          className="fixed inset-0 z-50 flex items-start justify-center bg-slate-900/40 px-4 pt-16 backdrop-blur-[2px] sm:pt-24 dark:bg-slate-950/75"
+          className="fixed inset-0 z-50 flex items-start justify-center bg-slate-900/40 px-2.5 pt-12 backdrop-blur-[2px] sm:px-4 sm:pt-24 dark:bg-slate-950/75"
           role="dialog"
           aria-modal="true"
           aria-label="Global Command Search"
         >
-          <div className="gpu-accelerated w-[92vw] max-w-2xl overflow-hidden rounded-2xl border border-slate-200 bg-white font-sans shadow-2xl sm:w-full dark:border-slate-800 dark:bg-slate-900">
+          <div className="gpu-accelerated w-full max-w-[calc(100vw-20px)] overflow-hidden rounded-2xl border border-slate-200 bg-white font-sans shadow-2xl sm:max-w-2xl dark:border-slate-800 dark:bg-slate-900">
             <div className="flex items-center gap-2.5 border-b border-slate-200 px-4 py-3 dark:border-slate-800">
               <Search className="h-4 w-4 shrink-0 text-slate-400 dark:text-slate-500" aria-hidden="true" />
               <input

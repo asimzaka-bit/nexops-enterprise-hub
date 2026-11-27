@@ -718,7 +718,7 @@ export function DashboardView({
         : Moon;
 
   return (
-    <div className="w-full min-w-0 max-w-full space-y-6 overflow-x-hidden">
+    <div className="w-full min-w-0 max-w-full space-y-5 overflow-x-clip sm:space-y-6">
       {/* Dynamic Time-of-Day Personalized Greeting Banner */}
       <section
         aria-label="Personalized Welcome Greeting"
@@ -935,7 +935,7 @@ export function DashboardView({
             </p>
           </div>
         ) : (
-          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-3">
             {activeNotices.map((notice) => {
               const tag =
                 notice.priorityTag ??
@@ -1064,7 +1064,7 @@ export function DashboardView({
               key={kpi.label}
               type="button"
               onClick={kpi.onClick}
-              className="group flex flex-col justify-between rounded-xl border border-slate-200 bg-white p-5 text-left transition-colors hover:border-slate-300 hover:bg-slate-50/40 focus-visible:outline-2 focus-visible:outline-indigo-600 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700 dark:hover:bg-slate-800/50"
+              className="group flex min-w-0 flex-col justify-between rounded-xl border border-slate-200 bg-white p-4 text-left transition-colors hover:border-slate-300 hover:bg-slate-50/40 focus-visible:outline-2 focus-visible:outline-indigo-600 sm:p-5 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700 dark:hover:bg-slate-800/50"
             >
               <div className="flex items-center justify-between gap-2">
                 <span className="text-xs font-medium text-slate-500 dark:text-slate-400">{kpi.label}</span>
@@ -1346,7 +1346,7 @@ export function DashboardView({
         </div>
 
         {projects.length > 0 && (
-          <div className="mt-5 grid grid-cols-1 gap-3.5 md:grid-cols-2 xl:grid-cols-3">
+          <div className="mt-5 grid grid-cols-1 gap-3.5 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
             {projects.map((proj) => {
               const cur = proj.currency || 'USD';
               const est = proj.estimatedBudget ?? 0;
@@ -1426,7 +1426,7 @@ export function DashboardView({
         </div>
 
         {/* Responsive Department Performance Summary Cards */}
-        <div className="grid grid-cols-1 gap-3 border-b border-slate-200 bg-slate-50/40 p-4 dark:border-slate-800 dark:bg-slate-950/40 sm:grid-cols-2 sm:p-6 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 border-b border-slate-200 bg-slate-50/40 p-3.5 sm:grid-cols-2 sm:p-6 xl:grid-cols-3 2xl:grid-cols-4 dark:border-slate-800 dark:bg-slate-950/40">
           {scorecardRows.map((row) => {
             const slaPct = row.slaCompliancePct ?? 100;
             const attRate = row.attendanceRatePct ?? 0;
@@ -1705,8 +1705,8 @@ export function DashboardView({
         <>
 
       {/* Urgent Attention Table */}
-      <section className="rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 px-6 py-4 dark:border-slate-800">
+      <section className="min-w-0 rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 px-4 py-4 sm:px-6 dark:border-slate-800">
           <div>
             <h2 className="font-display text-base font-bold text-slate-900 dark:text-slate-100">
               Urgent Attention Queue
@@ -1847,7 +1847,7 @@ export function DashboardView({
             No approved team members found in directory yet.
           </div>
         ) : (
-          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
             {activeDirectoryWithPresence.map(({ member, liveOverride }) => {
               const isSelf =
                 member.id === currentUser.id ||

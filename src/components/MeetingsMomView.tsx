@@ -451,7 +451,7 @@ export function MeetingsMomView({
       {/* Search & Filter Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
         <div className="flex flex-1 flex-wrap items-center gap-3">
-          <div className="relative min-w-[240px] flex-1">
+          <div className="relative w-full min-w-0 flex-1 sm:min-w-[240px]">
             <Search
               className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-slate-500"
               aria-hidden="true"

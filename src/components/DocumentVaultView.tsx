@@ -5,14 +5,12 @@ import {
   CalendarClock,
   CheckCircle2,
   Clock,
-  Cloud,
   Download,
   ExternalLink,
   Eye,
   FileSpreadsheet,
   FileText,
   FolderLock,
-  HardDrive,
   History,
   Landmark,
   Link2,
@@ -261,13 +259,6 @@ export function DocumentVaultView({
   }, [pendingEditorChanges, activeRole, currentUser.email, canManageVault]);
 
   const storageStats = useMemo(() => calculateVaultStorageStats(documents), [documents]);
-
-  const storageTone =
-    storageStats.usedPercent >= 90
-      ? 'rose'
-      : storageStats.usedPercent >= 75
-        ? 'amber'
-        : 'indigo';
 
   const visibleDocuments = useMemo(() => {
     return documents.filter((doc) => {
@@ -736,82 +727,6 @@ export function DocumentVaultView({
         </div>
       )}
 
-      {/* 10.0 GB Enterprise Cloud Storage Quota Meter */}
-      <div className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-start gap-3">
-            <div
-              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border ${
-                storageTone === 'rose'
-                  ? 'border-rose-200 bg-rose-50 text-rose-600 dark:border-rose-800/70 dark:bg-rose-950/50 dark:text-rose-400'
-                  : storageTone === 'amber'
-                    ? 'border-amber-200 bg-amber-50 text-amber-600 dark:border-amber-800/70 dark:bg-amber-950/50 dark:text-amber-400'
-                    : 'border-indigo-200 bg-indigo-50 text-indigo-600 dark:border-indigo-800/70 dark:bg-indigo-950/50 dark:text-indigo-400'
-              }`}
-            >
-              <HardDrive className="h-5 w-5" />
-            </div>
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <h3 className="font-display text-sm font-bold text-slate-900 dark:text-slate-100">
-                  10.0 GB Total Enterprise Cloud Storage
-                </h3>
-                <span className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:border-emerald-800/70 dark:bg-emerald-950/50 dark:text-emerald-300">
-                  <Cloud className="h-3 w-3" />
-                  Supabase Cloud Vault
-                </span>
-              </div>
-              <p className="mt-0.5 font-mono text-xs text-slate-600 tabular-nums dark:text-slate-300">
-                <span className="font-bold text-slate-900 dark:text-slate-100">
-                  {formatStorageSize(storageStats.usedBytes)} / 10.0 GB Used
-                </span>{' '}
-                ({storageStats.usedPercent.toFixed(1)}%) ·{' '}
-                <span className="text-slate-500 dark:text-slate-400">
-                  {formatStorageSize(storageStats.remainingBytes)} remaining
-                </span>
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-4 text-xs">
-            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-right dark:border-slate-800 dark:bg-slate-950">
-              <span className="block text-[10px] font-medium text-slate-500 dark:text-slate-400">
-                Stored Files / Links
-              </span>
-              <span className="font-mono text-xs font-bold text-slate-900 tabular-nums dark:text-slate-100">
-                {storageStats.fileCount} files · {storageStats.linkCount} links
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* Sleek Quota Progress Bar */}
-        <div className="mt-4">
-          <div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
-            <div
-              className={`h-full rounded-full transition-all duration-300 ${
-                storageTone === 'rose'
-                  ? 'bg-rose-600'
-                  : storageTone === 'amber'
-                    ? 'bg-amber-500'
-                    : 'bg-indigo-600'
-              }`}
-              style={{
-                width: `${storageStats.usedBytes > 0 ? Math.max(1.2, storageStats.usedPercent) : 0}%`,
-              }}
-            />
-          </div>
-          <div className="mt-1.5 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
-            <span>Supports PDF, DOCX, XLSX, PNG, JPG, CSV &amp; ZIP</span>
-            <span className="font-mono tabular-nums">
-              {storageStats.remainingBytes <= 0
-                ? 'Quota Full — Delete old files to upload'
-                : `${formatStorageSize(storageStats.remainingBytes)} free of 10.0 GB`}
-            </span>
-          </div>
-        </div>
-      </div>
-
       {/* 4 Structured Vault Folders */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {VAULT_FOLDERS.map((f) => {
@@ -905,7 +820,7 @@ export function DocumentVaultView({
       {/* Filters Bar */}
       <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between dark:border-slate-800 dark:bg-slate-900">
         <div className="flex flex-1 flex-wrap items-center gap-2.5">
-          <div className="relative min-w-[220px] flex-1">
+          <div className="relative w-full min-w-0 flex-1 sm:min-w-[220px]">
             <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <input
               type="search"

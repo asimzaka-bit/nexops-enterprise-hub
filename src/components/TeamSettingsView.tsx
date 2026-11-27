@@ -774,7 +774,7 @@ export function TeamSettingsView({
                           value={rejectionReasonDraft}
                           onChange={(e) => setRejectionReasonDraft(e.target.value)}
                           placeholder="Optional rejection reason for the Editor..."
-                          className="h-8 min-w-[220px] flex-1 rounded-lg border border-rose-200 bg-white px-3 text-xs text-slate-900 focus:border-rose-500 focus:outline-none dark:border-rose-800 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
+                          className="h-8 w-full min-w-0 flex-1 rounded-lg border border-rose-200 bg-white px-3 text-xs text-slate-900 focus:border-rose-500 focus:outline-none sm:min-w-[220px] dark:border-rose-800 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
                         />
                         <button
                           type="button"

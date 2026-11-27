@@ -1279,8 +1279,8 @@ export function WorkspaceToolsView({
       {activeTool === 'gmail' && (
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-[#F6F8FC] shadow-xs dark:border-slate-800 dark:bg-slate-950">
           {/* Authentic Gmail Top Header Bar */}
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/80 bg-[#F6F8FC] px-4 py-2.5 dark:border-slate-800 dark:bg-slate-950">
-            <div className="flex items-center gap-2.5 min-w-[120px]">
+          <div className="flex flex-wrap items-center justify-between gap-2.5 border-b border-slate-200/80 bg-[#F6F8FC] px-3 py-2.5 sm:px-4 dark:border-slate-800 dark:bg-slate-950">
+            <div className="flex min-w-0 items-center gap-2.5">
               <GmailColorIcon className="h-7 w-7 shrink-0" />
               <span className="font-display text-lg font-medium tracking-tight text-[#444746] dark:text-slate-200">
                 Gmail
@@ -1290,7 +1290,7 @@ export function WorkspaceToolsView({
             {/* Gmail Pill Search Bar */}
             <form
               onSubmit={handleGmailSearchSubmit}
-              className="flex h-11 min-w-[240px] flex-1 max-w-2xl items-center gap-2 rounded-full bg-[#EAF1FB] px-4 transition-all focus-within:bg-white focus-within:shadow-md dark:border dark:border-slate-800 dark:bg-slate-900 dark:focus-within:border-indigo-500 dark:focus-within:bg-slate-900"
+              className="flex h-11 w-full min-w-0 max-w-2xl flex-1 items-center gap-2 rounded-full bg-[#EAF1FB] px-3.5 transition-all focus-within:bg-white focus-within:shadow-md sm:min-w-[240px] sm:px-4 dark:border dark:border-slate-800 dark:bg-slate-900 dark:focus-within:border-indigo-500 dark:focus-within:bg-slate-900"
             >
               <button
                 type="submit"

@@ -420,9 +420,9 @@ export function UserSettingsView({
         : Laptop;
 
   return (
-    <div className="min-w-0 w-full max-w-full space-y-6 overflow-x-hidden">
+    <div className="min-w-0 w-full max-w-full space-y-5 overflow-x-clip sm:space-y-6">
       {/* Page Hero Banner (Deep Navy #0F172A Branding) */}
-      <section className="rounded-xl border border-slate-800 bg-[#0F172A] p-5 text-white shadow-sm sm:p-6">
+      <section className="rounded-xl border border-slate-800 bg-[#0F172A] p-4 text-white shadow-sm sm:p-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex min-w-0 items-start gap-3.5">
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-indigo-400/30 bg-indigo-500/20 text-indigo-300">
@@ -1622,16 +1622,21 @@ export function UserSettingsView({
 
               {/* Read-Only Active Viewport / Device Mode Card */}
               <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/80 p-3.5 dark:border-slate-800 dark:bg-slate-950/60">
-                <div className="flex items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-900 dark:text-slate-100">
-                    <DeviceIcon className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
-                    <span>Active Viewport / Device Mode</span>
+                    <DeviceIcon className="h-4 w-4 shrink-0 text-indigo-600 dark:text-indigo-400" />
+                    <span>Active Viewport / Auto-Layout</span>
                   </span>
-                  <span className="rounded-md border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-bold capitalize text-indigo-700 dark:border-indigo-800 dark:bg-indigo-950/70 dark:text-indigo-300">
-                    {viewport.deviceType}
-                  </span>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <span className="rounded-md border border-slate-200 bg-white px-2 py-0.5 font-mono text-[10px] font-bold uppercase text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                      {viewport.breakpoint}
+                    </span>
+                    <span className="rounded-md border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-bold capitalize text-indigo-700 dark:border-indigo-800 dark:bg-indigo-950/70 dark:text-indigo-300">
+                      {viewport.deviceType}
+                    </span>
+                  </div>
                 </div>
-                <div className="mt-2 grid grid-cols-3 gap-2 text-[11px] text-slate-600 dark:text-slate-400">
+                <div className="mt-2 grid grid-cols-1 gap-2 text-[11px] text-slate-600 sm:grid-cols-3 dark:text-slate-400">
                   <div className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 dark:border-slate-800 dark:bg-slate-900">
                     <span className="block text-[10px] text-slate-400">Resolution</span>
                     <span className="font-mono font-bold text-slate-800 tabular-nums dark:text-slate-200">

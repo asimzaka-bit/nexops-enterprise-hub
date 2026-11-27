@@ -220,19 +220,21 @@ export function QuickChatDrawer({
     }
   };
 
+  const isXsMobile = viewport ? viewport.isXs : false;
+
   return (
-    <div className="no-print fixed right-4 bottom-4 z-30 max-w-[calc(100vw-24px)] sm:right-6 sm:bottom-6">
+    <div className="no-print fixed right-2.5 bottom-2.5 z-30 max-w-[calc(100vw-20px)] sm:right-6 sm:bottom-6">
       {!open ? (
         <button
           type="button"
           onClick={() => setOpen(true)}
           aria-label="Open Quick Team Chat Drawer"
           className={`inline-flex items-center gap-2 rounded-full border border-indigo-500/30 bg-indigo-600 text-xs font-bold text-white shadow-lg transition-transform hover:scale-[1.02] hover:bg-indigo-700 focus-visible:outline-2 focus-visible:outline-indigo-600 ${
-            isCompactMobile ? 'px-3.5 py-2.5' : 'px-4 py-2.5'
+            isXsMobile ? 'px-3 py-2' : isCompactMobile ? 'px-3.5 py-2.5' : 'px-4 py-2.5'
           }`}
         >
           <MessageSquare className="h-4 w-4 shrink-0" />
-          <span>Team Chat</span>
+          <span>{isXsMobile ? 'Chat' : 'Team Chat'}</span>
           {totalUnread > 0 && (
             <span className="rounded-full bg-rose-500 px-1.5 py-0.5 font-mono text-[10px] font-bold text-white tabular-nums">
               {totalUnread}
@@ -241,7 +243,7 @@ export function QuickChatDrawer({
         </button>
       ) : (
         <div
-          className="flex h-[520px] max-h-[80vh] w-[calc(100vw-24px)] max-w-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl sm:w-[400px] dark:border-slate-800 dark:bg-slate-900"
+          className="flex h-[min(520px,calc(100dvh-5.5rem))] w-[calc(100vw-20px)] max-w-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl sm:h-[520px] sm:max-h-[80vh] sm:w-[400px] dark:border-slate-800 dark:bg-slate-900"
           role="dialog"
           aria-label="Quick Team Chat Drawer"
         >
@@ -382,24 +384,24 @@ export function QuickChatDrawer({
                       roundedClass="rounded-md"
                     />
                     <div
-                      className={`max-w-[80%] rounded-xl border px-3 py-2 text-xs ${
+                      className={`min-w-0 max-w-[82%] rounded-xl border px-3 py-2 text-xs ${
                         isSelf
                           ? 'border-indigo-200 bg-indigo-50 text-slate-900 dark:border-indigo-800 dark:bg-indigo-950/60 dark:text-slate-100'
                           : 'border-slate-200 bg-slate-50 text-slate-900 dark:border-slate-800 dark:bg-slate-800/80 dark:text-slate-100'
                       }`}
                     >
                       <div className="flex items-center justify-between gap-2 text-[10px] text-slate-500 dark:text-slate-400">
-                        <span className="font-bold text-slate-800 dark:text-slate-200">
+                        <span className="truncate font-bold text-slate-800 dark:text-slate-200">
                           {msg.senderName}
                         </span>
-                        <span className="font-mono tabular-nums">
+                        <span className="shrink-0 font-mono tabular-nums">
                           {new Date(msg.createdAt).toLocaleTimeString([], {
                             hour: '2-digit',
                             minute: '2-digit',
                           })}
                         </span>
                       </div>
-                      <p className="mt-0.5 whitespace-pre-wrap leading-relaxed">{msg.body}</p>
+                      <p className="mt-0.5 break-words whitespace-pre-wrap leading-relaxed">{msg.body}</p>
                       {msg.meetInvite && (
                         <a
                           href={msg.meetInvite.url}

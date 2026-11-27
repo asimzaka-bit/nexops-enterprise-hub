@@ -18,6 +18,7 @@
   }
 
   *, *::before, *::after {
+    box-sizing: border-box;
     font-family: var(--nexops-font-family, 'Calibri', 'Carlito', 'Segoe UI', sans-serif) !important;
   }
 
@@ -74,6 +75,17 @@
 .font-display,
 .font-mono {
   font-family: var(--nexops-font-family, 'Calibri', 'Carlito', 'Segoe UI', sans-serif) !important;
+}
+
+/* Automatic Breakpoint-Driven Self-Adjustment Rules */
+html[data-breakpoint='xs'] main {
+  overflow-wrap: break-word;
+}
+
+html[data-breakpoint='xs'] main table th,
+html[data-breakpoint='xs'] main table td {
+  padding-left: 0.625rem;
+  padding-right: 0.625rem;
 }
 
 /* Interface Density Modes (set on html[data-density]) */

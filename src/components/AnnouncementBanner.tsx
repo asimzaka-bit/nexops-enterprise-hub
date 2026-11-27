@@ -200,9 +200,9 @@ export function AnnouncementBanner({
         <div
           role="region"
           aria-label="Official Company Circulars"
-          className={`border-b px-4 py-2 sm:px-6 lg:px-8 ${severityStyles[activeNotice.severity].wrapper}`}
+          className={`max-w-full overflow-x-clip border-b px-2.5 py-2 sm:px-6 lg:px-8 2xl:px-10 ${severityStyles[activeNotice.severity].wrapper}`}
         >
-          <div className="mx-auto flex max-w-[1360px] flex-wrap items-center justify-between gap-2.5">
+          <div className="mx-auto flex w-full min-w-0 max-w-[1680px] flex-wrap items-center justify-between gap-2.5">
             <div className="flex min-w-0 flex-1 items-start gap-2.5 sm:items-center">
               {activeNotice.severity === 'urgent' ? (
                 <ShieldAlert
@@ -237,7 +237,7 @@ export function AnnouncementBanner({
                   )}
                 </div>
                 {!collapsed && (
-                  <p className="mt-0.5 text-xs leading-relaxed opacity-90">{activeNotice.message}</p>
+                  <p className="mt-0.5 break-words text-xs leading-relaxed opacity-90">{activeNotice.message}</p>
                 )}
               </div>
             </div>
@@ -332,8 +332,8 @@ export function AnnouncementBanner({
         </div>
       ) : (
         /* Compact bar when notices are dismissed or only Super Admin controls are shown */
-        <div className="border-b border-slate-200 bg-slate-100/80 px-4 py-1.5 sm:px-6 lg:px-8 dark:border-slate-800 dark:bg-slate-900/70">
-          <div className="mx-auto flex max-w-[1360px] flex-wrap items-center justify-between gap-2 text-xs">
+        <div className="max-w-full overflow-x-clip border-b border-slate-200 bg-slate-100/80 px-2.5 py-1.5 sm:px-6 lg:px-8 2xl:px-10 dark:border-slate-800 dark:bg-slate-900/70">
+          <div className="mx-auto flex w-full min-w-0 max-w-[1680px] flex-wrap items-center justify-between gap-2 text-xs">
             <span className="inline-flex items-center gap-1.5 text-slate-600 dark:text-slate-400">
               <Info className="h-3.5 w-3.5 text-slate-400 dark:text-slate-500" />
               <span>

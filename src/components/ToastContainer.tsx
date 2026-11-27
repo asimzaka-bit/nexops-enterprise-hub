@@ -11,7 +11,7 @@ export function ToastContainer({ toasts, onDismiss }: ToastContainerProps) {
 
   return (
     <div
-      className="pointer-events-none fixed right-3 bottom-3 left-3 z-50 flex flex-col gap-2.5 sm:left-auto sm:right-6 sm:bottom-6 sm:w-full sm:max-w-sm"
+      className="pointer-events-none fixed right-2.5 bottom-2.5 left-2.5 z-50 flex max-w-[calc(100vw-20px)] flex-col gap-2.5 sm:left-auto sm:right-6 sm:bottom-6 sm:w-full sm:max-w-sm"
       aria-live="polite"
       aria-atomic="true"
     >

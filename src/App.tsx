@@ -8588,7 +8588,13 @@ export default function App() {
             onRestoreAnnouncement={handleRestoreAnnouncement}
           />
 
-          <div className="mx-auto w-full min-w-0 max-w-[1360px] px-3 pt-3 sm:px-6 lg:px-8">
+          <div
+            className={`mx-auto w-full min-w-0 max-w-[1680px] pt-2.5 sm:pt-3 ${
+              viewport.isXs
+                ? 'px-2.5'
+                : 'px-3.5 sm:px-6 lg:px-8 2xl:px-10'
+            }`}
+          >
             <QuickLaunchBar
               bookmarks={quickBookmarks}
               activeSection={activeSection}
@@ -8600,55 +8606,71 @@ export default function App() {
           </div>
 
           {!isOnline && (
-            <div className="mx-3 mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 text-xs text-amber-900 shadow-xs sm:mx-6 lg:mx-8 dark:border-amber-700/70 dark:bg-amber-950/60 dark:text-amber-200">
-              <div className="flex min-w-0 items-center gap-2 font-medium">
-                <WifiOff className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
-                <span>
-                  Offline Mode — Changes queued locally and will auto-sync when reconnected
-                  {pendingSyncCount > 0 ? ` (${pendingSyncCount} pending)` : ''}.
-                </span>
+            <div className="mx-auto mt-3 w-full min-w-0 max-w-[1680px] px-2.5 sm:px-6 lg:px-8 2xl:px-10">
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 text-xs text-amber-900 shadow-xs dark:border-amber-700/70 dark:bg-amber-950/60 dark:text-amber-200">
+                <div className="flex min-w-0 items-center gap-2 font-medium">
+                  <WifiOff className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                  <span>
+                    Offline Mode — Changes queued locally and will auto-sync when reconnected
+                    {pendingSyncCount > 0 ? ` (${pendingSyncCount} pending)` : ''}.
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void handleForceCloudSync()}
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-amber-400/70 bg-white px-2.5 py-1 text-[11px] font-semibold text-amber-900 transition hover:bg-amber-100 dark:border-amber-700 dark:bg-slate-900 dark:text-amber-200 dark:hover:bg-amber-900/40"
+                >
+                  <RefreshCw className="h-3 w-3" />
+                  Retry Sync
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => void handleForceCloudSync()}
-                className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-amber-400/70 bg-white px-2.5 py-1 text-[11px] font-semibold text-amber-900 transition hover:bg-amber-100 dark:border-amber-700 dark:bg-slate-900 dark:text-amber-200 dark:hover:bg-amber-900/40"
-              >
-                <RefreshCw className="h-3 w-3" />
-                Retry Sync
-              </button>
             </div>
           )}
 
           {idleWarningSecondsLeft !== null && (
-            <div className="mx-3 mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-rose-300 bg-rose-50 px-4 py-2.5 text-xs text-rose-900 shadow-xs sm:mx-6 lg:mx-8 dark:border-rose-700/70 dark:bg-rose-950/70 dark:text-rose-200">
-              <div className="flex min-w-0 items-center gap-2 font-medium">
-                <ShieldAlert className="h-4 w-4 shrink-0 text-rose-600 dark:text-rose-400" />
-                <span className="flex items-center gap-1.5">
-                  <Clock className="h-3.5 w-3.5 shrink-0" />
-                  Session inactivity timeout: automatically signing out in{' '}
-                  <strong className="font-bold tabular-nums">{idleWarningSecondsLeft}s</strong>.
-                </span>
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleStaySignedIn}
-                  className="rounded-lg bg-slate-900 px-3 py-1 text-[11px] font-semibold text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
-                >
-                  Stay Signed In
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSignOut}
-                  className="rounded-lg border border-rose-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-rose-700 transition hover:bg-rose-100 dark:border-rose-700 dark:bg-slate-900 dark:text-rose-300 dark:hover:bg-rose-900/40"
-                >
-                  Sign Out Now
-                </button>
+            <div className="mx-auto mt-3 w-full min-w-0 max-w-[1680px] px-2.5 sm:px-6 lg:px-8 2xl:px-10">
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-rose-300 bg-rose-50 px-4 py-2.5 text-xs text-rose-900 shadow-xs dark:border-rose-700/70 dark:bg-rose-950/70 dark:text-rose-200">
+                <div className="flex min-w-0 items-center gap-2 font-medium">
+                  <ShieldAlert className="h-4 w-4 shrink-0 text-rose-600 dark:text-rose-400" />
+                  <span className="flex items-center gap-1.5">
+                    <Clock className="h-3.5 w-3.5 shrink-0" />
+                    Session inactivity timeout: automatically signing out in{' '}
+                    <strong className="font-bold tabular-nums">{idleWarningSecondsLeft}s</strong>.
+                  </span>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleStaySignedIn}
+                    className="rounded-lg bg-slate-900 px-3 py-1 text-[11px] font-semibold text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
+                  >
+                    Stay Signed In
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSignOut}
+                    className="rounded-lg border border-rose-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-rose-700 transition hover:bg-rose-100 dark:border-rose-700 dark:bg-slate-900 dark:text-rose-300 dark:hover:bg-rose-900/40"
+                  >
+                    Sign Out Now
+                  </button>
+                </div>
               </div>
             </div>
           )}
 
-          <main className="mx-auto w-full min-w-0 max-w-[1360px] flex-1 overflow-x-hidden px-3 py-4 sm:px-6 sm:py-6 lg:px-8">
+          <main
+            className={`mx-auto w-full min-w-0 max-w-[1680px] flex-1 overflow-x-clip ${
+              viewport.breakpoint === 'xs'
+                ? 'px-2.5 py-3'
+                : viewport.breakpoint === 'sm'
+                  ? 'px-3.5 py-4'
+                  : viewport.breakpoint === 'md'
+                    ? 'px-5 py-5'
+                    : viewport.breakpoint === 'xl'
+                      ? 'px-8 py-6 2xl:px-10'
+                      : 'px-6 py-6 lg:px-8'
+            }`}
+          >
             {isHydrating ? (
               <WorkspaceSkeleton />
             ) : (
