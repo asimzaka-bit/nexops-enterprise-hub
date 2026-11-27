@@ -43,6 +43,8 @@ interface AnnouncementBannerProps {
   }) => void;
   onArchiveAnnouncement: (announcementId: string) => void;
   onRestoreAnnouncement: (announcementId: string) => void;
+  highlightedNoticeId?: string | null;
+  onClearHighlightedNotice?: () => void;
 }
 
 export function AnnouncementBanner({
@@ -52,6 +54,8 @@ export function AnnouncementBanner({
   onPublishAnnouncement,
   onArchiveAnnouncement,
   onRestoreAnnouncement,
+  highlightedNoticeId,
+  onClearHighlightedNotice,
 }: AnnouncementBannerProps) {
   const isSuperAdmin = activeRole === 'Admin' && isSuperAdminEmail(currentUserEmail);
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -102,6 +106,25 @@ export function AnnouncementBanner({
 
   const safeIndex = activeNotices.length > 0 ? currentIndex % activeNotices.length : 0;
   const activeNotice = activeNotices[safeIndex];
+
+  useEffect(() => {
+    if (!highlightedNoticeId) return;
+    if (dismissedSet.has(highlightedNoticeId)) {
+      const next = dismissedIds.filter((id) => id !== highlightedNoticeId);
+      setDismissedIds(next);
+      saveDismissedAnnouncementIds(currentUserEmail, next);
+    }
+    const idx = allLiveNotices.findIndex((n) => n.id === highlightedNoticeId);
+    if (idx >= 0) {
+      setCollapsed(false);
+      const visibleAfter = allLiveNotices.filter(
+        (n) => n.id === highlightedNoticeId || !dismissedSet.has(n.id),
+      );
+      const visibleIdx = visibleAfter.findIndex((n) => n.id === highlightedNoticeId);
+      setCurrentIndex(visibleIdx >= 0 ? visibleIdx : 0);
+    }
+    onClearHighlightedNotice?.();
+  }, [highlightedNoticeId, allLiveNotices, dismissedIds, dismissedSet, currentUserEmail, onClearHighlightedNotice]);
 
   const handleDismissNotice = (noticeId: string) => {
     const next = Array.from(new Set([...dismissedIds, noticeId]));

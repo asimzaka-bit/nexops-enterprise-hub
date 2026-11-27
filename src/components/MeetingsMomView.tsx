@@ -15,7 +15,7 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import {
   Department,
   MeetingActionItem,
@@ -87,6 +87,8 @@ interface MeetingsMomViewProps {
   onInspectRequest: (requestId: string) => void;
   onStampMeeting?: (meetingId: string) => void;
   onDeleteMeeting?: (meetingId: string) => void;
+  jumpToMeetingId?: string | null;
+  onClearJumpMeeting?: () => void;
 }
 
 const PRIORITIES: Priority[] = ['Low', 'Medium', 'High', 'Urgent'];
@@ -112,6 +114,8 @@ export function MeetingsMomView({
   onInspectRequest,
   onStampMeeting,
   onDeleteMeeting,
+  jumpToMeetingId,
+  onClearJumpMeeting,
 }: MeetingsMomViewProps) {
   const canManage = activeRole === 'Admin' || activeRole === 'Editor';
   const todayStr = getTodayDateString();
@@ -144,6 +148,17 @@ export function MeetingsMomView({
   const [searchQuery, setSearchQuery] = useState('');
   const [deptFilter, setDeptFilter] = useState<string>('All');
   const [openActionsOnly, setOpenActionsOnly] = useState(false);
+
+  useEffect(() => {
+    if (!jumpToMeetingId) return;
+    const matched = meetings.find((m) => m.id === jumpToMeetingId);
+    if (matched) {
+      setDeptFilter('All');
+      setOpenActionsOnly(false);
+      setSearchQuery(matched.code || matched.title);
+    }
+    onClearJumpMeeting?.();
+  }, [jumpToMeetingId, meetings, onClearJumpMeeting]);
 
   // Create Meeting Modal state
   const [createOpen, setCreateOpen] = useState(false);

@@ -185,6 +185,8 @@ export interface DigitalApprovalStamp {
   badgeLabel: string;
 }
 
+export type WorkflowApprovalStatus = 'Submitted' | 'Under Review' | 'Approved' | 'Rejected';
+
 export interface SopDocument {
   id: string;
   code: string;
@@ -202,6 +204,10 @@ export interface SopDocument {
   acknowledgments: SopAcknowledgment[];
   versions?: DocumentVersionEntry[];
   approvalStamp?: DigitalApprovalStamp;
+  workflowStatus?: WorkflowApprovalStatus;
+  rejectionReason?: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
   updatedAt: string;
 }
 
@@ -290,7 +296,7 @@ export type LeaveType =
   | 'Casual / Personal'
   | 'Parental / Emergency';
 
-export type LeaveStatus = 'Pending' | 'Approved' | 'Rejected';
+export type LeaveStatus = 'Submitted' | 'Pending' | 'Under Review' | 'Approved' | 'Rejected';
 
 export interface LeaveRequest {
   id: string;
@@ -307,7 +313,10 @@ export interface LeaveRequest {
   status: LeaveStatus;
   backupDelegateName?: string;
   reviewerName?: string;
+  reviewerEmail?: string;
   reviewerNotes?: string;
+  rejectionReason?: string;
+  reviewedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -374,7 +383,13 @@ export type DocumentVaultAccessTag =
 
 export type DocumentVaultSourceType = 'google_drive' | 'external_link' | 'uploaded_file';
 
-export type DocumentSignOffStatus = 'Pending' | 'Acknowledged';
+export type DocumentSignOffStatus =
+  | 'Submitted'
+  | 'Pending'
+  | 'Under Review'
+  | 'Approved'
+  | 'Acknowledged'
+  | 'Rejected';
 
 export interface DocumentSignOffRequest {
   id: string;
@@ -386,6 +401,9 @@ export interface DocumentSignOffRequest {
   status: DocumentSignOffStatus;
   signedOffAt?: string;
   note?: string;
+  rejectionReason?: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
 }
 
 export interface DocumentVaultItem {
@@ -409,6 +427,10 @@ export interface DocumentVaultItem {
   currentVersion?: string;
   versions?: DocumentVersionEntry[];
   approvalStamp?: DigitalApprovalStamp;
+  workflowStatus?: WorkflowApprovalStatus;
+  rejectionReason?: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
   expiryDate?: string;
   signOffRequests?: DocumentSignOffRequest[];
   createdAt: string;
@@ -737,6 +759,9 @@ export interface OperationalRequest {
   stage2Approval?: ApprovalStageSignOff;
   checklist: ChecklistItem[];
   revisionReason?: string;
+  rejectionReason?: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
   auditTrail: AuditEvent[];
 }
 

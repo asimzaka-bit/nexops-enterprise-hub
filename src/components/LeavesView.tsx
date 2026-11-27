@@ -12,6 +12,7 @@ import {
   LogIn,
   LogOut,
   Plus,
+  Printer,
   Save,
   Search,
   SlidersHorizontal,
@@ -32,15 +33,20 @@ import {
   TeamMember,
 } from '../types/nexops';
 import {
+  AttendanceSummaryRow,
+  buildAttendanceSummaryRows,
   calculatePunctualityStats,
   evaluateAttendanceTags,
   exportAttendanceLogsCsv,
+  exportAttendanceSummaryCsv,
   formatDateTime,
   formatShortDate,
   formatTime12hFromHHMM,
   getShiftForDepartment,
   getTodayDateString,
+  hasWorkspacePermission,
   isLeavePendingOver24h,
+  isLeavePendingStatus,
   isSuperAdminEmail,
   normalizeShiftRosters,
 } from '../utils/storage';
@@ -69,9 +75,18 @@ interface LeavesViewProps {
   onCreateLeave: (payload: CreateLeavePayload) => void;
   onDecisionLeave: (
     leaveId: string,
-    decision: 'Approved' | 'Rejected',
+    decision: 'Under Review' | 'Approved' | 'Rejected',
     reviewerNotes?: string,
   ) => void;
+  onOpenAttendancePrintModal?: (payload: {
+    startDate: string;
+    endDate: string;
+    department: string;
+    rows: AttendanceSummaryRow[];
+  }) => void;
+  onDenyPermission?: (actionLabel: string, requiredRole: string) => void;
+  jumpQuery?: string | null;
+  onClearJumpQuery?: () => void;
 }
 
 const LEAVE_TYPES: LeaveType[] = ['Casual', 'Sick', 'Annual'];
@@ -112,14 +127,22 @@ export function LeavesView({
   onClockOut,
   onCreateLeave,
   onDecisionLeave,
+  onOpenAttendancePrintModal,
+  onDenyPermission,
+  jumpQuery,
+  onClearJumpQuery,
 }: LeavesViewProps) {
   const isAdmin = activeRole === 'Admin';
   const isSuperAdmin = isAdmin && isSuperAdminEmail(currentUser.email);
-  void permissionMatrix;
-  const isViewer = !isAdmin;
-  const canSubmitLeave = isAdmin;
+  const isViewer = activeRole === 'Viewer';
+  const canSubmitLeave =
+    currentUser.active !== false &&
+    (activeRole === 'Admin' || activeRole === 'Editor') &&
+    hasWorkspacePermission(activeRole, currentUser.email, permissionMatrix, 'create_requests');
   const canClockAction = Boolean(currentUser.email.trim()) && currentUser.active !== false;
-  const canApproveLeaves = isAdmin;
+  const canApproveLeaves =
+    isAdmin &&
+    hasWorkspacePermission(activeRole, currentUser.email, permissionMatrix, 'approve_leaves');
 
   const normalizedRosters = useMemo(
     () => normalizeShiftRosters(shiftRosters, departments),
@@ -153,15 +176,28 @@ export function LeavesView({
   const [attendanceSearch, setAttendanceSearch] = useState('');
   const [attendanceDateFilter, setAttendanceDateFilter] = useState<string>('');
 
+  // Automated Attendance & Punctuality Summary filters
+  const today = getTodayDateString();
+  const [summaryStartDate, setSummaryStartDate] = useState(() => `${today.slice(0, 8)}01`);
+  const [summaryEndDate, setSummaryEndDate] = useState(today);
+  const [summaryDept, setSummaryDept] = useState<string>('All');
+
+  useEffect(() => {
+    if (!jumpQuery) return;
+    setSearchQuery(jumpQuery);
+    setAttendanceSearch(jumpQuery);
+    onClearJumpQuery?.();
+  }, [jumpQuery, onClearJumpQuery]);
+
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [decisionTarget, setDecisionTarget] = useState<{
     leave: LeaveRequest;
     decision: 'Approved' | 'Rejected';
   } | null>(null);
   const [decisionNotes, setDecisionNotes] = useState('');
+  const [decisionError, setDecisionError] = useState<string | null>(null);
 
   // Create Leave Form state
-  const today = getTodayDateString();
   const [leaveType, setLeaveType] = useState<LeaveType>('Casual');
   const [startDate, setStartDate] = useState(today);
   const [endDate, setEndDate] = useState(today);
@@ -270,8 +306,61 @@ export function LeavesView({
     return result;
   }, [attendanceLogs, normalizedRosters]);
 
+  const attendanceSummaryRows = useMemo(() => {
+    const allRows = buildAttendanceSummaryRows({
+      attendanceLogs,
+      leaves,
+      teamMembers,
+      shiftRosters: normalizedRosters,
+      startDate: summaryStartDate,
+      endDate: summaryEndDate,
+      department: isAdmin ? summaryDept : 'All',
+    });
+    if (isAdmin) return allRows;
+    const emailLower = currentUser.email.trim().toLowerCase();
+    const nameLower = currentUser.name.trim().toLowerCase();
+    return allRows.filter(
+      (r) =>
+        (r.email && emailLower && r.email.trim().toLowerCase() === emailLower) ||
+        r.employeeId === currentUser.employeeId ||
+        r.name.trim().toLowerCase() === nameLower,
+    );
+  }, [
+    attendanceLogs,
+    leaves,
+    teamMembers,
+    normalizedRosters,
+    summaryStartDate,
+    summaryEndDate,
+    isAdmin,
+    summaryDept,
+    currentUser.email,
+    currentUser.employeeId,
+    currentUser.name,
+  ]);
+
+  const summaryTotals = useMemo(() => {
+    const totalHours = attendanceSummaryRows.reduce((s, r) => s + r.totalHours, 0);
+    const totalLate = attendanceSummaryRows.reduce((s, r) => s + r.lateCount, 0);
+    const totalEarlyOut = attendanceSummaryRows.reduce((s, r) => s + r.earlyOutCount, 0);
+    const avgPunctuality =
+      attendanceSummaryRows.length > 0
+        ? Math.round(
+            attendanceSummaryRows.reduce((s, r) => s + r.punctualityScore, 0) /
+              attendanceSummaryRows.length,
+          )
+        : 100;
+    return {
+      staffCount: attendanceSummaryRows.length,
+      totalHours: Number(totalHours.toFixed(2)),
+      totalLate,
+      totalEarlyOut,
+      avgPunctuality,
+    };
+  }, [attendanceSummaryRows]);
+
   const metrics = useMemo(() => {
-    const pendingCount = scopedLeaves.filter((l) => l.status === 'Pending').length;
+    const pendingCount = scopedLeaves.filter((l) => isLeavePendingStatus(l.status)).length;
     const approvedCount = scopedLeaves.filter((l) => l.status === 'Approved').length;
     const presentTodayCount = attendanceLogs.filter(
       (a) => a.attendanceDate === today,
@@ -306,6 +395,10 @@ export function LeavesView({
   }, [scopedLeaves, searchQuery, statusFilter, departmentFilter, nowTick]);
 
   const handleOpenCreate = () => {
+    if (!canSubmitLeave) {
+      onDenyPermission?.('Submit Leave Request', 'Editor or Super Admin');
+      return;
+    }
     setLeaveType('Casual');
     setStartDate(today);
     setEndDate(today);
@@ -317,7 +410,10 @@ export function LeavesView({
 
   const handleCreateSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if (!canSubmitLeave) return;
+    if (!canSubmitLeave) {
+      onDenyPermission?.('Submit Leave Request', 'Editor or Super Admin');
+      return;
+    }
     if (!startDate || !endDate) {
       setFormError('Start date and end date are required.');
       return;
@@ -345,16 +441,23 @@ export function LeavesView({
   const handleDecisionSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (!decisionTarget) return;
-    if (decisionTarget.decision === 'Rejected' && !decisionNotes.trim()) {
+    if (!canApproveLeaves) {
+      onDenyPermission?.('Approve / Reject Leave Requests', 'Super Admin');
+      return;
+    }
+    const trimmedNotes = decisionNotes.trim();
+    if (decisionTarget.decision === 'Rejected' && trimmedNotes.length < 3) {
+      setDecisionError('Please enter a clear rejection reason (minimum 3 characters).');
       return;
     }
     onDecisionLeave(
       decisionTarget.leave.id,
       decisionTarget.decision,
-      decisionNotes.trim() || undefined,
+      trimmedNotes || undefined,
     );
     setDecisionTarget(null);
     setDecisionNotes('');
+    setDecisionError(null);
   };
 
   const getStatusBadge = (status: LeaveStatus) => {
@@ -374,10 +477,18 @@ export function LeavesView({
         </span>
       );
     }
+    if (status === 'Under Review') {
+      return (
+        <span className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/50 dark:text-amber-300">
+          <Clock className="h-3 w-3" />
+          Under Review
+        </span>
+      );
+    }
     return (
-      <span className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/50 dark:text-amber-300">
+      <span className="inline-flex items-center gap-1 rounded-md border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-700 dark:border-indigo-900/60 dark:bg-indigo-950/50 dark:text-indigo-300">
         <Clock className="h-3 w-3" />
-        Pending Review
+        {status === 'Submitted' ? 'Submitted' : 'Pending Review'}
       </span>
     );
   };
@@ -696,6 +807,269 @@ export function LeavesView({
         </div>
       </div>
 
+      {/* Automated Attendance & Punctuality Summary Reports */}
+      <section className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+        <div className="flex flex-col gap-3 border-b border-slate-200 bg-slate-900 px-4 py-4 text-white sm:px-6 lg:flex-row lg:items-center lg:justify-between dark:border-slate-800">
+          <div className="min-w-0">
+            <h2 className="font-display text-base font-bold">
+              Attendance &amp; Punctuality Summary
+            </h2>
+            <p className="mt-0.5 text-xs text-slate-300">
+              {isAdmin
+                ? 'Automated per-employee total working hours, late check-ins, early outs, punctuality %, and leave status'
+                : 'Your verified working hours, punctuality percentage, and leave status across the selected date window'}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/10 px-2.5 py-1 text-xs">
+              <span className="text-[10px] font-semibold text-slate-300">From</span>
+              <input
+                type="date"
+                aria-label="Summary start date"
+                value={summaryStartDate}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setSummaryStartDate(next);
+                  if (summaryEndDate && next && summaryEndDate < next) {
+                    setSummaryEndDate(next);
+                  }
+                }}
+                className="bg-transparent font-mono text-xs text-white focus:outline-none"
+              />
+            </div>
+            <div className="flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/10 px-2.5 py-1 text-xs">
+              <span className="text-[10px] font-semibold text-slate-300">To</span>
+              <input
+                type="date"
+                aria-label="Summary end date"
+                min={summaryStartDate}
+                value={summaryEndDate}
+                onChange={(e) => setSummaryEndDate(e.target.value)}
+                className="bg-transparent font-mono text-xs text-white focus:outline-none"
+              />
+            </div>
+            {isAdmin && (
+              <select
+                aria-label="Filter summary by department"
+                value={summaryDept}
+                onChange={(e) => setSummaryDept(e.target.value)}
+                className="h-8 rounded-lg border border-white/20 bg-slate-800 px-2.5 text-xs font-medium text-white focus:outline-none"
+              >
+                <option value="All">All Departments</option>
+                {departments.map((dept) => (
+                  <option key={dept} value={dept}>
+                    {dept}
+                  </option>
+                ))}
+              </select>
+            )}
+            <button
+              type="button"
+              onClick={() =>
+                exportAttendanceSummaryCsv({
+                  companyName: 'NexOps Enterprise Hub',
+                  startDate: summaryStartDate,
+                  endDate: summaryEndDate,
+                  department: isAdmin
+                    ? summaryDept === 'All'
+                      ? 'All Departments'
+                      : summaryDept
+                    : currentUser.department,
+                  preparedBy: `${currentUser.name} (${currentUser.employeeId})`,
+                  rows: attendanceSummaryRows,
+                })
+              }
+              disabled={attendanceSummaryRows.length === 0}
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-white/20 bg-white/10 px-3 text-xs font-semibold text-white transition-colors hover:bg-white/20 disabled:opacity-50"
+            >
+              <Download className="h-3.5 w-3.5" />
+              <span>Export CSV</span>
+            </button>
+            {onOpenAttendancePrintModal && (
+              <button
+                type="button"
+                onClick={() =>
+                  onOpenAttendancePrintModal({
+                    startDate: summaryStartDate,
+                    endDate: summaryEndDate,
+                    department: isAdmin ? summaryDept : currentUser.department,
+                    rows: attendanceSummaryRows,
+                  })
+                }
+                disabled={attendanceSummaryRows.length === 0}
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-white px-3 text-xs font-semibold text-slate-900 transition-colors hover:bg-slate-100 disabled:opacity-50"
+              >
+                <Printer className="h-3.5 w-3.5" />
+                <span>Print Summary</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Summary KPI Strip */}
+        <div className="grid grid-cols-2 gap-3 border-b border-slate-200 bg-slate-50/80 px-4 py-3 sm:grid-cols-5 sm:px-6 dark:border-slate-800 dark:bg-slate-950/60">
+          <div>
+            <p className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">Employees</p>
+            <p className="font-mono text-sm font-bold text-slate-900 tabular-nums dark:text-slate-100">
+              {summaryTotals.staffCount}
+            </p>
+          </div>
+          <div>
+            <p className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">Total Hours</p>
+            <p className="font-mono text-sm font-bold text-indigo-700 tabular-nums dark:text-indigo-400">
+              {summaryTotals.totalHours.toFixed(2)}h
+            </p>
+          </div>
+          <div>
+            <p className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">Late Check-Ins</p>
+            <p className="font-mono text-sm font-bold text-amber-700 tabular-nums dark:text-amber-400">
+              {summaryTotals.totalLate}
+            </p>
+          </div>
+          <div>
+            <p className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">Early Outs</p>
+            <p className="font-mono text-sm font-bold text-rose-700 tabular-nums dark:text-rose-400">
+              {summaryTotals.totalEarlyOut}
+            </p>
+          </div>
+          <div className="col-span-2 sm:col-span-1">
+            <p className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">Avg Punctuality</p>
+            <p className="font-mono text-sm font-bold text-emerald-700 tabular-nums dark:text-emerald-400">
+              {summaryTotals.avgPunctuality}%
+            </p>
+          </div>
+        </div>
+
+        {attendanceSummaryRows.length === 0 ? (
+          <div className="px-6 py-8 text-center text-xs text-slate-500 dark:text-slate-400">
+            No attendance or team records matched the selected date range and department filter.
+          </div>
+        ) : (
+          <>
+            {/* Tablet / Desktop Summary Table */}
+            <div className="hidden overflow-x-auto md:block">
+              <table className="w-full min-w-[760px] border-collapse text-left text-xs">
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-50 font-semibold text-slate-600 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-400">
+                    <th className="py-2.5 pr-3 pl-6">Employee</th>
+                    <th className="px-3 py-2.5">Department</th>
+                    <th className="px-3 py-2.5">Present Days</th>
+                    <th className="px-3 py-2.5">Total Working Hours</th>
+                    <th className="px-3 py-2.5">Late Count</th>
+                    <th className="px-3 py-2.5">Early Out Count</th>
+                    <th className="px-3 py-2.5">Punctuality %</th>
+                    <th className="py-2.5 pr-6 pl-3 text-right">Leave Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {attendanceSummaryRows.map((row) => (
+                    <tr key={row.key} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40">
+                      <td className="py-3 pr-3 pl-6">
+                        <p className="font-semibold text-slate-900 dark:text-slate-100">{row.name}</p>
+                        <p className="font-mono text-[10px] text-slate-400 dark:text-slate-500">
+                          {row.employeeId}
+                        </p>
+                      </td>
+                      <td className="px-3 py-3 text-slate-600 dark:text-slate-300">{row.department}</td>
+                      <td className="px-3 py-3 font-mono font-semibold text-slate-800 tabular-nums dark:text-slate-200">
+                        {row.presentDays}
+                      </td>
+                      <td className="px-3 py-3 font-mono font-bold text-indigo-700 tabular-nums dark:text-indigo-400">
+                        {row.totalHours.toFixed(2)} hrs
+                      </td>
+                      <td className="px-3 py-3 font-mono font-semibold text-amber-700 tabular-nums dark:text-amber-400">
+                        {row.lateCount}
+                      </td>
+                      <td className="px-3 py-3 font-mono font-semibold text-rose-700 tabular-nums dark:text-rose-400">
+                        {row.earlyOutCount}
+                      </td>
+                      <td className="px-3 py-3">
+                        <span
+                          className={`inline-flex items-center rounded border px-2 py-0.5 font-mono text-[11px] font-bold tabular-nums ${
+                            row.punctualityScore >= 90
+                              ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/50 dark:text-emerald-300'
+                              : row.punctualityScore >= 70
+                                ? 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/50 dark:text-amber-300'
+                                : 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/50 dark:text-rose-300'
+                          }`}
+                        >
+                          {row.punctualityScore}%
+                        </span>
+                      </td>
+                      <td className="py-3 pr-6 pl-3 text-right">
+                        <span
+                          className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-semibold ${
+                            row.leaveStatus.startsWith('On Leave')
+                              ? 'border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-900/60 dark:bg-indigo-950/50 dark:text-indigo-300'
+                              : row.leaveStatus.includes('Pending') || row.leaveStatus.includes('Review')
+                                ? 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/50 dark:text-amber-300'
+                                : 'border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                          }`}
+                        >
+                          {row.leaveStatus}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile Card Stack (Zero Overflow) */}
+            <div className="divide-y divide-slate-100 md:hidden dark:divide-slate-800">
+              {attendanceSummaryRows.map((row) => (
+                <div key={row.key} className="space-y-2 p-4">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-xs font-bold text-slate-900 dark:text-slate-100">
+                        {row.name}
+                      </p>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        {row.employeeId} · {row.department}
+                      </p>
+                    </div>
+                    <span
+                      className={`shrink-0 rounded border px-2 py-0.5 font-mono text-[11px] font-bold tabular-nums ${
+                        row.punctualityScore >= 90
+                          ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/50 dark:text-emerald-300'
+                          : row.punctualityScore >= 70
+                            ? 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/50 dark:text-amber-300'
+                            : 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/50 dark:text-rose-300'
+                      }`}
+                    >
+                      {row.punctualityScore}%
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 rounded-lg border border-slate-200 bg-slate-50/70 p-2 text-[11px] dark:border-slate-800 dark:bg-slate-950/60">
+                    <div>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400">Hours ({row.presentDays}d)</p>
+                      <p className="font-mono font-bold text-indigo-700 dark:text-indigo-400">
+                        {row.totalHours.toFixed(1)}h
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400">Late</p>
+                      <p className="font-mono font-bold text-amber-700 dark:text-amber-400">
+                        {row.lateCount}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400">Early Out</p>
+                      <p className="font-mono font-bold text-rose-700 dark:text-rose-400">
+                        {row.earlyOutCount}
+                      </p>
+                    </div>
+                  </div>
+                  <p className="text-[11px] font-medium text-slate-600 dark:text-slate-300">
+                    Leave Status: <span className="font-semibold">{row.leaveStatus}</span>
+                  </p>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </section>
+
       {/* Staff Attendance Logs Table */}
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
         <div className="flex flex-col gap-3 border-b border-slate-200 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6 dark:border-slate-800">
@@ -877,6 +1251,8 @@ export function LeavesView({
             className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
           >
             <option value="All">All Statuses</option>
+            <option value="Submitted">Submitted</option>
+            <option value="Under Review">Under Review</option>
             <option value="Pending">Pending Review</option>
             <option value="Approved">Approved</option>
             <option value="Rejected">Rejected</option>
@@ -897,16 +1273,18 @@ export function LeavesView({
           </select>
         </div>
 
-        {canSubmitLeave && (
-          <button
-            type="button"
-            onClick={handleOpenCreate}
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 text-xs font-semibold text-white transition-colors hover:bg-indigo-700 whitespace-nowrap"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            <span>Request Leave</span>
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={handleOpenCreate}
+          className={`inline-flex h-9 items-center gap-1.5 rounded-lg px-3.5 text-xs font-semibold whitespace-nowrap transition-colors ${
+            canSubmitLeave
+              ? 'bg-indigo-600 text-white hover:bg-indigo-700'
+              : 'cursor-not-allowed border border-slate-200 bg-slate-100 text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400'
+          }`}
+        >
+          <Plus className="h-3.5 w-3.5" />
+          <span>Request Leave</span>
+        </button>
       </div>
 
       {/* Leaves Registry Table */}
@@ -919,15 +1297,15 @@ export function LeavesView({
             <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
               Showing {filteredLeaves.length} of {scopedLeaves.length} leave records ·{' '}
               {canApproveLeaves
-                ? '1-click Admin / manager approval enabled'
+                ? 'Submitted → Under Review → Approved / Rejected workflow'
                 : 'Synced to Supabase leave_requests'}
             </p>
           </div>
           {!canApproveLeaves && (
             <span className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
               {isViewer
-                ? 'Read-only access (Viewer)'
-                : 'Showing your submitted leave requests'}
+                ? 'Viewer (Read-Only) — Leave submissions restricted'
+                : 'Editor — Can submit leaves; Super Admin handles final approval'}
             </span>
           )}
         </div>
@@ -954,101 +1332,121 @@ export function LeavesView({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {filteredLeaves.map((leave) => (
-                  <tr key={leave.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/50">
-                    <td className="py-3.5 pr-3 pl-6 align-top">
-                      <span className="font-mono text-xs font-bold text-indigo-700 tabular-nums whitespace-nowrap dark:text-indigo-400">
-                        {leave.code}
-                      </span>
-                      <p className="mt-0.5 font-mono text-[10px] text-slate-400 tabular-nums dark:text-slate-500">
-                        {leave.employeeId}
-                      </p>
-                    </td>
-                    <td className="px-3 py-3.5 align-top">
-                      <p className="text-xs font-semibold text-slate-900 dark:text-slate-100">{leave.employeeName}</p>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400">{leave.department}</p>
-                    </td>
-                    <td className="px-3 py-3.5 align-top">
-                      <span className="inline-block rounded border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                        {leave.leaveType}
-                      </span>
-                      <p className="mt-1 font-mono text-[11px] text-slate-700 tabular-nums whitespace-nowrap dark:text-slate-300">
-                        {formatShortDate(leave.startDate)} → {formatShortDate(leave.endDate)}
-                      </p>
-                      <p className="font-mono text-[10px] font-semibold text-slate-500 tabular-nums dark:text-slate-400">
-                        {leave.totalDays} day{leave.totalDays === 1 ? '' : 's'}
-                      </p>
-                    </td>
-                    <td className="max-w-xs px-3 py-3.5 align-top">
-                      <p className="text-xs text-slate-700 dark:text-slate-300">{leave.reason}</p>
-                      {leave.backupDelegateName && (
-                        <p className="mt-1 text-[11px] font-medium text-indigo-700 dark:text-indigo-400">
-                          Backup Coverage: {leave.backupDelegateName}
+                {filteredLeaves.map((leave) => {
+                  const isOpenLeave = isLeavePendingStatus(leave.status);
+                  const visibleRejectionText =
+                    leave.status === 'Rejected' ? leave.rejectionReason || leave.reviewerNotes : undefined;
+                  return (
+                    <tr key={leave.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/50">
+                      <td className="py-3.5 pr-3 pl-6 align-top">
+                        <span className="font-mono text-xs font-bold text-indigo-700 tabular-nums whitespace-nowrap dark:text-indigo-400">
+                          {leave.code}
+                        </span>
+                        <p className="mt-0.5 font-mono text-[10px] text-slate-400 tabular-nums dark:text-slate-500">
+                          {leave.employeeId}
                         </p>
-                      )}
-                      {leave.reviewerNotes && (
-                        <p className="mt-1 rounded border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                          <span className="font-semibold">{leave.reviewerName || 'Reviewer'}:</span>{' '}
-                          {leave.reviewerNotes}
+                      </td>
+                      <td className="px-3 py-3.5 align-top">
+                        <p className="text-xs font-semibold text-slate-900 dark:text-slate-100">{leave.employeeName}</p>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">{leave.department}</p>
+                      </td>
+                      <td className="px-3 py-3.5 align-top">
+                        <span className="inline-block rounded border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                          {leave.leaveType}
+                        </span>
+                        <p className="mt-1 font-mono text-[11px] text-slate-700 tabular-nums whitespace-nowrap dark:text-slate-300">
+                          {formatShortDate(leave.startDate)} → {formatShortDate(leave.endDate)}
                         </p>
-                      )}
-                    </td>
-                    <td className="px-3 py-3.5 align-top whitespace-nowrap">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        {getStatusBadge(leave.status)}
-                        {isLeavePendingOver24h(leave, nowTick.getTime()) && (
-                          <span
-                            title="Leave request pending review for more than 24 hours"
-                            className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-rose-50 px-2 py-0.5 text-[10px] font-bold text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/60 dark:text-rose-300"
-                          >
-                            <AlertTriangle className="h-3 w-3" />
-                            <span>SLA Overdue</span>
+                        <p className="font-mono text-[10px] font-semibold text-slate-500 tabular-nums dark:text-slate-400">
+                          {leave.totalDays} day{leave.totalDays === 1 ? '' : 's'}
+                        </p>
+                      </td>
+                      <td className="max-w-xs px-3 py-3.5 align-top">
+                        <p className="text-xs text-slate-700 dark:text-slate-300">{leave.reason}</p>
+                        {leave.backupDelegateName && (
+                          <p className="mt-1 text-[11px] font-medium text-indigo-700 dark:text-indigo-400">
+                            Backup Coverage: {leave.backupDelegateName}
+                          </p>
+                        )}
+                        {visibleRejectionText && (
+                          <div className="mt-1.5 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-[11px] text-rose-800 dark:border-rose-900/60 dark:bg-rose-950/50 dark:text-rose-200">
+                            <p className="font-bold">
+                              Rejection Reason
+                              {leave.reviewerName ? ` · ${leave.reviewerName}` : ''}
+                            </p>
+                            <p className="mt-0.5">{visibleRejectionText}</p>
+                          </div>
+                        )}
+                        {!visibleRejectionText && leave.reviewerNotes && (
+                          <p className="mt-1 rounded border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                            <span className="font-semibold">{leave.reviewerName || 'Reviewer'}:</span>{' '}
+                            {leave.reviewerNotes}
+                          </p>
+                        )}
+                      </td>
+                      <td className="px-3 py-3.5 align-top whitespace-nowrap">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {getStatusBadge(leave.status)}
+                          {isLeavePendingOver24h(leave, nowTick.getTime()) && (
+                            <span
+                              title="Leave request pending review for more than 24 hours"
+                              className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-rose-50 px-2 py-0.5 text-[10px] font-bold text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/60 dark:text-rose-300"
+                            >
+                              <AlertTriangle className="h-3 w-3" />
+                              <span>SLA Overdue</span>
+                            </span>
+                          )}
+                        </div>
+                        {leave.reviewerName && !isOpenLeave && (
+                          <p className="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
+                            By {leave.reviewerName}
+                            {leave.reviewedAt ? ` · ${formatDateTime(leave.reviewedAt)}` : ''}
+                          </p>
+                        )}
+                      </td>
+                      <td className="py-3.5 pr-6 pl-3 text-right align-top whitespace-nowrap">
+                        {isOpenLeave && canApproveLeaves ? (
+                          <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
+                            {leave.status !== 'Under Review' && (
+                              <button
+                                type="button"
+                                onClick={() => onDecisionLeave(leave.id, 'Under Review')}
+                                className="inline-flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100 dark:border-amber-900/60 dark:bg-amber-950/50 dark:text-amber-300"
+                              >
+                                <Clock className="h-3.5 w-3.5" />
+                                Review
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => onDecisionLeave(leave.id, 'Approved')}
+                              className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700"
+                            >
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                              Approve
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDecisionNotes('');
+                                setDecisionError(null);
+                                setDecisionTarget({ leave, decision: 'Rejected' });
+                              }}
+                              className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100 dark:border-rose-900/60 dark:bg-rose-950/50 dark:text-rose-300 dark:hover:bg-rose-900/60"
+                            >
+                              <XCircle className="h-3.5 w-3.5" />
+                              Reject
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-[11px] font-medium text-slate-400 dark:text-slate-500">
+                            {isOpenLeave ? 'Awaiting Super Admin Review' : 'Decision Logged'}
                           </span>
                         )}
-                      </div>
-                      {leave.reviewerName && leave.status !== 'Pending' && (
-                        <p className="mt-1 text-[10px] text-slate-500 dark:text-slate-400">By {leave.reviewerName}</p>
-                      )}
-                    </td>
-                    <td className="py-3.5 pr-6 pl-3 text-right align-top whitespace-nowrap">
-                      {leave.status === 'Pending' && canApproveLeaves ? (
-                        <div className="inline-flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => onDecisionLeave(leave.id, 'Approved')}
-                            className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700"
-                          >
-                            <CheckCircle2 className="h-3.5 w-3.5" />
-                            Approve
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => onDecisionLeave(leave.id, 'Rejected')}
-                            className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100 dark:border-rose-900/60 dark:bg-rose-950/50 dark:text-rose-300 dark:hover:bg-rose-900/60"
-                          >
-                            <XCircle className="h-3.5 w-3.5" />
-                            Reject
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setDecisionNotes('');
-                              setDecisionTarget({ leave, decision: 'Rejected' });
-                            }}
-                            title="Decide with written remarks"
-                            className="rounded-lg border border-slate-200 px-2 py-1.5 text-[11px] font-medium text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
-                          >
-                            Note
-                          </button>
-                        </div>
-                      ) : (
-                        <span className="text-[11px] font-medium text-slate-400 dark:text-slate-500">
-                          {leave.status === 'Pending' ? 'Awaiting Review' : 'Decision Logged'}
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -1238,6 +1636,15 @@ export function LeavesView({
             </div>
 
             <form onSubmit={handleDecisionSubmit} className="flex-1 space-y-4 overflow-y-auto p-4 sm:p-6">
+              {decisionError && (
+                <div
+                  role="alert"
+                  className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-800 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300"
+                >
+                  {decisionError}
+                </div>
+              )}
+
               <div>
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
                   Decision Action
@@ -1247,9 +1654,10 @@ export function LeavesView({
                     <button
                       key={opt}
                       type="button"
-                      onClick={() =>
-                        setDecisionTarget((prev) => (prev ? { ...prev, decision: opt } : prev))
-                      }
+                      onClick={() => {
+                        setDecisionError(null);
+                        setDecisionTarget((prev) => (prev ? { ...prev, decision: opt } : prev));
+                      }}
                       className={`rounded-lg border px-3 py-2 text-xs font-semibold ${
                         decisionTarget.decision === opt
                           ? opt === 'Approved'
@@ -1266,7 +1674,9 @@ export function LeavesView({
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                  Reviewer Decision Remarks{' '}
+                  {decisionTarget.decision === 'Rejected'
+                    ? 'Mandatory Rejection Reason'
+                    : 'Reviewer Decision Remarks'}{' '}
                   {decisionTarget.decision === 'Rejected' && (
                     <span className="text-rose-600 dark:text-rose-400">*</span>
                   )}
@@ -1275,11 +1685,14 @@ export function LeavesView({
                   rows={3}
                   required={decisionTarget.decision === 'Rejected'}
                   value={decisionNotes}
-                  onChange={(e) => setDecisionNotes(e.target.value)}
+                  onChange={(e) => {
+                    setDecisionNotes(e.target.value);
+                    setDecisionError(null);
+                  }}
                   placeholder={
                     decisionTarget.decision === 'Approved'
                       ? 'Optional approval confirmation or handover note...'
-                      : 'Specify operational conflict or reason for rejection...'
+                      : 'Specify operational conflict or reason for rejection (min 3 characters)...'
                   }
                   className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
                 />
@@ -1288,7 +1701,10 @@ export function LeavesView({
               <div className="flex items-center justify-end gap-2 border-t border-slate-100 pt-4 dark:border-slate-800">
                 <button
                   type="button"
-                  onClick={() => setDecisionTarget(null)}
+                  onClick={() => {
+                    setDecisionTarget(null);
+                    setDecisionError(null);
+                  }}
                   className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                 >
                   Cancel

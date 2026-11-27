@@ -24,8 +24,9 @@ import {
   Upload,
   UserCheck,
   X,
+  XCircle,
 } from 'lucide-react';
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { dataService } from '../services/dataService';
 import {
   Department,
@@ -37,6 +38,7 @@ import {
   RecycleBinItem,
   Role,
   TeamMember,
+  WorkflowApprovalStatus,
 } from '../types/nexops';
 import {
   calculateVaultStorageStats,
@@ -83,6 +85,19 @@ interface DocumentVaultViewProps {
     note?: string,
   ) => void;
   onAcknowledgeSignOff?: (docId: string, signOffId: string) => void;
+  onDecisionSignOff?: (
+    docId: string,
+    signOffId: string,
+    decision: 'Under Review' | 'Approved' | 'Rejected',
+    reason?: string,
+  ) => void;
+  onTransitionVaultWorkflow?: (
+    docId: string,
+    nextStatus: WorkflowApprovalStatus,
+    reason?: string,
+  ) => void;
+  jumpToDocId?: string | null;
+  onClearJumpDoc?: () => void;
   onRestoreRecycleItem?: (binId: string) => void;
   onPurgeRecycleItem?: (binId: string) => void;
 }
@@ -180,6 +195,10 @@ export function DocumentVaultView({
   onDeleteDocument,
   onRequestSignOff,
   onAcknowledgeSignOff,
+  onDecisionSignOff,
+  onTransitionVaultWorkflow,
+  jumpToDocId,
+  onClearJumpDoc,
   onRestoreRecycleItem,
   onPurgeRecycleItem,
 }: DocumentVaultViewProps) {
@@ -200,6 +219,14 @@ export function DocumentVaultView({
   const [signOffNote, setSignOffNote] = useState('');
   const [signOffError, setSignOffError] = useState('');
   const [showVaultBin, setShowVaultBin] = useState(false);
+  const [rejectModalTarget, setRejectModalTarget] = useState<{
+    kind: 'document' | 'signoff';
+    doc: DocumentVaultItem;
+    signOffId?: string;
+    label: string;
+  } | null>(null);
+  const [rejectReasonInput, setRejectReasonInput] = useState('');
+  const [rejectReasonError, setRejectReasonError] = useState('');
 
   // New Version Form State
   const [verTag, setVerTag] = useState('v1.1');
@@ -278,6 +305,63 @@ export function DocumentVaultView({
       return true;
     });
   }, [documents, activeRole, currentUser.department]);
+
+  useEffect(() => {
+    if (!jumpToDocId) return;
+    const found = visibleDocuments.find((d) => d.id === jumpToDocId);
+    if (found) {
+      setSelectedFolder('ALL');
+      setDepartmentFilter('ALL');
+      setExpiryFilter('ALL');
+      setSearchQuery(found.title);
+      const src = found.fileDataUrl || found.url || sessionBlobUrls[found.id];
+      const canOpenPreview =
+        Boolean(src) &&
+        (found.sourceType !== 'uploaded_file' ||
+          isImageMime(found.mimeType, found.fileName) ||
+          isPdfMime(found.mimeType, found.fileName));
+      if (canOpenPreview) {
+        setPreviewDoc(found);
+      }
+      onClearJumpDoc?.();
+    }
+  }, [jumpToDocId, visibleDocuments, sessionBlobUrls, onClearJumpDoc]);
+
+  const getVaultWorkflowStatus = (doc: DocumentVaultItem): WorkflowApprovalStatus =>
+    doc.workflowStatus ?? (doc.approvalStamp ? 'Approved' : 'Submitted');
+
+  const renderVaultWorkflowBadge = (status: WorkflowApprovalStatus) => {
+    if (status === 'Approved') {
+      return (
+        <span className="inline-flex items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 dark:border-emerald-800/70 dark:bg-emerald-950/50 dark:text-emerald-300">
+          <CheckCircle2 className="h-3 w-3" />
+          Approved
+        </span>
+      );
+    }
+    if (status === 'Rejected') {
+      return (
+        <span className="inline-flex items-center gap-1 rounded border border-rose-200 bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-700 dark:border-rose-800/70 dark:bg-rose-950/50 dark:text-rose-300">
+          <XCircle className="h-3 w-3" />
+          Rejected
+        </span>
+      );
+    }
+    if (status === 'Under Review') {
+      return (
+        <span className="inline-flex items-center gap-1 rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-800 dark:border-amber-800/70 dark:bg-amber-950/50 dark:text-amber-300">
+          <Clock className="h-3 w-3" />
+          Under Review
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1 rounded border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 text-[10px] font-bold text-indigo-700 dark:border-indigo-800/70 dark:bg-indigo-950/50 dark:text-indigo-300">
+        <Clock className="h-3 w-3" />
+        Submitted
+      </span>
+    );
+  };
 
   const folderCounts = useMemo(() => {
     const counts: Record<DocumentVaultFolder, number> = {
@@ -946,10 +1030,14 @@ export function DocumentVaultView({
                   const downloadSrc = resolveDownloadSource(doc);
                   const expiryInfo = getDocumentExpiryInfo(doc.expiryDate, todayStr);
                   const signOffList = doc.signOffRequests ?? [];
-                  const ackCount = signOffList.filter((r) => r.status === 'Acknowledged').length;
+                  const ackCount = signOffList.filter(
+                    (r) => r.status === 'Acknowledged' || r.status === 'Approved',
+                  ).length;
                   const myPendingSignOff = signOffList.find(
                     (r) =>
-                      r.status === 'Pending' &&
+                      (r.status === 'Pending' ||
+                        r.status === 'Submitted' ||
+                        r.status === 'Under Review') &&
                       r.reviewerEmail.trim().toLowerCase() === currentEmailLower,
                   );
                   const canPreview =
@@ -1016,6 +1104,7 @@ export function DocumentVaultView({
                                   VERIFIED &amp; APPROVED
                                 </span>
                               )}
+                              {renderVaultWorkflowBadge(getVaultWorkflowStatus(doc))}
                               {pendingVaultEditIds.has(doc.id) && <PendingApprovalBadge compact />}
                               {isFile && (
                                 <span className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-slate-600 tabular-nums dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
@@ -1026,6 +1115,12 @@ export function DocumentVaultView({
                             {doc.description && (
                               <p className="mt-0.5 line-clamp-1 text-[11px] text-slate-500 dark:text-slate-400">
                                 {doc.description}
+                              </p>
+                            )}
+                            {getVaultWorkflowStatus(doc) === 'Rejected' && doc.rejectionReason && (
+                              <p className="mt-1 rounded border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] text-rose-800 dark:border-rose-900/60 dark:bg-rose-950/50 dark:text-rose-200">
+                                <span className="font-bold">Rejected{doc.reviewedBy ? ` (${doc.reviewedBy})` : ''}: </span>
+                                {doc.rejectionReason}
                               </p>
                             )}
                             <p className="mt-0.5 font-mono text-[10px] text-slate-400 dark:text-slate-500">
@@ -1142,6 +1237,49 @@ export function DocumentVaultView({
                               <Upload className="h-3 w-3" />
                               <span>New Version</span>
                             </button>
+                          )}
+
+                          {isSuperAdmin && onTransitionVaultWorkflow && (
+                            <>
+                              {getVaultWorkflowStatus(doc) === 'Submitted' && (
+                                <button
+                                  type="button"
+                                  onClick={() => onTransitionVaultWorkflow(doc.id, 'Under Review')}
+                                  className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-800 hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-300"
+                                >
+                                  <Clock className="h-3 w-3" />
+                                  <span>Under Review</span>
+                                </button>
+                              )}
+                              {getVaultWorkflowStatus(doc) !== 'Approved' && (
+                                <button
+                                  type="button"
+                                  onClick={() => onTransitionVaultWorkflow(doc.id, 'Approved')}
+                                  className="inline-flex items-center gap-1 rounded-md bg-emerald-600 px-2 py-1 text-[11px] font-semibold text-white hover:bg-emerald-700"
+                                >
+                                  <CheckCircle2 className="h-3 w-3" />
+                                  <span>Approve</span>
+                                </button>
+                              )}
+                              {getVaultWorkflowStatus(doc) !== 'Rejected' && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setRejectModalTarget({
+                                      kind: 'document',
+                                      doc,
+                                      label: doc.title,
+                                    });
+                                    setRejectReasonInput('');
+                                    setRejectReasonError('');
+                                  }}
+                                  className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] font-semibold text-rose-700 hover:bg-rose-100 dark:border-rose-800 dark:bg-rose-950/50 dark:text-rose-300"
+                                >
+                                  <XCircle className="h-3 w-3" />
+                                  <span>Reject</span>
+                                </button>
+                              )}
+                            </>
                           )}
 
                           {isSuperAdmin && !doc.approvalStamp && (
@@ -1821,33 +1959,46 @@ export function DocumentVaultView({
                 ) : (
                   <div className="mt-2 space-y-2">
                     {liveSignOffDoc.signOffRequests.map((req) => {
-                      const isMyPending =
-                        req.status === 'Pending' &&
-                        req.reviewerEmail.trim().toLowerCase() === currentEmailLower;
+                      const isPendingSignOff =
+                        req.status === 'Pending' ||
+                        req.status === 'Submitted' ||
+                        req.status === 'Under Review';
+                      const canActOnSignOff =
+                        isPendingSignOff &&
+                        (req.reviewerEmail.trim().toLowerCase() === currentEmailLower ||
+                          isSuperAdmin);
                       return (
                         <div
                           key={req.id}
                           className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50/70 px-3.5 py-2.5 text-xs dark:border-slate-800 dark:bg-slate-950/60"
                         >
-                          <div className="min-w-0">
+                          <div className="min-w-0 flex-1">
                             <div className="flex flex-wrap items-center gap-1.5">
                               <span className="font-bold text-slate-900 dark:text-slate-100">
                                 {req.reviewerName}
                               </span>
                               <span
                                 className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-bold ${
-                                  req.status === 'Acknowledged'
+                                  req.status === 'Acknowledged' || req.status === 'Approved'
                                     ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800/70 dark:bg-emerald-950/50 dark:text-emerald-300'
-                                    : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800/70 dark:bg-amber-950/50 dark:text-amber-300'
+                                    : req.status === 'Rejected'
+                                      ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-800/70 dark:bg-rose-950/50 dark:text-rose-300'
+                                      : req.status === 'Under Review'
+                                        ? 'border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-800/70 dark:bg-indigo-950/50 dark:text-indigo-300'
+                                        : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800/70 dark:bg-amber-950/50 dark:text-amber-300'
                                 }`}
                               >
-                                {req.status === 'Acknowledged' ? (
+                                {req.status === 'Acknowledged' || req.status === 'Approved' ? (
                                   <CheckCircle2 className="h-3 w-3" />
+                                ) : req.status === 'Rejected' ? (
+                                  <XCircle className="h-3 w-3" />
                                 ) : (
                                   <Clock className="h-3 w-3" />
                                 )}
                                 <span>
-                                  {req.status === 'Acknowledged' ? 'Signed Off' : 'Pending'}
+                                  {req.status === 'Acknowledged' || req.status === 'Approved'
+                                    ? 'Approved / Signed Off'
+                                    : req.status}
                                 </span>
                               </span>
                             </div>
@@ -1862,16 +2013,59 @@ export function DocumentVaultView({
                                 Note: {req.note}
                               </p>
                             )}
+                            {req.status === 'Rejected' && req.rejectionReason && (
+                              <p className="mt-1 rounded border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] text-rose-800 dark:border-rose-900/60 dark:bg-rose-950/50 dark:text-rose-200">
+                                <span className="font-bold">
+                                  Rejected{req.reviewedBy ? ` by ${req.reviewedBy}` : ''}:{' '}
+                                </span>
+                                {req.rejectionReason}
+                              </p>
+                            )}
                           </div>
-                          {isMyPending && onAcknowledgeSignOff && (
-                            <button
-                              type="button"
-                              onClick={() => onAcknowledgeSignOff(liveSignOffDoc.id, req.id)}
-                              className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-700"
-                            >
-                              <CheckCircle2 className="h-3.5 w-3.5" />
-                              <span>Sign Off Now</span>
-                            </button>
+                          {canActOnSignOff && (
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              {req.status !== 'Under Review' && onDecisionSignOff && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    onDecisionSignOff(liveSignOffDoc.id, req.id, 'Under Review')
+                                  }
+                                  className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1.5 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100 dark:border-indigo-800 dark:bg-indigo-950/50 dark:text-indigo-300"
+                                >
+                                  <Clock className="h-3.5 w-3.5" />
+                                  <span>Under Review</span>
+                                </button>
+                              )}
+                              {onAcknowledgeSignOff && (
+                                <button
+                                  type="button"
+                                  onClick={() => onAcknowledgeSignOff(liveSignOffDoc.id, req.id)}
+                                  className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-700"
+                                >
+                                  <CheckCircle2 className="h-3.5 w-3.5" />
+                                  <span>Approve / Sign Off</span>
+                                </button>
+                              )}
+                              {onDecisionSignOff && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setRejectModalTarget({
+                                      kind: 'signoff',
+                                      doc: liveSignOffDoc,
+                                      signOffId: req.id,
+                                      label: `${liveSignOffDoc.title} (${req.reviewerName})`,
+                                    });
+                                    setRejectReasonInput('');
+                                    setRejectReasonError('');
+                                  }}
+                                  className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-[11px] font-semibold text-rose-700 hover:bg-rose-100 dark:border-rose-800 dark:bg-rose-950/50 dark:text-rose-300"
+                                >
+                                  <XCircle className="h-3.5 w-3.5" />
+                                  <span>Reject</span>
+                                </button>
+                              )}
+                            </div>
                           )}
                         </div>
                       );
@@ -1955,6 +2149,96 @@ export function DocumentVaultView({
                 </form>
               )}
             </div>
+          </div>
+        </div>
+      )}
+      {/* Mandatory Rejection Reason Modal (Document Workflow or Sign-Off) */}
+      {rejectModalTarget && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs sm:p-4 dark:bg-slate-950/75"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Mandatory Rejection Reason"
+        >
+          <div className="flex w-full max-w-md flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-5 py-4 dark:border-slate-800">
+              <div className="min-w-0">
+                <h3 className="font-display text-base font-bold text-slate-900 dark:text-slate-100">
+                  Reject {rejectModalTarget.kind === 'signoff' ? 'Sign-Off Request' : 'Vault Document'}
+                </h3>
+                <p className="truncate text-xs text-slate-500 dark:text-slate-400">
+                  {rejectModalTarget.label}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRejectModalTarget(null)}
+                className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const trimmed = rejectReasonInput.trim();
+                if (trimmed.length < 3) {
+                  setRejectReasonError('Please provide a clear rejection reason (at least 3 characters).');
+                  return;
+                }
+                if (rejectModalTarget.kind === 'signoff' && rejectModalTarget.signOffId) {
+                  onDecisionSignOff?.(
+                    rejectModalTarget.doc.id,
+                    rejectModalTarget.signOffId,
+                    'Rejected',
+                    trimmed,
+                  );
+                } else {
+                  onTransitionVaultWorkflow?.(rejectModalTarget.doc.id, 'Rejected', trimmed);
+                }
+                setRejectModalTarget(null);
+                setRejectReasonInput('');
+                setRejectReasonError('');
+              }}
+              className="space-y-4 p-5"
+            >
+              {rejectReasonError && (
+                <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700 dark:border-rose-800 dark:bg-rose-950/60 dark:text-rose-300">
+                  {rejectReasonError}
+                </div>
+              )}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Mandatory Rejection Reason <span className="text-rose-600">*</span>
+                </label>
+                <textarea
+                  rows={3}
+                  required
+                  value={rejectReasonInput}
+                  onChange={(e) => {
+                    setRejectReasonInput(e.target.value);
+                    if (rejectReasonError) setRejectReasonError('');
+                  }}
+                  placeholder="Explain the missing compliance detail or reason for rejection..."
+                  className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-900 placeholder:text-slate-400 focus:border-rose-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                />
+              </div>
+              <div className="flex items-center justify-end gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setRejectModalTarget(null)}
+                  className="rounded-lg border border-slate-200 px-3.5 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-lg bg-rose-600 px-4 py-2 text-xs font-semibold text-white hover:bg-rose-700"
+                >
+                  Confirm Reject
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

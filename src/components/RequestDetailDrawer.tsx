@@ -369,14 +369,15 @@ export function RequestDetailDrawer({
   };
 
   const handleReject = () => {
-    if (!remark.trim()) {
+    const trimmed = remark.trim();
+    if (trimmed.length < 3) {
       setValidationError(
-        'Rejection reason required: Document the compliance or operational reason for rejection.',
+        'Mandatory Rejection Reason required: Please enter a clear reason (at least 3 characters) before rejecting this request.',
       );
       return;
     }
     setValidationError(null);
-    onTransitionStatus(request.id, 'Rejected', remark.trim());
+    onTransitionStatus(request.id, 'Rejected', trimmed);
     setRemark('');
   };
 
@@ -1291,9 +1292,20 @@ export function RequestDetailDrawer({
               )}
 
               {request.status === 'Rejected' && (
-                <div className="mt-3 flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-800 dark:border-rose-900/60 dark:bg-rose-950/50 dark:text-rose-300">
-                  <XCircle className="h-4 w-4 shrink-0 text-rose-600 dark:text-rose-400" />
-                  <span>This request was formally rejected during governance review.</span>
+                <div className="mt-3 flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-900 dark:border-rose-900/60 dark:bg-rose-950/50 dark:text-rose-200">
+                  <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-rose-600 dark:text-rose-400" />
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <p className="font-bold">
+                      Formally Rejected
+                      {request.reviewedBy ? ` by ${request.reviewedBy}` : ''}
+                      {request.reviewedAt ? ` · ${formatDateTime(request.reviewedAt)}` : ''}
+                    </p>
+                    <p className="text-rose-800 dark:text-rose-300">
+                      <span className="font-semibold">Rejection Reason: </span>
+                      {request.rejectionReason ||
+                        'Rejected during governance review (check audit trail for full note).'}
+                    </p>
+                  </div>
                 </div>
               )}
             </div>

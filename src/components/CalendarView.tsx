@@ -16,7 +16,7 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import {
   CalendarEvent,
   CalendarEventType,
@@ -38,6 +38,8 @@ interface CalendarViewProps {
   currentUser: TeamMember;
   onSaveEvent: (event: CalendarEvent) => void;
   onDeleteEvent: (eventId: string) => void;
+  jumpToDate?: string | null;
+  onClearJumpCalendar?: () => void;
 }
 
 type CalendarViewMode = 'month' | 'week';
@@ -140,6 +142,8 @@ export function CalendarView({
   currentUser,
   onSaveEvent,
   onDeleteEvent,
+  jumpToDate,
+  onClearJumpCalendar,
 }: CalendarViewProps) {
   const today = useMemo(() => new Date(), []);
   const todayKey = useMemo(() => toDateKey(today), [today]);
@@ -151,6 +155,19 @@ export function CalendarView({
   const [selectedDateKey, setSelectedDateKey] = useState<string>(todayKey);
   const [typeFilter, setTypeFilter] = useState<CalendarEventType | 'All'>('All');
   const [deptFilter, setDeptFilter] = useState<string>('All');
+
+  useEffect(() => {
+    if (!jumpToDate) return;
+    const cleanDate = jumpToDate.slice(0, 10);
+    const parsed = parseDateKey(cleanDate);
+    if (!Number.isNaN(parsed.getTime())) {
+      setTypeFilter('All');
+      setDeptFilter('All');
+      setCursorDate(new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate()));
+      setSelectedDateKey(cleanDate);
+    }
+    onClearJumpCalendar?.();
+  }, [jumpToDate, onClearJumpCalendar]);
 
   // Event modal state
   const [modalOpen, setModalOpen] = useState(false);

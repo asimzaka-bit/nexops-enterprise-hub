@@ -15,8 +15,9 @@ import {
   ShieldCheck,
   Users,
   X,
+  XCircle,
 } from 'lucide-react';
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import {
   Department,
   PendingEditorChange,
@@ -24,6 +25,7 @@ import {
   SopCategory,
   SopDocument,
   TeamMember,
+  WorkflowApprovalStatus,
 } from '../types/nexops';
 import { formatDateTime, formatShortDate, isSuperAdminEmail } from '../utils/storage';
 import { PendingApprovalBadge } from './StatusIndicator';
@@ -50,6 +52,13 @@ interface SopVaultViewProps {
   onAcknowledgeSop: (sopId: string) => void;
   onReviseSop?: (sopId: string, patch: SopRevisionPayload) => void;
   onStampSop?: (sopId: string) => void;
+  onTransitionSopWorkflow?: (
+    sopId: string,
+    nextStatus: WorkflowApprovalStatus,
+    reason?: string,
+  ) => void;
+  jumpToSopId?: string | null;
+  onClearJumpSop?: () => void;
 }
 
 const SOP_CATEGORIES: SopCategory[] = [
@@ -150,6 +159,9 @@ export function SopVaultView({
   onAcknowledgeSop,
   onReviseSop,
   onStampSop,
+  onTransitionSopWorkflow,
+  jumpToSopId,
+  onClearJumpSop,
 }: SopVaultViewProps) {
   const isViewer = activeRole === 'Viewer';
   const canManageSops = activeRole === 'Admin' || activeRole === 'Editor';
@@ -197,6 +209,52 @@ export function SopVaultView({
   const [revStepsText, setRevStepsText] = useState('');
   const [revRulesText, setRevRulesText] = useState('');
   const [revError, setRevError] = useState<string | null>(null);
+  const [rejectSopTarget, setRejectSopTarget] = useState<SopDocument | null>(null);
+  const [rejectSopReason, setRejectSopReason] = useState('');
+  const [rejectSopError, setRejectSopError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (jumpToSopId && sops.some((s) => s.id === jumpToSopId)) {
+      setReaderSopId(jumpToSopId);
+      onClearJumpSop?.();
+    }
+  }, [jumpToSopId, sops, onClearJumpSop]);
+
+  const getSopWorkflowStatus = (sop: SopDocument): WorkflowApprovalStatus =>
+    sop.workflowStatus ?? (sop.approvalStamp ? 'Approved' : 'Submitted');
+
+  const renderWorkflowBadge = (status: WorkflowApprovalStatus) => {
+    if (status === 'Approved') {
+      return (
+        <span className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700 dark:border-emerald-800/70 dark:bg-emerald-950/50 dark:text-emerald-300">
+          <CheckCircle2 className="h-3 w-3" />
+          Approved
+        </span>
+      );
+    }
+    if (status === 'Rejected') {
+      return (
+        <span className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-rose-50 px-2 py-0.5 text-[10px] font-bold text-rose-700 dark:border-rose-800/70 dark:bg-rose-950/50 dark:text-rose-300">
+          <XCircle className="h-3 w-3" />
+          Rejected
+        </span>
+      );
+    }
+    if (status === 'Under Review') {
+      return (
+        <span className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-800 dark:border-amber-800/70 dark:bg-amber-950/50 dark:text-amber-300">
+          <Clock className="h-3 w-3" />
+          Under Review
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1 rounded-md border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-700 dark:border-indigo-800/70 dark:bg-indigo-950/50 dark:text-indigo-300">
+        <Clock className="h-3 w-3" />
+        Submitted
+      </span>
+    );
+  };
 
   // Publish Form state
   const [pubCode, setPubCode] = useState('');
@@ -775,6 +833,7 @@ export function SopVaultView({
                           VERIFIED &amp; APPROVED
                         </span>
                       )}
+                      {renderWorkflowBadge(getSopWorkflowStatus(sop))}
                       {pendingSopEditIds.has(sop.id) && <PendingApprovalBadge compact />}
                     </div>
 
@@ -832,6 +891,12 @@ export function SopVaultView({
                     <span aria-hidden="true">·</span>
                     <span>By {sop.authorName}</span>
                   </div>
+                  {getSopWorkflowStatus(sop) === 'Rejected' && sop.rejectionReason && (
+                    <div className="mt-2.5 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-[11px] text-rose-800 dark:border-rose-900/60 dark:bg-rose-950/50 dark:text-rose-200">
+                      <span className="font-bold">Rejected: </span>
+                      <span className="line-clamp-2">{sop.rejectionReason}</span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Compliance Progress Bar & User Sign-Off Footer */}
@@ -911,6 +976,7 @@ export function SopVaultView({
                               VERIFIED &amp; APPROVED
                             </span>
                           )}
+                          {renderWorkflowBadge(getSopWorkflowStatus(sop))}
                           {pendingSopEditIds.has(sop.id) && <PendingApprovalBadge compact />}
                         </div>
                         <div className="mt-1 flex items-center gap-2">
@@ -919,6 +985,11 @@ export function SopVaultView({
                             Author: {sop.authorName}
                           </span>
                         </div>
+                        {getSopWorkflowStatus(sop) === 'Rejected' && sop.rejectionReason && (
+                          <p className="mt-1 max-w-md truncate text-[11px] font-medium text-rose-700 dark:text-rose-300">
+                            Rejection Reason: {sop.rejectionReason}
+                          </p>
+                        )}
                       </td>
                       <td className="px-3 py-3.5 font-mono text-xs font-semibold text-slate-700 tabular-nums whitespace-nowrap dark:text-slate-300">
                         {sop.version}
@@ -1045,6 +1116,7 @@ export function SopVaultView({
                           <span>{activeReaderSop.approvalStamp.badgeLabel}</span>
                         </span>
                       )}
+                      {renderWorkflowBadge(getSopWorkflowStatus(activeReaderSop))}
                     </div>
                     <h2
                       id="sop-reader-title"
@@ -1061,7 +1133,7 @@ export function SopVaultView({
                       · Owner: <strong className="text-slate-700 dark:text-slate-200">{activeReaderSop.authorName}</strong>
                     </p>
                   </div>
-                  <div className="flex shrink-0 items-center gap-1.5">
+                  <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
                     <button
                       type="button"
                       onClick={() => setReaderShowHistory((prev) => !prev)}
@@ -1084,11 +1156,49 @@ export function SopVaultView({
                         <span>New Revision</span>
                       </button>
                     )}
+                    {isSuperAdmin && onTransitionSopWorkflow && (
+                      <>
+                        {getSopWorkflowStatus(activeReaderSop) === 'Submitted' && (
+                          <button
+                            type="button"
+                            onClick={() => onTransitionSopWorkflow(activeReaderSop.id, 'Under Review')}
+                            className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-300"
+                          >
+                            <Clock className="h-3.5 w-3.5" />
+                            <span>Under Review</span>
+                          </button>
+                        )}
+                        {getSopWorkflowStatus(activeReaderSop) !== 'Approved' && (
+                          <button
+                            type="button"
+                            onClick={() => onTransitionSopWorkflow(activeReaderSop.id, 'Approved')}
+                            className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700"
+                          >
+                            <CheckCircle2 className="h-3.5 w-3.5" />
+                            <span>Approve</span>
+                          </button>
+                        )}
+                        {getSopWorkflowStatus(activeReaderSop) !== 'Rejected' && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setRejectSopTarget(activeReaderSop);
+                              setRejectSopReason('');
+                              setRejectSopError(null);
+                            }}
+                            className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100 dark:border-rose-800 dark:bg-rose-950/50 dark:text-rose-300"
+                          >
+                            <XCircle className="h-3.5 w-3.5" />
+                            <span>Reject</span>
+                          </button>
+                        )}
+                      </>
+                    )}
                     {isSuperAdmin && onStampSop && !activeReaderSop.approvalStamp && (
                       <button
                         type="button"
                         onClick={() => onStampSop(activeReaderSop.id)}
-                        className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700"
+                        className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-slate-800 dark:bg-indigo-600 dark:hover:bg-indigo-700"
                       >
                         <BadgeCheck className="h-3.5 w-3.5" />
                         <span>Stamp &amp; Approve</span>
@@ -1110,6 +1220,22 @@ export function SopVaultView({
 
                 {/* Modal Body */}
                 <div className="flex-1 space-y-5 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
+                  {getSopWorkflowStatus(activeReaderSop) === 'Rejected' && (
+                    <div className="flex items-start gap-2.5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-900 dark:border-rose-900/60 dark:bg-rose-950/50 dark:text-rose-200">
+                      <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-rose-600 dark:text-rose-400" />
+                      <div className="min-w-0 flex-1 space-y-0.5">
+                        <p className="font-bold">
+                          SOP Sign-Off Rejected
+                          {activeReaderSop.reviewedBy ? ` by ${activeReaderSop.reviewedBy}` : ''}
+                          {activeReaderSop.reviewedAt ? ` · ${formatDateTime(activeReaderSop.reviewedAt)}` : ''}
+                        </p>
+                        <p className="text-rose-800 dark:text-rose-300">
+                          <span className="font-semibold">Rejection Reason: </span>
+                          {activeReaderSop.rejectionReason || 'Rejected during SOP governance review.'}
+                        </p>
+                      </div>
+                    </div>
+                  )}
                   {/* Structured SOP Sections */}
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-950/60">
@@ -1751,6 +1877,110 @@ export function SopVaultView({
                   className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-700"
                 >
                   Save Revision {revVersion}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Mandatory SOP Rejection Reason Modal */}
+      {rejectSopTarget && onTransitionSopWorkflow && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2.5 backdrop-blur-xs sm:p-4 dark:bg-slate-950/75"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Reject SOP Policy"
+        >
+          <div className="flex max-h-[90vh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-center justify-between gap-2 border-b border-slate-200 bg-slate-900 px-4 py-3.5 text-white sm:px-6">
+              <div className="min-w-0">
+                <h2 className="truncate font-display text-sm font-bold">
+                  Reject SOP · {rejectSopTarget.code}
+                </h2>
+                <p className="mt-0.5 truncate text-[11px] text-slate-300">
+                  {rejectSopTarget.title}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setRejectSopTarget(null);
+                  setRejectSopReason('');
+                  setRejectSopError(null);
+                }}
+                aria-label="Close rejection modal"
+                className="shrink-0 rounded-lg p-1 text-slate-300 hover:bg-white/10 hover:text-white"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const trimmed = rejectSopReason.trim();
+                if (trimmed.length < 3) {
+                  setRejectSopError('Please enter a clear rejection reason (minimum 3 characters).');
+                  return;
+                }
+                onTransitionSopWorkflow(rejectSopTarget.id, 'Rejected', trimmed);
+                setRejectSopTarget(null);
+                setRejectSopReason('');
+                setRejectSopError(null);
+              }}
+              className="space-y-4 p-4 sm:p-6"
+            >
+              {rejectSopError && (
+                <div
+                  role="alert"
+                  className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-800 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300"
+                >
+                  {rejectSopError}
+                </div>
+              )}
+
+              <div>
+                <label
+                  htmlFor="sop-rejection-reason"
+                  className="block text-xs font-semibold text-slate-700 dark:text-slate-300"
+                >
+                  Rejection Reason <span className="text-rose-600 dark:text-rose-400">*</span>
+                </label>
+                <textarea
+                  id="sop-rejection-reason"
+                  rows={3}
+                  required
+                  value={rejectSopReason}
+                  onChange={(e) => {
+                    setRejectSopReason(e.target.value);
+                    setRejectSopError(null);
+                  }}
+                  placeholder="Specify policy gap, compliance issue, or required revision..."
+                  className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-900 placeholder:text-slate-400 focus:border-rose-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
+                />
+                <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                  Recorded in Audit Trail and shown visibly on this SOP.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRejectSopTarget(null);
+                    setRejectSopReason('');
+                    setRejectSopError(null);
+                  }}
+                  className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-lg bg-rose-600 px-4 py-2 text-xs font-semibold text-white hover:bg-rose-700"
+                >
+                  Confirm Reject
                 </button>
               </div>
             </form>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Clock, RefreshCw, ShieldAlert, WifiOff } from 'lucide-react';
+import { Clock, Download, Printer, RefreshCw, ShieldAlert, ShieldCheck, WifiOff, X } from 'lucide-react';
 import { AnnouncementBanner } from './components/AnnouncementBanner';
 import { AssetsInventoryView } from './components/AssetsInventoryView';
 import { AuditLogsView } from './components/AuditLogsView';
@@ -18,6 +18,7 @@ import {
   StartGoogleMeetPayload,
 } from './components/MailChatHubView';
 import { CreateMeetingPayload, MeetingsMomView } from './components/MeetingsMomView';
+import { NexOpsLogo } from './components/NexOpsLogo';
 import { OfficialReportModal } from './components/OfficialReportModal';
 import { PendingApprovalScreen } from './components/PendingApprovalScreen';
 import { ProjectsDirectoryView } from './components/ProjectsDirectoryView';
@@ -90,6 +91,7 @@ import {
   ThemePreference,
   ToastMessage,
   UserPreferences,
+  WorkflowApprovalStatus,
   WorkspaceEmailLog,
   WorkspaceSavedLink,
   WorkspaceToolType,
@@ -115,18 +117,23 @@ import {
 } from './services/googleWorkspaceService';
 import {
   applyUserPreferencesToDom,
+  AttendanceSummaryRow,
   createRecycleBinExpiry,
   downloadSystemBackupJson,
   evaluateAttendanceTags,
+  exportAttendanceSummaryCsv,
   extractDmPeerEmail,
   formatCurrency,
+  formatDateTime,
   generateNextRequestId,
   getDocumentExpiryInfo,
   getShiftForDepartment,
   getTodayDateString,
+  hasWorkspacePermission,
   isActionItemOpen,
   isAssetAlert,
   isDmParticipant,
+  isLeavePendingStatus,
   isPrivateCommsAuditEvent,
   isStrictChatParticipant,
   isStrictMailParticipant,
@@ -285,6 +292,19 @@ export default function App() {
     open: boolean;
     requestId: string | null;
   }>({ open: false, requestId: null });
+  const [attendancePrintModal, setAttendancePrintModal] = useState<{
+    open: boolean;
+    startDate: string;
+    endDate: string;
+    department: string;
+    rows: AttendanceSummaryRow[];
+  } | null>(null);
+  const [jumpSopId, setJumpSopId] = useState<string | null>(null);
+  const [jumpVaultDocId, setJumpVaultDocId] = useState<string | null>(null);
+  const [jumpMeetingId, setJumpMeetingId] = useState<string | null>(null);
+  const [jumpCalendarDate, setJumpCalendarDate] = useState<string | null>(null);
+  const [jumpAnnouncementId, setJumpAnnouncementId] = useState<string | null>(null);
+  const [jumpLeaveQuery, setJumpLeaveQuery] = useState<string | null>(null);
 
   // Toast Queue, Hydration & Cloud Sync State
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
@@ -417,6 +437,17 @@ export default function App() {
   const dismissToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
+
+  const denyPermission = useCallback(
+    (actionLabel: string, requiredRole: string) => {
+      pushToast(
+        'Permission Restricted',
+        `${actionLabel} requires ${requiredRole} privileges.`,
+        'warning',
+      );
+    },
+    [pushToast],
+  );
 
   const handleCloudWriteError = useCallback(
     (err: unknown) => {
@@ -1005,6 +1036,20 @@ export default function App() {
       setActiveSection('dashboard');
     }
   }, [activeSection, isSuperAdminOperator]);
+
+  const handleSelectSection = useCallback(
+    (section: NavSection) => {
+      if ((section === 'settings' || section === 'audit') && !isSuperAdminOperator) {
+        denyPermission(
+          section === 'settings' ? 'Admin Control Center' : 'Activity Audit Trail',
+          'Super Admin',
+        );
+        return;
+      }
+      setActiveSection(section);
+    },
+    [denyPermission, isSuperAdminOperator],
+  );
 
   useEffect(() => {
     if (
@@ -1732,7 +1777,7 @@ export default function App() {
   );
 
   const pendingLeavesCount = useMemo(
-    () => state.leaves.filter((l) => l.status === 'Pending').length,
+    () => state.leaves.filter((l) => isLeavePendingStatus(l.status)).length,
     [state.leaves],
   );
 
@@ -2578,14 +2623,20 @@ export default function App() {
 
   // Open Create / Edit Modal fresh, from template, or in Edit mode
   const handleOpenBlankCreateModal = () => {
-    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    if (!hasWorkspacePermission(currentUser.role, currentUser.email, state.permissionMatrix, 'create_requests')) {
+      denyPermission('Create operational requests', 'Editor or Super Admin');
+      return;
+    }
     setEditingRequest(null);
     setTemplateSource(null);
     setCreateModalOpen(true);
   };
 
   const handleDuplicateRequest = (req: OperationalRequest) => {
-    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    if (!hasWorkspacePermission(currentUser.role, currentUser.email, state.permissionMatrix, 'create_requests')) {
+      denyPermission('Duplicate operational requests', 'Editor or Super Admin');
+      return;
+    }
     setSelectedRequestId(null);
     setEditingRequest(null);
     setTemplateSource(req);
@@ -2593,7 +2644,10 @@ export default function App() {
   };
 
   const handleOpenEditRequestModal = (req: OperationalRequest) => {
-    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    if (!hasWorkspacePermission(currentUser.role, currentUser.email, state.permissionMatrix, 'create_requests')) {
+      denyPermission('Edit operational requests', 'Editor or Super Admin');
+      return;
+    }
     setSelectedRequestId(null);
     setTemplateSource(null);
     setEditingRequest(req);
@@ -2602,7 +2656,10 @@ export default function App() {
 
   // Create new request (Admin direct or Editor Maker-Checker)
   const handleCreateRequest = (payload: CreateRequestPayload) => {
-    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    if (!hasWorkspacePermission(currentUser.role, currentUser.email, state.permissionMatrix, 'create_requests')) {
+      denyPermission('Create operational requests', 'Editor or Super Admin');
+      return;
+    }
     const now = new Date().toISOString();
     const newId = generateNextRequestId(state.requests);
     const initialStatus: RequestStatus = payload.submitImmediately ? 'Submitted' : 'Draft';
@@ -2784,7 +2841,10 @@ export default function App() {
 
   // Edit existing operational request (Admin direct or Editor Maker-Checker)
   const handleEditRequest = (requestId: string, payload: CreateRequestPayload) => {
-    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    if (!hasWorkspacePermission(currentUser.role, currentUser.email, state.permissionMatrix, 'create_requests')) {
+      denyPermission('Edit operational requests', 'Editor or Super Admin');
+      return;
+    }
     const target = state.requests.find((r) => r.id === requestId);
     if (!target) return;
 
@@ -2958,7 +3018,10 @@ export default function App() {
 
   // Delete operational request
   const handleDeleteRequest = (requestId: string) => {
-    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    if (!hasWorkspacePermission(currentUser.role, currentUser.email, state.permissionMatrix, 'create_requests')) {
+      denyPermission('Delete operational requests', 'Editor or Super Admin');
+      return;
+    }
     const target = state.requests.find((r) => r.id === requestId);
     if (!target) return;
 
@@ -3018,7 +3081,10 @@ export default function App() {
 
   // Toggle QA checklist item
   const handleToggleChecklistItem = (requestId: string, itemId: string) => {
-    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    if (!hasWorkspacePermission(currentUser.role, currentUser.email, state.permissionMatrix, 'create_requests')) {
+      denyPermission('Verify QA checklist gates', 'Editor or Super Admin');
+      return;
+    }
     const target = state.requests.find((r) => r.id === requestId);
     if (!target) return;
     const item = target.checklist.find((c) => c.id === itemId);
@@ -3106,7 +3172,10 @@ export default function App() {
 
   // Stage 1 Editor / QA Sign-Off for Two-Tier Escalated Approval Chain
   const handleStage1SignOff = (requestId: string, comment?: string) => {
-    if (currentUser.role !== 'Admin') return;
+    if (!hasWorkspacePermission(currentUser.role, currentUser.email, state.permissionMatrix, 'approve_requests')) {
+      denyPermission('Complete Stage 1 QA approval sign-off', 'Super Admin');
+      return;
+    }
     const target = state.requests.find((r) => r.id === requestId);
     if (!target) return;
     const actor = getActorForRole(state.activeRole, state.teamMembers);
@@ -3168,7 +3237,10 @@ export default function App() {
 
   // Update Cost-Center Actual Spend on an individual request
   const handleUpdateRequestFinancials = (requestId: string, actualSpend: number) => {
-    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    if (!hasWorkspacePermission(currentUser.role, currentUser.email, state.permissionMatrix, 'create_requests')) {
+      denyPermission('Update cost-center spend', 'Editor or Super Admin');
+      return;
+    }
     const target = state.requests.find((r) => r.id === requestId);
     if (!target) return;
     const cur = target.currency || 'USD';
@@ -3243,9 +3315,22 @@ export default function App() {
     nextStatus: RequestStatus,
     comment?: string,
   ) => {
-    if (currentUser.role !== 'Admin') return;
+    if (!hasWorkspacePermission(currentUser.role, currentUser.email, state.permissionMatrix, 'approve_requests')) {
+      denyPermission('Approve, reject, or transition workflow status', 'Super Admin');
+      return;
+    }
     const targetBefore = state.requests.find((r) => r.id === requestId);
     if (!targetBefore) return;
+
+    const cleanComment = comment?.trim() || undefined;
+    if (nextStatus === 'Rejected' && (!cleanComment || cleanComment.length < 3)) {
+      pushToast(
+        'Rejection Reason Required',
+        `Please enter a clear rejection reason (at least 3 characters) before rejecting ${requestId}.`,
+        'warning',
+      );
+      return;
+    }
 
     const thresholdUsd = branding.approvalBudgetThresholdUsd ?? 5000;
     const isTwoTier = requiresTwoTierApproval(targetBefore, thresholdUsd);
@@ -3284,11 +3369,13 @@ export default function App() {
       nextStatus === 'Revision Required' || nextStatus === 'Submitted' || nextStatus === 'Draft';
 
     const detailText =
-      nextStatus === 'Approved' && isTwoTier
-        ? `Stage 2 Executive Final Sign-Off & Approved from ${targetBefore.status} by ${actor.name}.${comment ? ` Remarks: ${comment}` : ''}`
-        : comment
-          ? `Transitioned status from ${targetBefore.status} to ${nextStatus}. Remarks: ${comment}`
-          : `Transitioned status from ${targetBefore.status} to ${nextStatus}.`;
+      nextStatus === 'Rejected'
+        ? `Rejected from ${targetBefore.status} by ${actor.name} (${actor.email}). Rejection Reason: ${cleanComment}`
+        : nextStatus === 'Approved' && isTwoTier
+          ? `Stage 2 Executive Final Sign-Off & Approved from ${targetBefore.status} by ${actor.name}.${cleanComment ? ` Remarks: ${cleanComment}` : ''}`
+          : cleanComment
+            ? `Transitioned status from ${targetBefore.status} to ${nextStatus} by ${actor.name}. Remarks: ${cleanComment}`
+            : `Transitioned status from ${targetBefore.status} to ${nextStatus} by ${actor.name}.`;
 
     const syncAudit = createAuditEvent(requestId, 'Status Changed', detailText, state.activeRole);
 
@@ -3313,10 +3400,15 @@ export default function App() {
       title:
         nextStatus === 'Approved'
           ? `Task Completed: ${requestId}`
-          : `${requestId} marked ${nextStatus}`,
-      message: comment
-        ? `${actor.name}: ${comment}`
-        : `${actor.name} moved ${requestId} ("${targetBefore.title}") to ${nextStatus}.`,
+          : nextStatus === 'Rejected'
+            ? `Request Rejected: ${requestId}`
+            : `${requestId} marked ${nextStatus}`,
+      message:
+        nextStatus === 'Rejected'
+          ? `Rejected by ${actor.name} — Reason: ${cleanComment}`
+          : cleanComment
+            ? `${actor.name}: ${cleanComment}`
+            : `${actor.name} moved ${requestId} ("${targetBefore.title}") to ${nextStatus}.`,
       timestamp: now,
       read: false,
       requestId,
@@ -3343,10 +3435,24 @@ export default function App() {
             : stage2SignOff ?? req.stage2Approval,
           revisionReason:
             nextStatus === 'Revision Required'
-              ? comment
+              ? cleanComment
               : nextStatus === 'Submitted' || nextStatus === 'Approved'
                 ? undefined
                 : req.revisionReason,
+          rejectionReason:
+            nextStatus === 'Rejected'
+              ? cleanComment
+              : nextStatus === 'Submitted' || nextStatus === 'Approved' || nextStatus === 'Under QA Review'
+                ? undefined
+                : req.rejectionReason,
+          reviewedBy:
+            nextStatus === 'Approved' || nextStatus === 'Rejected' || nextStatus === 'Under QA Review'
+              ? actor.name
+              : req.reviewedBy,
+          reviewedAt:
+            nextStatus === 'Approved' || nextStatus === 'Rejected' || nextStatus === 'Under QA Review'
+              ? now
+              : req.reviewedAt,
           auditTrail: [...req.auditTrail, syncAudit],
         };
       });
@@ -3362,7 +3468,7 @@ export default function App() {
               timestamp: now,
               actorName: actor.name,
               eventType: 'Request Approved',
-              details: `Approved ${target.category} ${requestId} ("${target.title}") for ${target.submittedBy}${comment ? ` — Remarks: ${comment}` : '.'}`,
+              details: `Approved ${target.category} ${requestId} ("${target.title}") for ${target.submittedBy}${cleanComment ? ` — Remarks: ${cleanComment}` : '.'}`,
               requestId,
             };
             return {
@@ -3409,7 +3515,7 @@ export default function App() {
               timestamp: now,
               actorName: actor.name,
               eventType: 'Request Approved',
-              details: `Approved ${targetBefore.category} ${requestId} ("${targetBefore.title}") for ${targetBefore.submittedBy}${comment ? ` — Remarks: ${comment}` : '.'}`,
+              details: `Approved ${targetBefore.category} ${requestId} ("${targetBefore.title}") for ${targetBefore.submittedBy}${cleanComment ? ` — Remarks: ${cleanComment}` : '.'}`,
               requestId,
             },
             ...approvedLinkedAssetBefore.history,
@@ -3421,7 +3527,7 @@ export default function App() {
       dataService.requests.updateStatus(
         requestId,
         nextStatus,
-        nextStatus === 'Revision Required' ? comment : undefined,
+        nextStatus === 'Revision Required' || nextStatus === 'Rejected' ? cleanComment : undefined,
         now,
         syncAudit,
         syncNotif,
@@ -3445,12 +3551,15 @@ export default function App() {
             ? 'warning'
             : 'info';
 
-    pushToast(`${requestId} → ${nextStatus}`, comment || 'Workflow state updated and logged.', toastVariant);
+    pushToast(`${requestId} → ${nextStatus}`, cleanComment || 'Workflow state updated and logged.', toastVariant);
   };
 
   // Add comment to audit trail
   const handleAddComment = (requestId: string, comment: string) => {
-    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    if (!hasWorkspacePermission(currentUser.role, currentUser.email, state.permissionMatrix, 'create_requests')) {
+      denyPermission('Add audit notes', 'Editor or Super Admin');
+      return;
+    }
     if (currentUser.role === 'Editor') {
       const target = state.requests.find((r) => r.id === requestId);
       submitEditorChangeProposal({
@@ -3500,7 +3609,10 @@ export default function App() {
 
   // Escalate high-priority or overdue request to Admin
   const handleEscalateRequest = (requestId: string) => {
-    if (currentUser.role !== 'Admin') return;
+    if (!hasWorkspacePermission(currentUser.role, currentUser.email, state.permissionMatrix, 'approve_requests')) {
+      denyPermission('Escalate operational requests', 'Super Admin');
+      return;
+    }
     const target = state.requests.find((r) => r.id === requestId);
     if (!target) return;
 
@@ -3558,7 +3670,10 @@ export default function App() {
   const handleCreateProject = (
     projectInput: Omit<CompanyProject, 'id' | 'updatedAt'>,
   ) => {
-    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    if (!hasWorkspacePermission(currentUser.role, currentUser.email, state.permissionMatrix, 'manage_projects')) {
+      denyPermission('Create project or client record', 'Editor or Super Admin');
+      return;
+    }
     const now = new Date().toISOString();
     const newProject: CompanyProject = {
       ...projectInput,
@@ -3620,7 +3735,10 @@ export default function App() {
     projectId: string,
     patch: Partial<Omit<CompanyProject, 'id' | 'updatedAt'>>,
   ) => {
-    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    if (!hasWorkspacePermission(currentUser.role, currentUser.email, state.permissionMatrix, 'manage_projects')) {
+      denyPermission('Update project record', 'Editor or Super Admin');
+      return;
+    }
     const target = state.projects.find((p) => p.id === projectId);
     if (!target) return;
 
@@ -3718,7 +3836,10 @@ export default function App() {
   };
 
   const handleDeleteProject = (projectId: string) => {
-    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    if (!hasWorkspacePermission(currentUser.role, currentUser.email, state.permissionMatrix, 'manage_projects')) {
+      denyPermission('Delete project record', 'Editor or Super Admin');
+      return;
+    }
     const target = state.projects.find((p) => p.id === projectId);
     if (!target) return;
 
@@ -3768,7 +3889,10 @@ export default function App() {
   const handleRegisterAsset = (
     assetInput: Omit<CompanyAsset, 'id' | 'updatedAt' | 'history'>,
   ) => {
-    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    if (!hasWorkspacePermission(currentUser.role, currentUser.email, state.permissionMatrix, 'manage_assets')) {
+      denyPermission('Register inventory asset', 'Editor or Super Admin');
+      return;
+    }
     const now = new Date().toISOString();
     const actor = getActorForRole(state.activeRole, state.teamMembers);
     const initialHistory: AssetHistoryEntry = {
@@ -3842,7 +3966,10 @@ export default function App() {
       notes?: string;
     },
   ) => {
-    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    if (!hasWorkspacePermission(currentUser.role, currentUser.email, state.permissionMatrix, 'manage_assets')) {
+      denyPermission('Transfer asset custody', 'Editor or Super Admin');
+      return;
+    }
     const target = state.assets.find((a) => a.id === assetId);
     if (!target) return;
 
@@ -3935,7 +4062,10 @@ export default function App() {
       notes: string;
     },
   ) => {
-    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    if (!hasWorkspacePermission(currentUser.role, currentUser.email, state.permissionMatrix, 'manage_assets')) {
+      denyPermission('Log asset maintenance', 'Editor or Super Admin');
+      return;
+    }
     const target = state.assets.find((a) => a.id === assetId);
     if (!target) return;
 
@@ -4009,12 +4139,18 @@ export default function App() {
   const handlePublishSop = (
     sopInput: Omit<SopDocument, 'id' | 'acknowledgments' | 'updatedAt'>,
   ) => {
-    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    if (!hasWorkspacePermission(currentUser.role, currentUser.email, state.permissionMatrix, 'publish_sops')) {
+      denyPermission('Publish SOP or policy document', 'Editor or Super Admin');
+      return;
+    }
     const now = new Date().toISOString();
     const newSop: SopDocument = {
       ...sopInput,
       id: `sop-${Date.now()}`,
       acknowledgments: [],
+      workflowStatus: sopInput.workflowStatus ?? (currentUser.role === 'Admin' ? 'Approved' : 'Submitted'),
+      reviewedBy: currentUser.role === 'Admin' ? currentUser.name : sopInput.reviewedBy,
+      reviewedAt: currentUser.role === 'Admin' ? now : sopInput.reviewedAt,
       updatedAt: now,
     };
 
@@ -4065,7 +4201,10 @@ export default function App() {
   };
 
   const handleToggleSopMandatory = (sopId: string) => {
-    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    if (!hasWorkspacePermission(currentUser.role, currentUser.email, state.permissionMatrix, 'publish_sops')) {
+      denyPermission('Update SOP compliance policy', 'Editor or Super Admin');
+      return;
+    }
     const target = state.sops.find((s) => s.id === sopId);
     if (!target) return;
     const nextMandatory = !target.mandatoryRead;
@@ -4128,7 +4267,10 @@ export default function App() {
   };
 
   const handleAcknowledgeSop = (sopId: string) => {
-    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') {
+      denyPermission('Sign SOP compliance acknowledgment', 'Editor or Super Admin');
+      return;
+    }
     const target = state.sops.find((s) => s.id === sopId);
     if (!target) return;
 
@@ -4190,7 +4332,10 @@ export default function App() {
   });
 
   const handleReviseSop = (sopId: string, patch: SopRevisionPayload) => {
-    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    if (!hasWorkspacePermission(currentUser.role, currentUser.email, state.permissionMatrix, 'publish_sops')) {
+      denyPermission('Publish SOP revision', 'Editor or Super Admin');
+      return;
+    }
     const target = state.sops.find((s) => s.id === sopId);
     if (!target) return;
     const now = new Date().toISOString();
@@ -4216,6 +4361,10 @@ export default function App() {
       authorName: currentUser.name,
       versions: nextVersions,
       approvalStamp: undefined,
+      workflowStatus: currentUser.role === 'Admin' ? 'Approved' : 'Submitted',
+      rejectionReason: undefined,
+      reviewedBy: currentUser.role === 'Admin' ? currentUser.name : undefined,
+      reviewedAt: currentUser.role === 'Admin' ? now : undefined,
       updatedAt: now,
     };
     const auditEntry = createAuditEvent(
@@ -4238,6 +4387,90 @@ export default function App() {
     pushToast(`SOP Revised · ${target.code}`, `Updated to ${updatedSop.version}.`, 'success');
   };
 
+  const handleTransitionSopWorkflow = (
+    sopId: string,
+    nextStatus: WorkflowApprovalStatus,
+    reason?: string,
+  ) => {
+    if (!isSuperAdminOperator) {
+      denyPermission('Approve, reject, or review SOP documents', 'Super Admin');
+      return;
+    }
+    const target = state.sops.find((s) => s.id === sopId);
+    if (!target) return;
+    const cleanReason = reason?.trim() || undefined;
+    if (nextStatus === 'Rejected' && (!cleanReason || cleanReason.length < 3)) {
+      pushToast(
+        'Rejection Reason Required',
+        'Please provide a clear rejection reason (at least 3 characters).',
+        'warning',
+      );
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const updatedSop: SopDocument = {
+      ...target,
+      workflowStatus: nextStatus,
+      rejectionReason: nextStatus === 'Rejected' ? cleanReason : undefined,
+      reviewedBy: currentUser.name,
+      reviewedAt: now,
+      approvalStamp: nextStatus === 'Rejected' ? undefined : target.approvalStamp,
+      updatedAt: now,
+    };
+
+    const auditEntry = createAuditEvent(
+      target.code,
+      'Team Updated',
+      nextStatus === 'Rejected'
+        ? `${currentUser.name} (${currentUser.email}) marked SOP ${target.code} ("${target.title}") as Rejected. Reason: ${cleanReason}`
+        : `${currentUser.name} (${currentUser.email}) marked SOP ${target.code} ("${target.title}") as ${nextStatus}.`,
+    );
+
+    const authorMember = state.teamMembers.find(
+      (m) => m.name.trim().toLowerCase() === target.authorName.trim().toLowerCase(),
+    );
+    const notif: AppNotification = {
+      id: `notif-sop-wf-${Date.now()}`,
+      title: `SOP ${nextStatus}: ${target.code}`,
+      message:
+        nextStatus === 'Rejected'
+          ? `Rejected by ${currentUser.name} — Reason: ${cleanReason}`
+          : `${currentUser.name} marked ${target.code} ("${target.title}") as ${nextStatus}.`,
+      timestamp: now,
+      read: false,
+      targetSection: 'sops',
+      recipientEmail: authorMember?.email,
+      recipientRole: authorMember?.email ? undefined : 'all',
+      actorEmail: currentUser.email,
+      category: 'system',
+      severity: nextStatus === 'Rejected' ? 'danger' : nextStatus === 'Approved' ? 'success' : 'info',
+    };
+
+    const nextSops = state.sops.map((s) => (s.id === sopId ? updatedSop : s));
+    setState((prev) => ({
+      ...prev,
+      sops: nextSops,
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+      notifications: [notif, ...prev.notifications],
+    }));
+
+    void Promise.all([
+      dataService.sops.upsert(updatedSop, auditEntry, nextSops),
+      dataService.notifications.create(notif),
+    ])
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      })
+      .catch(handleCloudWriteError);
+
+    pushToast(
+      `SOP ${nextStatus} · ${target.code}`,
+      nextStatus === 'Rejected' ? `Reason: ${cleanReason}` : `${target.title} marked ${nextStatus}.`,
+      nextStatus === 'Rejected' ? 'error' : nextStatus === 'Approved' ? 'success' : 'info',
+    );
+  };
+
   const handleStampSop = (sopId: string) => {
     if (!isSuperAdminOperator) {
       pushToast('Super Admin Required', 'Only the verified Super Admin can digitally stamp SOPs.', 'error');
@@ -4249,6 +4482,10 @@ export default function App() {
     const updatedSop: SopDocument = {
       ...target,
       approvalStamp: stamp,
+      workflowStatus: 'Approved',
+      rejectionReason: undefined,
+      reviewedBy: currentUser.name,
+      reviewedAt: stamp.stampedAt,
       updatedAt: stamp.stampedAt,
     };
     const auditEntry = createAuditEvent(
@@ -4426,7 +4663,10 @@ export default function App() {
 
   // Leave & Time-Off Approvals Handlers (`leave_requests` + `nexops_leaves`)
   const handleCreateLeave = (payload: CreateLeavePayload) => {
-    if (currentUser.role !== 'Admin') return;
+    if (!hasWorkspacePermission(currentUser.role, currentUser.email, state.permissionMatrix, 'create_requests')) {
+      denyPermission('Submit leave request', 'Editor or Super Admin');
+      return;
+    }
     const now = new Date().toISOString();
     const maxNum = state.leaves.reduce((max, l) => {
       const match = l.code.match(/^LVE-\d{4}-(\d+)$/);
@@ -4445,7 +4685,7 @@ export default function App() {
       endDate: payload.endDate,
       totalDays: payload.totalDays,
       reason: payload.reason,
-      status: 'Pending',
+      status: 'Submitted',
       backupDelegateName: payload.backupDelegateName,
       createdAt: now,
       updatedAt: now,
@@ -4486,33 +4726,55 @@ export default function App() {
       })
       .catch(handleCloudWriteError);
 
-    pushToast(`Submitted ${code}`, `${payload.leaveType} (${payload.totalDays} days) awaiting Admin approval.`, 'success');
+    pushToast(`Submitted ${code}`, `${payload.leaveType} (${payload.totalDays} days) awaiting Admin review.`, 'success');
   };
 
   const handleDecisionLeave = (
     leaveId: string,
-    decision: 'Approved' | 'Rejected',
+    decision: 'Under Review' | 'Approved' | 'Rejected',
     reviewerNotes?: string,
   ) => {
-    if (currentUser.role !== 'Admin') {
-      pushToast('Admin Access Required', 'Only Admins can approve or reject leave requests.', 'error');
+    if (!hasWorkspacePermission(currentUser.role, currentUser.email, state.permissionMatrix, 'approve_leaves')) {
+      denyPermission('Review, approve, or reject leave requests', 'Super Admin');
       return;
     }
     const target = state.leaves.find((l) => l.id === leaveId);
     if (!target) return;
+    const cleanNotes = reviewerNotes?.trim() || undefined;
+    if (decision === 'Rejected' && (!cleanNotes || cleanNotes.length < 3)) {
+      pushToast(
+        'Rejection Reason Required',
+        'Please provide a clear rejection reason (at least 3 characters).',
+        'warning',
+      );
+      return;
+    }
+
     const now = new Date().toISOString();
     const updatedLeave: LeaveRequest = {
       ...target,
       status: decision,
       reviewerName: currentUser.name,
-      reviewerNotes,
+      reviewerEmail: currentUser.email,
+      reviewerNotes: cleanNotes,
+      rejectionReason: decision === 'Rejected' ? cleanNotes : undefined,
+      reviewedAt: now,
       updatedAt: now,
     };
 
+    const auditAction: AuditActionType =
+      decision === 'Approved'
+        ? 'Leave Approved'
+        : decision === 'Rejected'
+          ? 'Leave Rejected'
+          : 'Team Updated';
+
     const auditEntry = createAuditEvent(
       target.code,
-      decision === 'Approved' ? 'Leave Approved' : 'Leave Rejected',
-      `${currentUser.name} marked leave request ${target.code} (${target.employeeName}, ${target.totalDays}d ${target.leaveType}) as ${decision}.${reviewerNotes ? ` Remarks: ${reviewerNotes}` : ''}`,
+      auditAction,
+      decision === 'Rejected'
+        ? `${currentUser.name} (${currentUser.email}) marked leave request ${target.code} (${target.employeeName}, ${target.totalDays}d ${target.leaveType}) as Rejected. Rejection Reason: ${cleanNotes}`
+        : `${currentUser.name} (${currentUser.email}) marked leave request ${target.code} (${target.employeeName}, ${target.totalDays}d ${target.leaveType}) as ${decision}.${cleanNotes ? ` Remarks: ${cleanNotes}` : ''}`,
     );
 
     const employeeMember = state.teamMembers.find(
@@ -4525,14 +4787,19 @@ export default function App() {
     const notification: AppNotification = {
       id: `notif-lve-dec-${Date.now()}`,
       title: `Leave ${decision}: ${target.code}`,
-      message: `${currentUser.name} ${decision.toLowerCase()} your ${target.leaveType} leave (${target.startDate}–${target.endDate}).`,
+      message:
+        decision === 'Rejected'
+          ? `Rejected by ${currentUser.name} — Reason: ${cleanNotes}`
+          : decision === 'Under Review'
+            ? `${currentUser.name} moved your ${target.leaveType} leave (${target.startDate}–${target.endDate}) to Under Review.`
+            : `${currentUser.name} approved your ${target.leaveType} leave (${target.startDate}–${target.endDate}).`,
       timestamp: now,
       read: false,
       targetSection: 'leaves',
       recipientEmail: target.employeeEmail || employeeMember?.email,
       actorEmail: currentUser.email,
       category: 'leave',
-      severity: decision === 'Approved' ? 'success' : 'warning',
+      severity: decision === 'Approved' ? 'success' : decision === 'Rejected' ? 'danger' : 'info',
     };
 
     setState((prev) => ({
@@ -4551,11 +4818,13 @@ export default function App() {
       })
       .catch(handleCloudWriteError);
 
-    if (userPrefsRef.current.approvalLeaveAlerts) {
+    if (userPrefsRef.current.approvalLeaveAlerts || decision === 'Rejected') {
       pushToast(
         `${target.code} ${decision}`,
-        `${target.employeeName} (${target.totalDays}d ${target.leaveType})`,
-        decision === 'Approved' ? 'success' : 'warning',
+        decision === 'Rejected'
+          ? `Reason: ${cleanNotes}`
+          : `${target.employeeName} (${target.totalDays}d ${target.leaveType})`,
+        decision === 'Approved' ? 'success' : decision === 'Rejected' ? 'error' : 'info',
       );
     }
   };
@@ -5317,7 +5586,10 @@ export default function App() {
   };
 
   const handleEditAnnouncement = (updatedNotice: CompanyAnnouncement) => {
-    if (!isSuperAdminOperator) return;
+    if (!isSuperAdminOperator) {
+      denyPermission('Edit official announcements', 'Super Admin');
+      return;
+    }
     const now = new Date().toISOString();
     const nextNotice: CompanyAnnouncement = {
       ...updatedNotice,
@@ -5346,7 +5618,10 @@ export default function App() {
   };
 
   const handleTogglePinAnnouncement = (announcementId: string) => {
-    if (!isSuperAdminOperator) return;
+    if (!isSuperAdminOperator) {
+      denyPermission('Pin or unpin announcements', 'Super Admin');
+      return;
+    }
     const target = state.announcements.find((a) => a.id === announcementId);
     if (!target) return;
     const nextPinned = !target.pinned;
@@ -5376,7 +5651,10 @@ export default function App() {
   };
 
   const handleDeleteAnnouncement = (announcementId: string) => {
-    if (!isSuperAdminOperator) return;
+    if (!isSuperAdminOperator) {
+      denyPermission('Delete announcements', 'Super Admin');
+      return;
+    }
     const target = state.announcements.find((a) => a.id === announcementId);
     if (!target) return;
     const nowIso = new Date().toISOString();
@@ -5416,7 +5694,10 @@ export default function App() {
   };
 
   const handleArchiveAnnouncement = (announcementId: string) => {
-    if (!isSuperAdminOperator) return;
+    if (!isSuperAdminOperator) {
+      denyPermission('Archive announcements', 'Super Admin');
+      return;
+    }
     const target = state.announcements.find((a) => a.id === announcementId);
     if (!target) return;
     const nextNotice: CompanyAnnouncement = {
@@ -5444,7 +5725,10 @@ export default function App() {
   };
 
   const handleRestoreAnnouncement = (announcementId: string) => {
-    if (!isSuperAdminOperator) return;
+    if (!isSuperAdminOperator) {
+      denyPermission('Republish archived announcements', 'Super Admin');
+      return;
+    }
     const target = state.announcements.find((a) => a.id === announcementId);
     if (!target) return;
     const nextNotice: CompanyAnnouncement = {
@@ -5473,7 +5757,10 @@ export default function App() {
 
   // Meetings & Action Items (MoM) Tracker Handlers
   const handleCreateMeeting = (payload: CreateMeetingPayload) => {
-    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    if (!hasWorkspacePermission(currentUser.role, currentUser.email, state.permissionMatrix, 'manage_meetings')) {
+      denyPermission('Create meeting minutes', 'Editor or Super Admin');
+      return;
+    }
     const now = new Date().toISOString();
     const maxNum = state.meetings.reduce((max, m) => {
       const match = m.code.match(/^MOM-\d{4}-(\d+)$/);
@@ -5559,7 +5846,10 @@ export default function App() {
       status?: MeetingActionStatus;
     },
   ) => {
-    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    if (!hasWorkspacePermission(currentUser.role, currentUser.email, state.permissionMatrix, 'manage_meetings')) {
+      denyPermission('Add MoM action items', 'Editor or Super Admin');
+      return;
+    }
     const meeting = state.meetings.find((m) => m.id === meetingId);
     if (!meeting) return;
     const actionLabel = item.title?.trim() || item.description;
@@ -5627,7 +5917,10 @@ export default function App() {
     actionItemId: string,
     nextStatus: MeetingActionStatus,
   ) => {
-    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    if (!hasWorkspacePermission(currentUser.role, currentUser.email, state.permissionMatrix, 'manage_meetings')) {
+      denyPermission('Update MoM action item status', 'Editor or Super Admin');
+      return;
+    }
     const meeting = state.meetings.find((m) => m.id === meetingId);
     const actionItem = meeting?.actionItems.find((a) => a.id === actionItemId);
     if (!meeting || !actionItem) return;
@@ -5686,7 +5979,10 @@ export default function App() {
   };
 
   const handleConvertActionToRequest = (meetingId: string, actionItemId: string) => {
-    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    if (!hasWorkspacePermission(currentUser.role, currentUser.email, state.permissionMatrix, 'manage_meetings')) {
+      denyPermission('Convert MoM action item to request', 'Editor or Super Admin');
+      return;
+    }
     const meeting = state.meetings.find((m) => m.id === meetingId);
     const actionItem = meeting?.actionItems.find((a) => a.id === actionItemId);
     if (!meeting || !actionItem || actionItem.linkedRequestId) return;
@@ -5804,7 +6100,10 @@ export default function App() {
   };
 
   const handleCompleteMeetingActionItem = (meetingId: string, actionItemId: string) => {
-    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    if (!hasWorkspacePermission(currentUser.role, currentUser.email, state.permissionMatrix, 'manage_meetings')) {
+      denyPermission('Complete MoM action items', 'Editor or Super Admin');
+      return;
+    }
     const meeting = state.meetings.find((m) => m.id === meetingId);
     const actionItem = meeting?.actionItems.find((a) => a.id === actionItemId);
     if (!meeting || !actionItem) return;
@@ -5909,7 +6208,10 @@ export default function App() {
   };
 
   const handleDeleteMeeting = (meetingId: string) => {
-    if (currentUser.role !== 'Admin') return;
+    if (!isSuperAdminOperator) {
+      denyPermission('Delete meeting minutes', 'Super Admin');
+      return;
+    }
     const target = state.meetings.find((m) => m.id === meetingId);
     if (!target) return;
     const nowIso = new Date().toISOString();
@@ -6438,7 +6740,10 @@ export default function App() {
   };
 
   const handleSaveWorkspaceLink = (link: WorkspaceSavedLink) => {
-    if (currentUser.role !== 'Admin') return;
+    if (!isSuperAdminOperator) {
+      denyPermission('Add shared workspace links', 'Super Admin');
+      return;
+    }
     const toolLabel =
       link.toolType === 'docs'
         ? 'Google Docs'
@@ -6471,7 +6776,10 @@ export default function App() {
   };
 
   const handleDeleteWorkspaceLink = (linkId: string) => {
-    if (currentUser.role !== 'Admin') return;
+    if (!isSuperAdminOperator) {
+      denyPermission('Delete shared workspace links', 'Super Admin');
+      return;
+    }
     const target = state.workspaceLinks.find((l) => l.id === linkId);
     if (!target) return;
     const auditEntry = createAuditEvent(
@@ -6498,7 +6806,10 @@ export default function App() {
 
   // Task Sub-Tasks Checklist & Threaded Team Comments (@mentions)
   const handleAddSubtask = (requestId: string, title: string) => {
-    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    if (!hasWorkspacePermission(currentUser.role, currentUser.email, state.permissionMatrix, 'create_requests')) {
+      denyPermission('Add task sub-tasks', 'Editor or Super Admin');
+      return;
+    }
     if (currentUser.role === 'Editor') {
       submitEditorChangeProposal({
         module: 'requests',
@@ -6545,7 +6856,10 @@ export default function App() {
   };
 
   const handleToggleSubtask = (subtaskId: string) => {
-    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    if (!hasWorkspacePermission(currentUser.role, currentUser.email, state.permissionMatrix, 'create_requests')) {
+      denyPermission('Toggle task sub-tasks', 'Editor or Super Admin');
+      return;
+    }
     const target = state.subtasks.find((s) => s.id === subtaskId);
     if (!target) return;
     const nextCompleted = !target.completed;
@@ -6599,7 +6913,10 @@ export default function App() {
   };
 
   const handleDeleteSubtask = (subtaskId: string) => {
-    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    if (!hasWorkspacePermission(currentUser.role, currentUser.email, state.permissionMatrix, 'create_requests')) {
+      denyPermission('Remove task sub-tasks', 'Editor or Super Admin');
+      return;
+    }
     const target = state.subtasks.find((s) => s.id === subtaskId);
     if (!target) return;
     if (currentUser.role === 'Editor') {
@@ -6638,7 +6955,10 @@ export default function App() {
   };
 
   const handleAddTaskComment = (requestId: string, body: string, mentions: string[]) => {
-    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    if (!hasWorkspacePermission(currentUser.role, currentUser.email, state.permissionMatrix, 'create_requests')) {
+      denyPermission('Post task discussion comments', 'Editor or Super Admin');
+      return;
+    }
     if (currentUser.role === 'Editor') {
       submitEditorChangeProposal({
         module: 'requests',
@@ -6726,25 +7046,34 @@ export default function App() {
 
   // Department Document Vault Handlers
   const handleAddVaultDocument = (item: DocumentVaultItem) => {
-    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    if (!hasWorkspacePermission(currentUser.role, currentUser.email, state.permissionMatrix, 'publish_sops')) {
+      denyPermission('Upload Document Vault files', 'Editor or Super Admin');
+      return;
+    }
+    const normalizedItem: DocumentVaultItem = {
+      ...item,
+      workflowStatus: item.workflowStatus ?? (currentUser.role === 'Admin' ? 'Approved' : 'Submitted'),
+      reviewedBy: currentUser.role === 'Admin' ? currentUser.name : item.reviewedBy,
+      reviewedAt: currentUser.role === 'Admin' ? item.updatedAt : item.reviewedAt,
+    };
     if (currentUser.role === 'Editor') {
       submitEditorChangeProposal({
         module: 'vault',
         moduleLabel: 'Document Vault',
         action: 'create',
-        targetId: item.id,
-        itemLabel: item.title,
-        summary: `Add document "${item.title}" to ${item.folder} (${item.accessTag}, ${item.department})`,
+        targetId: normalizedItem.id,
+        itemLabel: normalizedItem.title,
+        summary: `Add document "${normalizedItem.title}" to ${normalizedItem.folder} (${normalizedItem.accessTag}, ${normalizedItem.department})`,
         diffs: [
-          { field: 'Title', before: '— (New Document)', after: item.title },
-          { field: 'Folder', before: '—', after: item.folder },
-          { field: 'Department', before: '—', after: item.department },
-          { field: 'Access Policy', before: '—', after: item.accessTag },
-          ...(item.fileName ? [{ field: 'File Name', before: '—', after: item.fileName }] : []),
+          { field: 'Title', before: '— (New Document)', after: normalizedItem.title },
+          { field: 'Folder', before: '—', after: normalizedItem.folder },
+          { field: 'Department', before: '—', after: normalizedItem.department },
+          { field: 'Access Policy', before: '—', after: normalizedItem.accessTag },
+          ...(normalizedItem.fileName ? [{ field: 'File Name', before: '—', after: normalizedItem.fileName }] : []),
         ],
         payload: {
           op: 'vault_create',
-          document: item,
+          document: normalizedItem,
         },
       });
       return;
@@ -6753,12 +7082,12 @@ export default function App() {
     const auditEntry = createAuditEvent(
       'DOC-VAULT',
       'Vault Updated',
-      `Added "${item.title}" to ${item.folder} (${item.accessTag}, ${item.department}).`,
+      `Added "${normalizedItem.title}" to ${normalizedItem.folder} (${normalizedItem.accessTag}, ${normalizedItem.department}).`,
     );
     const vaultNotif: AppNotification = {
       id: `notif-vault-${Date.now()}`,
-      title: `Document Uploaded: ${item.title}`,
-      message: `${currentUser.name} uploaded "${item.title}" to ${item.folder}.`,
+      title: `Document Uploaded: ${normalizedItem.title}`,
+      message: `${currentUser.name} uploaded "${normalizedItem.title}" to ${normalizedItem.folder}.`,
       timestamp: nowIso,
       read: false,
       targetSection: 'vault',
@@ -6767,26 +7096,29 @@ export default function App() {
       category: 'system',
       severity: 'info',
     };
-    const nextVaultDocs = [item, ...state.vaultDocuments];
+    const nextVaultDocs = [normalizedItem, ...state.vaultDocuments];
     setState((prev) => ({
       ...prev,
-      vaultDocuments: [item, ...prev.vaultDocuments],
+      vaultDocuments: [normalizedItem, ...prev.vaultDocuments],
       globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
       notifications: [vaultNotif, ...prev.notifications],
     }));
     void Promise.all([
-      dataService.documentVault.upsert(item, auditEntry, nextVaultDocs),
+      dataService.documentVault.upsert(normalizedItem, auditEntry, nextVaultDocs),
       dataService.notifications.create(vaultNotif),
     ])
       .then(() => {
         if (dataService.isSupabaseConfigured()) setDbConnected(true);
       })
       .catch(handleCloudWriteError);
-    pushToast('Document Added to Vault', `${item.title} (${item.folder})`, 'success');
+    pushToast('Document Added to Vault', `${normalizedItem.title} (${normalizedItem.folder})`, 'success');
   };
 
   const handleUploadVaultNewVersion = (docId: string, versionMeta: VaultNewVersionPayload) => {
-    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    if (!hasWorkspacePermission(currentUser.role, currentUser.email, state.permissionMatrix, 'publish_sops')) {
+      denyPermission('Upload new document version', 'Editor or Super Admin');
+      return;
+    }
     const target = state.vaultDocuments.find((d) => d.id === docId);
     if (!target) return;
     const nowIso = new Date().toISOString();
@@ -6866,7 +7198,10 @@ export default function App() {
     reviewers: { email: string; name: string }[],
     note?: string,
   ) => {
-    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    if (!hasWorkspacePermission(currentUser.role, currentUser.email, state.permissionMatrix, 'publish_sops')) {
+      denyPermission('Request document sign-off', 'Editor or Super Admin');
+      return;
+    }
     const target = state.vaultDocuments.find((d) => d.id === docId);
     if (!target || reviewers.length === 0) return;
 
@@ -7010,6 +7345,181 @@ export default function App() {
     pushToast('Document Signed Off', `Recorded sign-off for "${target.title}".`, 'success');
   };
 
+  const handleTransitionVaultWorkflow = (
+    docId: string,
+    nextStatus: WorkflowApprovalStatus,
+    reason?: string,
+  ) => {
+    if (!isSuperAdminOperator) {
+      denyPermission('Approve, reject, or review vault documents', 'Super Admin');
+      return;
+    }
+    const target = state.vaultDocuments.find((d) => d.id === docId);
+    if (!target) return;
+    const cleanReason = reason?.trim() || undefined;
+    if (nextStatus === 'Rejected' && (!cleanReason || cleanReason.length < 3)) {
+      pushToast(
+        'Rejection Reason Required',
+        'Please provide a clear rejection reason (at least 3 characters).',
+        'warning',
+      );
+      return;
+    }
+
+    const nowIso = new Date().toISOString();
+    const updatedDoc: DocumentVaultItem = {
+      ...target,
+      workflowStatus: nextStatus,
+      rejectionReason: nextStatus === 'Rejected' ? cleanReason : undefined,
+      reviewedBy: currentUser.name,
+      reviewedAt: nowIso,
+      approvalStamp: nextStatus === 'Rejected' ? undefined : target.approvalStamp,
+      updatedAt: nowIso,
+    };
+
+    const auditEntry = createAuditEvent(
+      'DOC-VAULT',
+      'Vault Updated',
+      nextStatus === 'Rejected'
+        ? `${currentUser.name} (${currentUser.email}) marked document "${target.title}" as Rejected. Reason: ${cleanReason}`
+        : `${currentUser.name} (${currentUser.email}) marked document "${target.title}" as ${nextStatus}.`,
+    );
+
+    const notif: AppNotification = {
+      id: `notif-vault-wf-${Date.now()}`,
+      title: `Document ${nextStatus}: ${target.title}`,
+      message:
+        nextStatus === 'Rejected'
+          ? `Rejected by ${currentUser.name} — Reason: ${cleanReason}`
+          : `${currentUser.name} marked "${target.title}" (${target.folder}) as ${nextStatus}.`,
+      timestamp: nowIso,
+      read: false,
+      targetSection: 'vault',
+      recipientEmail: target.uploadedByEmail || undefined,
+      recipientRole: target.uploadedByEmail ? undefined : 'all',
+      actorEmail: currentUser.email,
+      category: 'signoff',
+      severity: nextStatus === 'Rejected' ? 'danger' : nextStatus === 'Approved' ? 'success' : 'info',
+    };
+
+    const nextVaultDocs = state.vaultDocuments.map((d) => (d.id === docId ? updatedDoc : d));
+    setState((prev) => ({
+      ...prev,
+      vaultDocuments: nextVaultDocs,
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+      notifications: [notif, ...prev.notifications],
+    }));
+
+    void Promise.all([
+      dataService.documentVault.upsert(updatedDoc, auditEntry, nextVaultDocs),
+      dataService.notifications.create(notif),
+    ])
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      })
+      .catch(handleCloudWriteError);
+
+    pushToast(
+      `Document ${nextStatus}`,
+      nextStatus === 'Rejected' ? `${target.title} — Reason: ${cleanReason}` : `${target.title} marked ${nextStatus}.`,
+      nextStatus === 'Rejected' ? 'error' : nextStatus === 'Approved' ? 'success' : 'info',
+    );
+  };
+
+  const handleDecisionVaultSignOff = (
+    docId: string,
+    signOffId: string,
+    decision: 'Under Review' | 'Approved' | 'Rejected',
+    reason?: string,
+  ) => {
+    if (!isApprovedUser || !currentUser.email.trim()) return;
+    const target = state.vaultDocuments.find((d) => d.id === docId);
+    const req = target?.signOffRequests?.find((r) => r.id === signOffId);
+    if (!target || !req) return;
+
+    const selfEmail = currentUser.email.trim().toLowerCase();
+    if (req.reviewerEmail.trim().toLowerCase() !== selfEmail && !isSuperAdminOperator) {
+      denyPermission('Review or reject this sign-off request', 'Assigned Reviewer or Super Admin');
+      return;
+    }
+
+    const cleanReason = reason?.trim() || undefined;
+    if (decision === 'Rejected' && (!cleanReason || cleanReason.length < 3)) {
+      pushToast(
+        'Rejection Reason Required',
+        'Please provide a clear rejection reason (at least 3 characters).',
+        'warning',
+      );
+      return;
+    }
+
+    const nowIso = new Date().toISOString();
+    const updatedDoc: DocumentVaultItem = {
+      ...target,
+      signOffRequests: (target.signOffRequests ?? []).map((r) =>
+        r.id === signOffId
+          ? {
+              ...r,
+              status: decision,
+              reviewedBy: currentUser.name,
+              reviewedAt: nowIso,
+              signedOffAt: decision === 'Approved' ? nowIso : r.signedOffAt,
+              rejectionReason: decision === 'Rejected' ? cleanReason : undefined,
+            }
+          : r,
+      ),
+      updatedAt: nowIso,
+    };
+
+    const auditEntry = createAuditEvent(
+      'DOC-VAULT',
+      'Vault Updated',
+      decision === 'Rejected'
+        ? `${currentUser.name} (${currentUser.email}) rejected sign-off on "${target.title}" (${target.currentVersion || 'v1.0'}). Reason: ${cleanReason}`
+        : `${currentUser.name} (${currentUser.email}) marked sign-off on "${target.title}" (${target.currentVersion || 'v1.0'}) as ${decision}.`,
+    );
+
+    const notif: AppNotification = {
+      id: `notif-signoff-dec-${Date.now()}`,
+      title: `Document Sign-Off ${decision}: ${target.title}`,
+      message:
+        decision === 'Rejected'
+          ? `Rejected by ${currentUser.name} — Reason: ${cleanReason}`
+          : `${currentUser.name} marked sign-off on "${target.title}" as ${decision}.`,
+      timestamp: nowIso,
+      read: false,
+      targetSection: 'vault',
+      recipientEmail: req.requestedByEmail || target.uploadedByEmail || undefined,
+      recipientRole: req.requestedByEmail || target.uploadedByEmail ? undefined : 'Admin',
+      actorEmail: currentUser.email,
+      category: 'signoff',
+      severity: decision === 'Approved' ? 'success' : decision === 'Rejected' ? 'danger' : 'info',
+    };
+
+    const nextVaultDocs = state.vaultDocuments.map((d) => (d.id === docId ? updatedDoc : d));
+    setState((prev) => ({
+      ...prev,
+      vaultDocuments: nextVaultDocs,
+      globalAuditLogs: [auditEntry, ...prev.globalAuditLogs],
+      notifications: [notif, ...prev.notifications],
+    }));
+
+    void Promise.all([
+      dataService.documentVault.upsert(updatedDoc, auditEntry, nextVaultDocs),
+      dataService.notifications.create(notif),
+    ])
+      .then(() => {
+        if (dataService.isSupabaseConfigured()) setDbConnected(true);
+      })
+      .catch(handleCloudWriteError);
+
+    pushToast(
+      `Sign-Off ${decision}`,
+      decision === 'Rejected' ? `Reason: ${cleanReason}` : `"${target.title}" updated.`,
+      decision === 'Rejected' ? 'error' : decision === 'Approved' ? 'success' : 'info',
+    );
+  };
+
   const handleStampVaultDocument = (docId: string) => {
     if (!isSuperAdminOperator) {
       pushToast('Super Admin Required', 'Only the verified Super Admin can digitally stamp Vault files.', 'error');
@@ -7060,7 +7570,10 @@ export default function App() {
   };
 
   const handleDeleteVaultDocument = (itemId: string) => {
-    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    if (!hasWorkspacePermission(currentUser.role, currentUser.email, state.permissionMatrix, 'publish_sops')) {
+      denyPermission('Delete Document Vault items', 'Editor or Super Admin');
+      return;
+    }
     const target = state.vaultDocuments.find((d) => d.id === itemId);
     if (!target) return;
     if (currentUser.role === 'Editor') {
@@ -7301,8 +7814,14 @@ export default function App() {
     } else if (notification.targetSection) {
       if (
         (notification.targetSection === 'settings' || notification.targetSection === 'audit') &&
-        currentUser.role !== 'Admin'
+        !isSuperAdminOperator
       ) {
+        denyPermission(
+          notification.targetSection === 'settings'
+            ? 'Admin Control Center'
+            : 'Activity Audit Trail',
+          'Super Admin',
+        );
         return;
       }
       setActiveSection(notification.targetSection);
@@ -7321,7 +7840,10 @@ export default function App() {
 
   // Bulk Priority Update
   const handleBulkUpdatePriority = (requestIds: string[], nextPriority: Priority) => {
-    if (currentUser.role !== 'Admin') return;
+    if (!hasWorkspacePermission(currentUser.role, currentUser.email, state.permissionMatrix, 'approve_requests')) {
+      denyPermission('Bulk-update request priority', 'Super Admin');
+      return;
+    }
     if (requestIds.length === 0) return;
     const now = new Date().toISOString();
     const auditEntries: AuditEvent[] = [];
@@ -7375,7 +7897,10 @@ export default function App() {
 
   // Bulk CSV Import
   const handleImportRequests = (rows: ImportedRequestRow[]) => {
-    if (currentUser.role !== 'Admin' && currentUser.role !== 'Editor') return;
+    if (!hasWorkspacePermission(currentUser.role, currentUser.email, state.permissionMatrix, 'create_requests')) {
+      denyPermission('Bulk-import operational requests', 'Editor or Super Admin');
+      return;
+    }
     if (rows.length === 0) return;
     const now = new Date().toISOString();
     const baseId = generateNextRequestId(state.requests);
@@ -8043,6 +8568,14 @@ export default function App() {
 
     const now = new Date().toISOString();
     const cleanReason = reason?.trim() || undefined;
+    if (!cleanReason || cleanReason.length < 3) {
+      pushToast(
+        'Rejection Reason Required',
+        'Please provide a clear rejection reason (at least 3 characters) before declining this Editor proposal.',
+        'warning',
+      );
+      return;
+    }
     const targetSectionMap: Record<PendingEditorChangeModule, NavSection> = {
       requests: 'requests',
       projects: 'projects',
@@ -8123,7 +8656,10 @@ export default function App() {
 
   // System Backup Export / Restore (Super Admin Only)
   const handleDownloadBackup = () => {
-    if (!isSuperAdminOperator) return;
+    if (!isSuperAdminOperator) {
+      denyPermission('Export system backup', 'Super Admin');
+      return;
+    }
     downloadSystemBackupJson(state, `${currentUser.name} (${currentUser.employeeId})`);
     const auditEntry = createAuditEvent(
       'SYS-BACKUP',
@@ -8143,7 +8679,10 @@ export default function App() {
   };
 
   const handleRestoreBackup = async (restoredState: NexOpsState) => {
-    if (currentUser.role !== 'Admin') return;
+    if (!isSuperAdminOperator) {
+      denyPermission('Restore system backup', 'Super Admin');
+      return;
+    }
     const restoreEvent = createAuditEvent(
       'SYS-RESTORE',
       'Team Updated',
@@ -8185,7 +8724,10 @@ export default function App() {
 
   // White-Label Branding, Custom Lists & Permission Matrix Handlers (Admin Only)
   const handleUpdateBranding = (nextBranding: CompanyBrandingConfig) => {
-    if (currentUser.role !== 'Admin') return;
+    if (!isSuperAdminOperator) {
+      denyPermission('Update company branding and SLA configuration', 'Super Admin');
+      return;
+    }
     const saved = dataService.branding.saveSync(nextBranding);
     setBranding(saved);
     const sla = saved.slaPolicy ?? DEFAULT_SLA_POLICY;
@@ -8214,7 +8756,10 @@ export default function App() {
   };
 
   const handleResetBranding = () => {
-    if (currentUser.role !== 'Admin') return;
+    if (!isSuperAdminOperator) {
+      denyPermission('Reset company branding', 'Super Admin');
+      return;
+    }
     const defaults = dataService.branding.resetSync();
     setBranding(defaults);
     void dataService.branding.saveCloud(defaults, currentUser.name).catch(handleCloudWriteError);
@@ -8261,7 +8806,10 @@ export default function App() {
   };
 
   const handleUpdatePermissionMatrix = (nextMatrix: PermissionMatrix) => {
-    if (currentUser.role !== 'Admin') return;
+    if (!isSuperAdminOperator) {
+      denyPermission('Modify role permission matrix', 'Super Admin');
+      return;
+    }
     const normalized = normalizePermissionMatrix(nextMatrix);
     const auditEntry = createAuditEvent(
       'SYS-RBAC-MATRIX',
@@ -8497,17 +9045,17 @@ export default function App() {
 
   return (
     <div className="min-h-screen w-full max-w-full overflow-x-clip bg-slate-50 text-slate-900 transition-colors dark:bg-slate-950 dark:text-slate-100">
-      {/* Main App Shell (hidden during window.print() when OfficialReportModal is open) */}
-      <div className={reportModalState.open ? 'no-print' : ''}>
+      {/* Main App Shell (hidden during window.print() when OfficialReportModal or AttendanceSummaryPrint is open) */}
+      <div className={reportModalState.open || attendancePrintModal?.open ? 'no-print' : ''}>
         {/* Fixed Left Sidebar (Desktop >= 1024px) & Slide-Over Drawer (Mobile/Tablet < 1024px) */}
         <Sidebar
           branding={branding}
           activeSection={activeSection}
-          onSelectSection={setActiveSection}
+          onSelectSection={handleSelectSection}
           activeWorkspaceTool={activeWorkspaceTool}
           onSelectWorkspaceTool={(tool) => {
             setActiveWorkspaceTool(tool);
-            setActiveSection('workspace');
+            handleSelectSection('workspace');
           }}
           activeRole={currentUser.role}
           currentUser={currentUser}
@@ -8546,6 +9094,13 @@ export default function App() {
             departments={branding.departments}
             requests={state.requests}
             auditLogs={state.globalAuditLogs.filter((a) => !isPrivateCommsAuditEvent(a))}
+            sops={state.sops}
+            vaultDocuments={state.vaultDocuments}
+            meetings={state.meetings}
+            calendarEvents={state.calendarEvents}
+            announcements={state.announcements}
+            attendanceLogs={state.attendanceLogs}
+            leaves={state.leaves}
             pendingEditorChanges={state.pendingEditorChanges}
             dbConnected={dbConnected}
             lastSyncError={lastSyncError}
@@ -8556,7 +9111,31 @@ export default function App() {
             onSelectRequestById={handleInspectRequestById}
             onSelectDepartment={handleSelectDepartmentFromSearch}
             onSelectAuditMatch={handleSelectAuditFromSearch}
-            onSelectSection={setActiveSection}
+            onSelectSection={handleSelectSection}
+            onSelectSopById={(sopId) => {
+              setJumpSopId(sopId);
+              handleSelectSection('sops');
+            }}
+            onSelectVaultDocById={(docId) => {
+              setJumpVaultDocId(docId);
+              handleSelectSection('vault');
+            }}
+            onSelectMeetingById={(meetingId) => {
+              setJumpMeetingId(meetingId);
+              handleSelectSection('meetings');
+            }}
+            onSelectCalendarDate={(dateKey) => {
+              setJumpCalendarDate(dateKey);
+              handleSelectSection('calendar');
+            }}
+            onSelectAnnouncementById={(annId) => {
+              setJumpAnnouncementId(annId);
+              handleSelectSection('dashboard');
+            }}
+            onSelectLeaveOrAttendance={(query) => {
+              setJumpLeaveQuery(query);
+              handleSelectSection('leaves');
+            }}
             notifications={state.notifications}
             onMarkAllRead={handleMarkAllRead}
             onClearNotifications={handleClearNotifications}
@@ -8575,7 +9154,7 @@ export default function App() {
             viewport={viewport}
             onSelectWorkspaceTool={(tool) => {
               setActiveWorkspaceTool(tool);
-              setActiveSection('workspace');
+              handleSelectSection('workspace');
             }}
           />
 
@@ -8583,6 +9162,8 @@ export default function App() {
             announcements={state.announcements}
             activeRole={currentUser.role}
             currentUserEmail={currentUser.email}
+            highlightedNoticeId={jumpAnnouncementId}
+            onClearHighlightedNotice={() => setJumpAnnouncementId(null)}
             onPublishAnnouncement={handlePublishAnnouncement}
             onArchiveAnnouncement={handleArchiveAnnouncement}
             onRestoreAnnouncement={handleRestoreAnnouncement}
@@ -8600,7 +9181,7 @@ export default function App() {
               activeSection={activeSection}
               activeRole={currentUser.role}
               isSuperAdmin={isSuperAdminOperator}
-              onSelectSection={setActiveSection}
+              onSelectSection={handleSelectSection}
               onUpdateBookmarks={handleUpdateQuickBookmarks}
             />
           </div>
@@ -8810,6 +9391,9 @@ export default function App() {
                     onAcknowledgeSop={handleAcknowledgeSop}
                     onReviseSop={handleReviseSop}
                     onStampSop={handleStampSop}
+                    onTransitionSopWorkflow={handleTransitionSopWorkflow}
+                    jumpToSopId={jumpSopId}
+                    onClearJumpSop={() => setJumpSopId(null)}
                   />
                 )}
 
@@ -8828,6 +9412,10 @@ export default function App() {
                     onDeleteDocument={handleDeleteVaultDocument}
                     onRequestSignOff={handleRequestVaultSignOff}
                     onAcknowledgeSignOff={handleAcknowledgeVaultSignOff}
+                    onDecisionSignOff={handleDecisionVaultSignOff}
+                    onTransitionVaultWorkflow={handleTransitionVaultWorkflow}
+                    jumpToDocId={jumpVaultDocId}
+                    onClearJumpDoc={() => setJumpVaultDocId(null)}
                     onRestoreRecycleItem={handleRestoreRecycleItem}
                     onPurgeRecycleItem={handlePurgeRecycleItem}
                   />
@@ -8848,6 +9436,12 @@ export default function App() {
                     onClockOut={handleClockOut}
                     onCreateLeave={handleCreateLeave}
                     onDecisionLeave={handleDecisionLeave}
+                    onOpenAttendancePrintModal={(payload) =>
+                      setAttendancePrintModal({ open: true, ...payload })
+                    }
+                    onDenyPermission={denyPermission}
+                    jumpQuery={jumpLeaveQuery}
+                    onClearJumpQuery={() => setJumpLeaveQuery(null)}
                   />
                 )}
 
@@ -8867,6 +9461,8 @@ export default function App() {
                     onInspectRequest={handleInspectRequestById}
                     onStampMeeting={handleStampMeeting}
                     onDeleteMeeting={handleDeleteMeeting}
+                    jumpToMeetingId={jumpMeetingId}
+                    onClearJumpMeeting={() => setJumpMeetingId(null)}
                   />
                 )}
 
@@ -8881,6 +9477,8 @@ export default function App() {
                     currentUser={currentUser}
                     onSaveEvent={handleSaveCalendarEvent}
                     onDeleteEvent={handleDeleteCalendarEvent}
+                    jumpToDate={jumpCalendarDate}
+                    onClearJumpCalendar={() => setJumpCalendarDate(null)}
                   />
                 )}
 
@@ -9026,7 +9624,13 @@ export default function App() {
         </div>
 
         {/* Create / Edit Request Modal */}
-        {createModalOpen && (currentUser.role === 'Admin' || currentUser.role === 'Editor') && (
+        {createModalOpen &&
+          hasWorkspacePermission(
+            currentUser.role,
+            currentUser.email,
+            state.permissionMatrix,
+            'create_requests',
+          ) && (
           <CreateRequestModal
             nextRequestId={nextRequestId}
             departments={branding.departments}
@@ -9048,7 +9652,13 @@ export default function App() {
         )}
 
         {/* CSV Bulk Import Modal */}
-        {importModalOpen && (currentUser.role === 'Admin' || currentUser.role === 'Editor') && (
+        {importModalOpen &&
+          hasWorkspacePermission(
+            currentUser.role,
+            currentUser.email,
+            state.permissionMatrix,
+            'create_requests',
+          ) && (
           <ImportRequestsModal
             nextRequestId={nextRequestId}
             departments={branding.departments}
@@ -9144,6 +9754,262 @@ export default function App() {
             pushToast('Print Dialog Opened', `Preparing ${reportTitle} for PDF/Print.`, 'info')
           }
         />
+      )}
+
+      {/* Print-Ready Attendance & Punctuality Summary Modal */}
+      {attendancePrintModal?.open && (
+        <div
+          className="print-report-overlay fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-2.5 backdrop-blur-xs sm:p-4 dark:bg-slate-950/80"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="attendance-summary-print-heading"
+        >
+          <div className="print-report-dialog flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900">
+            {/* Non-Printable Action Bar */}
+            <div className="no-print flex flex-wrap items-center justify-between gap-2.5 border-b border-slate-200 bg-slate-50 px-4 py-3 sm:px-6 dark:border-slate-800 dark:bg-slate-950/60">
+              <div className="min-w-0">
+                <h2
+                  id="attendance-summary-print-heading"
+                  className="font-display text-sm font-bold text-slate-900 dark:text-slate-100"
+                >
+                  Shift &amp; Attendance Summary Report
+                </h2>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  {attendancePrintModal.startDate} to {attendancePrintModal.endDate} · Department:{' '}
+                  {attendancePrintModal.department === 'All'
+                    ? 'All Departments'
+                    : attendancePrintModal.department}
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    exportAttendanceSummaryCsv({
+                      companyName: branding.companyName,
+                      startDate: attendancePrintModal.startDate,
+                      endDate: attendancePrintModal.endDate,
+                      department:
+                        attendancePrintModal.department === 'All'
+                          ? 'All Departments'
+                          : attendancePrintModal.department,
+                      preparedBy: `${currentUser.name} (${currentUser.employeeId})`,
+                      rows: attendancePrintModal.rows,
+                    });
+                    pushToast(
+                      'Attendance CSV Exported',
+                      `Exported ${attendancePrintModal.rows.length} employee summary row(s).`,
+                      'success',
+                    );
+                  }}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-800 transition-colors hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 whitespace-nowrap dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  <span>Export CSV</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    pushToast(
+                      'Print Dialog Opened',
+                      'Preparing Shift & Attendance Summary Report for PDF/Print.',
+                      'info',
+                    );
+                    window.print();
+                  }}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-slate-900 px-3.5 text-xs font-semibold text-white transition-colors hover:bg-slate-800 whitespace-nowrap dark:bg-indigo-600 dark:hover:bg-indigo-700"
+                >
+                  <Printer className="h-3.5 w-3.5" />
+                  <span>Print / Save PDF</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAttendancePrintModal(null)}
+                  aria-label="Close attendance summary print preview"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Printable Report Body */}
+            <div className="print-report-scroll flex-1 overflow-y-auto bg-white p-4 text-slate-900 sm:p-8">
+              {/* Branded Deep Navy Header (#0F172A) */}
+              <div className="rounded-xl bg-[#0F172A] px-5 py-4 text-white">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white/10">
+                      <NexOpsLogo className="h-7 w-7 text-white" />
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-bold tracking-widest text-indigo-300 uppercase">
+                        {branding.companyName} · Official Attendance Governance
+                      </p>
+                      <h3 className="text-lg font-bold tracking-tight text-white">
+                        Shift &amp; Attendance Summary Report
+                      </h3>
+                    </div>
+                  </div>
+                  <div className="text-right text-[11px] text-slate-300">
+                    <p>
+                      Period:{' '}
+                      <strong className="text-white">
+                        {attendancePrintModal.startDate} → {attendancePrintModal.endDate}
+                      </strong>
+                    </p>
+                    <p>
+                      Scope:{' '}
+                      <strong className="text-white">
+                        {attendancePrintModal.department === 'All'
+                          ? 'All Departments'
+                          : attendancePrintModal.department}
+                      </strong>
+                    </p>
+                    <p>Generated: {formatDateTime(new Date().toISOString())}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* KPI Totals Strip */}
+              {(() => {
+                const rows = attendancePrintModal.rows;
+                const totalHours = rows.reduce((s, r) => s + r.totalHours, 0);
+                const totalLate = rows.reduce((s, r) => s + r.lateCount, 0);
+                const totalEarlyOut = rows.reduce((s, r) => s + r.earlyOutCount, 0);
+                const avgPunctuality =
+                  rows.length > 0
+                    ? Math.round(
+                        rows.reduce((s, r) => s + r.punctualityScore, 0) / rows.length,
+                      )
+                    : 100;
+                return (
+                  <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+                      <p className="text-[10px] font-semibold tracking-wide text-slate-500 uppercase">
+                        Personnel Covered
+                      </p>
+                      <p className="mt-0.5 text-lg font-bold text-slate-900 tabular-nums">
+                        {rows.length}
+                      </p>
+                    </div>
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+                      <p className="text-[10px] font-semibold tracking-wide text-slate-500 uppercase">
+                        Total Hours Logged
+                      </p>
+                      <p className="mt-0.5 text-lg font-bold text-slate-900 tabular-nums">
+                        {totalHours.toFixed(1)}h
+                      </p>
+                    </div>
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+                      <p className="text-[10px] font-semibold tracking-wide text-slate-500 uppercase">
+                        Late / Early Out
+                      </p>
+                      <p className="mt-0.5 text-lg font-bold text-amber-700 tabular-nums">
+                        {totalLate} / {totalEarlyOut}
+                      </p>
+                    </div>
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+                      <p className="text-[10px] font-semibold tracking-wide text-slate-500 uppercase">
+                        Avg Punctuality
+                      </p>
+                      <p className="mt-0.5 text-lg font-bold text-emerald-700 tabular-nums">
+                        {avgPunctuality}%
+                      </p>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Summary Table */}
+              <div className="mt-5 overflow-x-auto rounded-xl border border-slate-200">
+                <table className="w-full min-w-[640px] border-collapse text-left text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-200 bg-slate-100 text-[10px] font-bold tracking-wider text-slate-600 uppercase">
+                      <th className="px-3 py-2.5">Employee</th>
+                      <th className="px-3 py-2.5">Department</th>
+                      <th className="px-3 py-2.5 text-right">Present Days</th>
+                      <th className="px-3 py-2.5 text-right">Total Hours</th>
+                      <th className="px-3 py-2.5 text-right">Late</th>
+                      <th className="px-3 py-2.5 text-right">Early Out</th>
+                      <th className="px-3 py-2.5 text-right">Punctuality %</th>
+                      <th className="px-3 py-2.5">Leave Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200">
+                    {attendancePrintModal.rows.length === 0 ? (
+                      <tr>
+                        <td
+                          colSpan={8}
+                          className="px-4 py-6 text-center text-xs text-slate-500"
+                        >
+                          No attendance or roster records match this period and department.
+                        </td>
+                      </tr>
+                    ) : (
+                      attendancePrintModal.rows.map((row) => (
+                        <tr key={row.key} className="hover:bg-slate-50/60">
+                          <td className="px-3 py-2 font-semibold text-slate-900">
+                            {row.name}
+                            <span className="ml-1.5 text-[10px] font-normal text-slate-500">
+                              ({row.employeeId})
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-slate-700">{row.department}</td>
+                          <td className="px-3 py-2 text-right font-semibold tabular-nums">
+                            {row.presentDays}
+                          </td>
+                          <td className="px-3 py-2 text-right font-semibold tabular-nums">
+                            {row.totalHours.toFixed(2)}h
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums text-amber-700">
+                            {row.lateCount}
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums text-orange-700">
+                            {row.earlyOutCount}
+                          </td>
+                          <td className="px-3 py-2 text-right font-bold tabular-nums text-emerald-700">
+                            {row.punctualityScore}%
+                          </td>
+                          <td className="px-3 py-2">
+                            <span
+                              className={`inline-flex rounded-md px-2 py-0.5 text-[10px] font-semibold ${
+                                row.leaveStatus === 'On Leave'
+                                  ? 'bg-amber-100 text-amber-800'
+                                  : row.leaveStatus === 'Pending Leave'
+                                    ? 'bg-indigo-100 text-indigo-800'
+                                    : 'bg-emerald-100 text-emerald-800'
+                              }`}
+                            >
+                              {row.leaveStatus}
+                            </span>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Official Super Admin Verification Footer */}
+              <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-4 text-[11px] text-slate-600">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="h-4 w-4 text-emerald-600" />
+                  <span>
+                    Verified by{' '}
+                    <strong className="text-slate-900">
+                      {currentUser.name} ({currentUser.employeeId})
+                    </strong>
+                    {isSuperAdminOperator ? ' · Primary Super Administrator' : ''}
+                  </span>
+                </div>
+                <span className="text-slate-400">
+                  {branding.companyName} · Confidential Enterprise Record
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

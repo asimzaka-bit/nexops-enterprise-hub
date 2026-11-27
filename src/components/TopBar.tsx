@@ -2,8 +2,10 @@ import {
   AlertTriangle,
   ArrowUpRight,
   Bell,
+  BookOpen,
   Briefcase,
   Building2,
+  Calendar,
   Camera,
   CheckCheck,
   CheckCircle2,
@@ -12,10 +14,12 @@ import {
   Clock,
   Cloud,
   FileSpreadsheet,
+  FolderLock,
   HardDrive,
   Info,
   LayoutGrid,
   LogOut,
+  Megaphone,
   Menu,
   MessageSquare,
   Monitor,
@@ -30,20 +34,28 @@ import {
   Sun,
   Trash2,
   User,
+  Users,
   X,
   XCircle,
 } from 'lucide-react';
 import { KeyboardEvent, ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AppNotification,
+  AttendanceLog,
   AuditEvent,
+  CalendarEvent,
+  CompanyAnnouncement,
   DEFAULT_SLA_POLICY,
   Department,
+  DocumentVaultItem,
+  LeaveRequest,
+  MeetingMinute,
   NavSection,
   OperationalRequest,
   PendingEditorChange,
   Role,
   SlaPolicyConfig,
+  SopDocument,
   TeamMember,
   ThemePreference,
   WorkspaceToolType,
@@ -51,6 +63,7 @@ import {
 import {
   formatDateTime,
   getRequestSlaStatus,
+  isAnnouncementActive,
   isPrivateCommsAuditEvent,
   isRequestPendingOver24h,
   isSuperAdminEmail,
@@ -78,6 +91,13 @@ interface TopBarProps {
   departments: string[];
   requests: OperationalRequest[];
   auditLogs: AuditEvent[];
+  sops?: SopDocument[];
+  vaultDocuments?: DocumentVaultItem[];
+  meetings?: MeetingMinute[];
+  calendarEvents?: CalendarEvent[];
+  announcements?: CompanyAnnouncement[];
+  attendanceLogs?: AttendanceLog[];
+  leaves?: LeaveRequest[];
   dbConnected: boolean;
   lastSyncError?: string | null;
   isSyncing: boolean;
@@ -88,6 +108,12 @@ interface TopBarProps {
   onSelectDepartment: (department: Department) => void;
   onSelectAuditMatch: (audit: AuditEvent) => void;
   onSelectSection?: (section: NavSection) => void;
+  onSelectSopById?: (sopId: string) => void;
+  onSelectVaultDocById?: (docId: string) => void;
+  onSelectMeetingById?: (meetingId: string) => void;
+  onSelectCalendarDate?: (dateKey: string) => void;
+  onSelectAnnouncementById?: (announcementId: string) => void;
+  onSelectLeaveOrAttendance?: (query: string) => void;
   notifications: AppNotification[];
   onMarkAllRead: () => void;
   onClearNotifications: () => void;
@@ -201,6 +227,13 @@ const SECTION_TITLES: Record<NavSection, { title: string; subtitle: string }> = 
 
 type CommandItem =
   | { kind: 'request'; request: OperationalRequest }
+  | { kind: 'sop'; sop: SopDocument }
+  | { kind: 'vault'; doc: DocumentVaultItem }
+  | { kind: 'meeting'; meeting: MeetingMinute }
+  | { kind: 'calendar'; event: CalendarEvent }
+  | { kind: 'announcement'; announcement: CompanyAnnouncement }
+  | { kind: 'leave'; leave: LeaveRequest }
+  | { kind: 'attendance'; log: AttendanceLog }
   | { kind: 'department'; department: Department; count: number }
   | { kind: 'module'; section: NavSection; title: string; subtitle: string }
   | { kind: 'user'; member: TeamMember }
@@ -216,6 +249,13 @@ export function TopBar({
   departments,
   requests,
   auditLogs,
+  sops = [],
+  vaultDocuments = [],
+  meetings = [],
+  calendarEvents = [],
+  announcements = [],
+  attendanceLogs = [],
+  leaves = [],
   dbConnected,
   lastSyncError,
   isSyncing,
@@ -226,6 +266,12 @@ export function TopBar({
   onSelectDepartment,
   onSelectAuditMatch,
   onSelectSection,
+  onSelectSopById,
+  onSelectVaultDocById,
+  onSelectMeetingById,
+  onSelectCalendarDate,
+  onSelectAnnouncementById,
+  onSelectLeaveOrAttendance,
   notifications,
   onMarkAllRead,
   onClearNotifications,
@@ -258,6 +304,7 @@ export function TopBar({
   }, []);
 
   const [commandOpen, setCommandOpen] = useState(false);
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState(globalSearch);
   const [highlightedIdx, setHighlightedIdx] = useState(0);
 
@@ -267,7 +314,10 @@ export function TopBar({
   const profileMenuRef = useRef<HTMLDivElement>(null);
   const workspaceMenuRef = useRef<HTMLDivElement>(null);
   const workspaceDropdownRef = useRef<HTMLDivElement>(null);
-  const paletteInputRef = useRef<HTMLInputElement>(null);
+  const desktopSearchRef = useRef<HTMLDivElement>(null);
+  const mobileSearchRef = useRef<HTMLDivElement>(null);
+  const desktopInputRef = useRef<HTMLInputElement>(null);
+  const mobileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setCommandQuery(globalSearch);
@@ -278,14 +328,22 @@ export function TopBar({
     setProfileOpen(false);
     setWorkspaceMenuOpen(false);
     setCommandOpen(true);
-    window.setTimeout(() => {
-      paletteInputRef.current?.focus();
-      paletteInputRef.current?.select();
-    }, 20);
+    const isSmallViewport = typeof window !== 'undefined' && window.innerWidth < 768;
+    if (isSmallViewport) {
+      setMobileSearchOpen(true);
+      window.setTimeout(() => {
+        mobileInputRef.current?.focus();
+      }, 20);
+    } else {
+      window.setTimeout(() => {
+        desktopInputRef.current?.focus();
+      }, 20);
+    }
   };
 
   const closeCommandPalette = () => {
     setCommandOpen(false);
+    setMobileSearchOpen(false);
   };
 
   useEffect(() => {
@@ -312,6 +370,16 @@ export function TopBar({
       ) {
         setWorkspaceMenuOpen(false);
       }
+      const insideDesktopSearch = Boolean(
+        desktopSearchRef.current && desktopSearchRef.current.contains(target),
+      );
+      const insideMobileSearch = Boolean(
+        mobileSearchRef.current && mobileSearchRef.current.contains(target),
+      );
+      if (!insideDesktopSearch && !insideMobileSearch) {
+        setCommandOpen(false);
+        setMobileSearchOpen(false);
+      }
     };
     document.addEventListener('mousedown', handleOutside);
     return () => document.removeEventListener('mousedown', handleOutside);
@@ -326,12 +394,21 @@ export function TopBar({
         setProfileOpen(false);
         setWorkspaceMenuOpen(false);
         setCommandOpen(true);
-        window.setTimeout(() => {
-          paletteInputRef.current?.focus();
-          paletteInputRef.current?.select();
-        }, 20);
+        if (window.innerWidth < 768) {
+          setMobileSearchOpen(true);
+          window.setTimeout(() => {
+            mobileInputRef.current?.focus();
+            mobileInputRef.current?.select();
+          }, 20);
+        } else {
+          window.setTimeout(() => {
+            desktopInputRef.current?.focus();
+            desktopInputRef.current?.select();
+          }, 20);
+        }
       } else if (e.key === 'Escape') {
         setCommandOpen(false);
+        setMobileSearchOpen(false);
         setNotifOpen(false);
         setProfileOpen(false);
         setWorkspaceMenuOpen(false);
@@ -385,6 +462,7 @@ export function TopBar({
 
   const commandResults = useMemo(() => {
     const q = commandQuery.trim().toLowerCase();
+    const selfEmailLower = currentUser.email.trim().toLowerCase();
 
     const matchedRequests = (
       q
@@ -397,19 +475,139 @@ export function TopBar({
               r.submittedBy.toLowerCase().includes(q),
           )
         : requests
-    ).slice(0, 5);
+    ).slice(0, 4);
+
+    const matchedSops = (
+      q
+        ? sops.filter(
+            (s) =>
+              s.code.toLowerCase().includes(q) ||
+              s.title.toLowerCase().includes(q) ||
+              s.department.toLowerCase().includes(q) ||
+              s.category.toLowerCase().includes(q) ||
+              s.authorName.toLowerCase().includes(q),
+          )
+        : []
+    ).slice(0, 4);
+
+    const visibleVaultDocs = vaultDocuments.filter((doc) => {
+      if (activeRole === 'Admin') return true;
+      if (doc.accessTag === 'Admin Restricted') return false;
+      if (doc.accessTag === 'Editors & Admins' && activeRole === 'Viewer') return false;
+      if (doc.accessTag === 'Department Only') {
+        return doc.department.toLowerCase() === currentUser.department.toLowerCase();
+      }
+      return true;
+    });
+
+    const matchedVaultDocs = (
+      q
+        ? visibleVaultDocs.filter(
+            (d) =>
+              d.title.toLowerCase().includes(q) ||
+              d.folder.toLowerCase().includes(q) ||
+              d.department.toLowerCase().includes(q) ||
+              d.uploadedBy.toLowerCase().includes(q) ||
+              (d.fileName ?? '').toLowerCase().includes(q),
+          )
+        : []
+    ).slice(0, 4);
+
+    const matchedMeetings = (
+      q
+        ? meetings.filter(
+            (m) =>
+              m.code.toLowerCase().includes(q) ||
+              m.title.toLowerCase().includes(q) ||
+              m.department.toLowerCase().includes(q) ||
+              m.facilitator.toLowerCase().includes(q) ||
+              m.summary.toLowerCase().includes(q),
+          )
+        : []
+    ).slice(0, 4);
+
+    const matchedCalendarEvents = (
+      q
+        ? calendarEvents.filter(
+            (ev) =>
+              ev.title.toLowerCase().includes(q) ||
+              ev.type.toLowerCase().includes(q) ||
+              ev.department.toLowerCase().includes(q) ||
+              ev.createdBy.toLowerCase().includes(q) ||
+              ev.date.toLowerCase().includes(q),
+          )
+        : []
+    ).slice(0, 4);
+
+    const activeAnnouncements = announcements.filter((a) => isAnnouncementActive(a, nowMs));
+    const matchedAnnouncements = (
+      q
+        ? activeAnnouncements.filter(
+            (a) =>
+              a.title.toLowerCase().includes(q) ||
+              a.message.toLowerCase().includes(q) ||
+              a.priorityTag.toLowerCase().includes(q),
+          )
+        : []
+    ).slice(0, 3);
+
+    const scopedLeaves =
+      activeRole === 'Admin'
+        ? leaves
+        : leaves.filter(
+            (l) =>
+              (l.employeeEmail && l.employeeEmail.trim().toLowerCase() === selfEmailLower) ||
+              l.employeeId === currentUser.employeeId ||
+              l.employeeName.trim().toLowerCase() === currentUser.name.trim().toLowerCase(),
+          );
+    const matchedLeaves = (
+      q
+        ? scopedLeaves.filter(
+            (l) =>
+              l.code.toLowerCase().includes(q) ||
+              l.employeeName.toLowerCase().includes(q) ||
+              l.department.toLowerCase().includes(q) ||
+              l.leaveType.toLowerCase().includes(q) ||
+              l.status.toLowerCase().includes(q),
+          )
+        : []
+    ).slice(0, 3);
+
+    const scopedAttendance =
+      activeRole === 'Admin'
+        ? attendanceLogs
+        : attendanceLogs.filter(
+            (a) =>
+              a.userId === currentUser.id ||
+              a.userEmail.trim().toLowerCase() === selfEmailLower,
+          );
+    const matchedAttendance = (
+      q
+        ? scopedAttendance.filter(
+            (a) =>
+              a.userName.toLowerCase().includes(q) ||
+              a.department.toLowerCase().includes(q) ||
+              a.attendanceDate.toLowerCase().includes(q) ||
+              a.status.toLowerCase().includes(q),
+          )
+        : []
+    ).slice(0, 3);
 
     const matchedDepartments = (
       q
         ? departments.filter((dept) => dept.toLowerCase().includes(q))
-        : departments
+        : departments.slice(0, 4)
     ).map((department) => ({
       department,
       count: requests.filter((r) => r.department === department).length,
     }));
 
     const availableModules = (Object.keys(SECTION_TITLES) as NavSection[])
-      .filter((section) => activeRole === 'Admin' || (section !== 'audit' && section !== 'settings'))
+      .filter(
+        (section) =>
+          (activeRole === 'Admin' && isSuperAdmin) ||
+          (section !== 'audit' && section !== 'settings'),
+      )
       .map((section) => ({
         section,
         title: SECTION_TITLES[section].title,
@@ -444,33 +642,39 @@ export function TopBar({
 
     const sanitizedAudits = auditLogs.filter((a) => !isPrivateCommsAuditEvent(a));
     const matchedAudits =
-      activeRole === 'Admin'
-        ? (q
-            ? sanitizedAudits.filter(
-                (a) =>
-                  a.requestId.toLowerCase().includes(q) ||
-                  a.actorName.toLowerCase().includes(q) ||
-                  (a.actorEmail ?? '').toLowerCase().includes(q) ||
-                  a.actorRole.toLowerCase().includes(q) ||
-                  a.actionType.toLowerCase().includes(q) ||
-                  a.details.toLowerCase().includes(q),
-              )
-            : sanitizedAudits
-          ).slice(0, 4)
+      activeRole === 'Admin' && isSuperAdmin && q
+        ? sanitizedAudits
+            .filter(
+              (a) =>
+                a.requestId.toLowerCase().includes(q) ||
+                a.actorName.toLowerCase().includes(q) ||
+                (a.actorEmail ?? '').toLowerCase().includes(q) ||
+                a.actorRole.toLowerCase().includes(q) ||
+                a.actionType.toLowerCase().includes(q) ||
+                a.details.toLowerCase().includes(q),
+            )
+            .slice(0, 3)
         : [];
 
     const flatItems: CommandItem[] = [
-      ...matchedRequests.map((request) => ({ kind: 'request' as const, request })),
-      ...matchedDepartments.map((d) => ({
-        kind: 'department' as const,
-        department: d.department,
-        count: d.count,
-      })),
       ...matchedModules.map((mod) => ({
         kind: 'module' as const,
         section: mod.section,
         title: mod.title,
         subtitle: mod.subtitle,
+      })),
+      ...matchedRequests.map((request) => ({ kind: 'request' as const, request })),
+      ...matchedVaultDocs.map((doc) => ({ kind: 'vault' as const, doc })),
+      ...matchedSops.map((sop) => ({ kind: 'sop' as const, sop })),
+      ...matchedMeetings.map((meeting) => ({ kind: 'meeting' as const, meeting })),
+      ...matchedCalendarEvents.map((event) => ({ kind: 'calendar' as const, event })),
+      ...matchedAnnouncements.map((announcement) => ({ kind: 'announcement' as const, announcement })),
+      ...matchedLeaves.map((leave) => ({ kind: 'leave' as const, leave })),
+      ...matchedAttendance.map((log) => ({ kind: 'attendance' as const, log })),
+      ...matchedDepartments.map((d) => ({
+        kind: 'department' as const,
+        department: d.department,
+        count: d.count,
       })),
       ...matchedUsers.map((member) => ({ kind: 'user' as const, member })),
       ...matchedAudits.map((audit) => ({ kind: 'audit' as const, audit })),
@@ -478,13 +682,41 @@ export function TopBar({
 
     return {
       matchedRequests,
+      matchedSops,
+      matchedVaultDocs,
+      matchedMeetings,
+      matchedCalendarEvents,
+      matchedAnnouncements,
+      matchedLeaves,
+      matchedAttendance,
       matchedDepartments,
       matchedModules,
       matchedUsers,
       matchedAudits,
       flatItems,
     };
-  }, [commandQuery, requests, departments, teamMembers, auditLogs, activeRole]);
+  }, [
+    commandQuery,
+    requests,
+    sops,
+    vaultDocuments,
+    meetings,
+    calendarEvents,
+    announcements,
+    leaves,
+    attendanceLogs,
+    departments,
+    teamMembers,
+    auditLogs,
+    activeRole,
+    isSuperAdmin,
+    currentUser.department,
+    currentUser.email,
+    currentUser.employeeId,
+    currentUser.id,
+    currentUser.name,
+    nowMs,
+  ]);
 
   useEffect(() => {
     setHighlightedIdx(0);
@@ -493,6 +725,48 @@ export function TopBar({
   const executeCommandItem = (item: CommandItem) => {
     if (item.kind === 'request') {
       onSelectRequestById(item.request.id);
+    } else if (item.kind === 'sop') {
+      if (onSelectSopById) {
+        onSelectSopById(item.sop.id);
+      } else {
+        onSelectSection?.('sops');
+      }
+    } else if (item.kind === 'vault') {
+      if (onSelectVaultDocById) {
+        onSelectVaultDocById(item.doc.id);
+      } else {
+        onSelectSection?.('vault');
+      }
+    } else if (item.kind === 'meeting') {
+      if (onSelectMeetingById) {
+        onSelectMeetingById(item.meeting.id);
+      } else {
+        onSelectSection?.('meetings');
+      }
+    } else if (item.kind === 'calendar') {
+      if (onSelectCalendarDate) {
+        onSelectCalendarDate(item.event.date);
+      } else {
+        onSelectSection?.('calendar');
+      }
+    } else if (item.kind === 'announcement') {
+      if (onSelectAnnouncementById) {
+        onSelectAnnouncementById(item.announcement.id);
+      } else {
+        onSelectSection?.('dashboard');
+      }
+    } else if (item.kind === 'leave') {
+      if (onSelectLeaveOrAttendance) {
+        onSelectLeaveOrAttendance(item.leave.code);
+      } else {
+        onSelectSection?.('leaves');
+      }
+    } else if (item.kind === 'attendance') {
+      if (onSelectLeaveOrAttendance) {
+        onSelectLeaveOrAttendance(item.log.userName);
+      } else {
+        onSelectSection?.('leaves');
+      }
     } else if (item.kind === 'department') {
       onSelectDepartment(item.department);
     } else if (item.kind === 'module') {
@@ -500,7 +774,7 @@ export function TopBar({
     } else if (item.kind === 'user') {
       if (item.member.id === currentUser.id) {
         onOpenProfile();
-      } else if (activeRole === 'Admin') {
+      } else if (activeRole === 'Admin' && isSuperAdmin) {
         onSelectSection?.('settings');
       } else {
         onSelectSection?.('dashboard');
@@ -513,6 +787,7 @@ export function TopBar({
 
   const handleSearchInputChange = (val: string) => {
     setCommandQuery(val);
+    setCommandOpen(true);
     if (activeSection === 'requests') {
       onGlobalSearchChange(val);
     }
@@ -553,6 +828,13 @@ export function TopBar({
   const renderCommandResultsBody = () => {
     const {
       matchedRequests,
+      matchedSops,
+      matchedVaultDocs,
+      matchedMeetings,
+      matchedCalendarEvents,
+      matchedAnnouncements,
+      matchedLeaves,
+      matchedAttendance,
       matchedDepartments,
       matchedModules,
       matchedUsers,
@@ -561,8 +843,8 @@ export function TopBar({
     } = commandResults;
     if (flatItems.length === 0) {
       return (
-        <div className="px-4 py-10 text-center text-xs text-slate-500 dark:text-slate-400">
-          No matching Requests, Departments, Modules, Users, or Audit Logs found for &ldquo;{commandQuery}&rdquo;.
+        <div className="px-4 py-8 text-center text-xs text-slate-500 dark:text-slate-400">
+          No workspace records matched &ldquo;{commandQuery}&rdquo;. Private 1-on-1 chats and direct mails are never indexed globally.
         </div>
       );
     }
@@ -570,10 +852,58 @@ export function TopBar({
     let runningIdx = 0;
 
     return (
-      <div className="max-h-[60vh] divide-y divide-slate-100 overflow-x-hidden overflow-y-auto dark:divide-slate-800">
+      <div className="max-h-[60dvh] divide-y divide-slate-100 overflow-x-hidden overflow-y-auto dark:divide-slate-800">
+        {matchedModules.length > 0 && onSelectSection && (
+          <div className="p-2">
+            <p className="px-2 py-1 text-[10px] font-bold tracking-wider text-slate-400 dark:text-slate-500">
+              MODULES
+            </p>
+            <div className="mt-0.5 space-y-0.5">
+              {matchedModules.map((mod) => {
+                const currentIdx = runningIdx++;
+                const isHighlighted = currentIdx === highlightedIdx;
+                return (
+                  <button
+                    key={mod.section}
+                    type="button"
+                    onClick={() =>
+                      executeCommandItem({
+                        kind: 'module',
+                        section: mod.section,
+                        title: mod.title,
+                        subtitle: mod.subtitle,
+                      })
+                    }
+                    className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left transition-colors ${
+                      isHighlighted
+                        ? 'bg-indigo-50 text-indigo-950 dark:bg-indigo-950/60 dark:text-indigo-100'
+                        : 'hover:bg-slate-50 dark:hover:bg-slate-800/70'
+                    }`}
+                  >
+                    <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                      <LayoutGrid className="h-4 w-4 shrink-0 text-indigo-600 dark:text-indigo-400" />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-xs font-semibold text-slate-900 dark:text-slate-100">
+                          {mod.title}
+                        </p>
+                        <p className="truncate text-[11px] text-slate-500 dark:text-slate-400">
+                          {mod.subtitle}
+                        </p>
+                      </div>
+                    </div>
+                    <span className="shrink-0 text-[11px] font-semibold whitespace-nowrap text-indigo-600 dark:text-indigo-400">
+                      Jump →
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {matchedRequests.length > 0 && (
           <div className="p-2">
-            <p className="px-2 py-1 text-[11px] font-bold tracking-wider text-slate-400 dark:text-slate-500">
+            <p className="px-2 py-1 text-[10px] font-bold tracking-wider text-slate-400 dark:text-slate-500">
               OPERATIONAL REQUESTS
             </p>
             <div className="mt-0.5 space-y-0.5">
@@ -585,13 +915,13 @@ export function TopBar({
                     key={req.id}
                     type="button"
                     onClick={() => executeCommandItem({ kind: 'request', request: req })}
-                    className={`flex w-full items-center justify-between gap-3 rounded-lg px-4 py-3 text-left transition-colors ${
+                    className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left transition-colors ${
                       isHighlighted
                         ? 'bg-indigo-50 text-indigo-950 dark:bg-indigo-950/60 dark:text-indigo-100'
                         : 'hover:bg-slate-50 dark:hover:bg-slate-800/70'
                     }`}
                   >
-                    <div className="flex min-w-0 flex-1 items-center gap-3">
+                    <div className="flex min-w-0 flex-1 items-center gap-2.5">
                       <ClipboardCheck className="h-4 w-4 shrink-0 text-indigo-600 dark:text-indigo-400" />
                       <div className="min-w-0 flex-1">
                         <div className="flex min-w-0 items-center gap-2">
@@ -615,9 +945,273 @@ export function TopBar({
           </div>
         )}
 
+        {matchedVaultDocs.length > 0 && (
+          <div className="p-2">
+            <p className="px-2 py-1 text-[10px] font-bold tracking-wider text-slate-400 dark:text-slate-500">
+              DOCUMENT VAULT
+            </p>
+            <div className="mt-0.5 space-y-0.5">
+              {matchedVaultDocs.map((doc) => {
+                const currentIdx = runningIdx++;
+                const isHighlighted = currentIdx === highlightedIdx;
+                return (
+                  <button
+                    key={doc.id}
+                    type="button"
+                    onClick={() => executeCommandItem({ kind: 'vault', doc })}
+                    className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left transition-colors ${
+                      isHighlighted
+                        ? 'bg-indigo-50 text-indigo-950 dark:bg-indigo-950/60 dark:text-indigo-100'
+                        : 'hover:bg-slate-50 dark:hover:bg-slate-800/70'
+                    }`}
+                  >
+                    <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                      <FolderLock className="h-4 w-4 shrink-0 text-slate-700 dark:text-indigo-400" />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-xs font-semibold text-slate-900 dark:text-slate-100">
+                          {doc.title}
+                        </p>
+                        <p className="truncate text-[11px] text-slate-500 dark:text-slate-400">
+                          {doc.folder} · {doc.department} · {doc.currentVersion || 'v1.0'}
+                        </p>
+                      </div>
+                    </div>
+                    <ArrowUpRight className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {matchedSops.length > 0 && (
+          <div className="p-2">
+            <p className="px-2 py-1 text-[10px] font-bold tracking-wider text-slate-400 dark:text-slate-500">
+              SOP &amp; POLICY VAULT
+            </p>
+            <div className="mt-0.5 space-y-0.5">
+              {matchedSops.map((sop) => {
+                const currentIdx = runningIdx++;
+                const isHighlighted = currentIdx === highlightedIdx;
+                return (
+                  <button
+                    key={sop.id}
+                    type="button"
+                    onClick={() => executeCommandItem({ kind: 'sop', sop })}
+                    className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left transition-colors ${
+                      isHighlighted
+                        ? 'bg-indigo-50 text-indigo-950 dark:bg-indigo-950/60 dark:text-indigo-100'
+                        : 'hover:bg-slate-50 dark:hover:bg-slate-800/70'
+                    }`}
+                  >
+                    <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                      <BookOpen className="h-4 w-4 shrink-0 text-indigo-600 dark:text-indigo-400" />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-xs font-semibold text-slate-900 dark:text-slate-100">
+                          {sop.code} · {sop.title}
+                        </p>
+                        <p className="truncate text-[11px] text-slate-500 dark:text-slate-400">
+                          {sop.department} · {sop.category} · {sop.version}
+                        </p>
+                      </div>
+                    </div>
+                    <ArrowUpRight className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {matchedMeetings.length > 0 && (
+          <div className="p-2">
+            <p className="px-2 py-1 text-[10px] font-bold tracking-wider text-slate-400 dark:text-slate-500">
+              MEETINGS &amp; MOM
+            </p>
+            <div className="mt-0.5 space-y-0.5">
+              {matchedMeetings.map((meeting) => {
+                const currentIdx = runningIdx++;
+                const isHighlighted = currentIdx === highlightedIdx;
+                return (
+                  <button
+                    key={meeting.id}
+                    type="button"
+                    onClick={() => executeCommandItem({ kind: 'meeting', meeting })}
+                    className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left transition-colors ${
+                      isHighlighted
+                        ? 'bg-indigo-50 text-indigo-950 dark:bg-indigo-950/60 dark:text-indigo-100'
+                        : 'hover:bg-slate-50 dark:hover:bg-slate-800/70'
+                    }`}
+                  >
+                    <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                      <Users className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-xs font-semibold text-slate-900 dark:text-slate-100">
+                          {meeting.code} · {meeting.title}
+                        </p>
+                        <p className="truncate text-[11px] text-slate-500 dark:text-slate-400">
+                          {meeting.department} · {meeting.meetingDate} · {meeting.facilitator}
+                        </p>
+                      </div>
+                    </div>
+                    <ArrowUpRight className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {matchedCalendarEvents.length > 0 && (
+          <div className="p-2">
+            <p className="px-2 py-1 text-[10px] font-bold tracking-wider text-slate-400 dark:text-slate-500">
+              CALENDAR EVENTS
+            </p>
+            <div className="mt-0.5 space-y-0.5">
+              {matchedCalendarEvents.map((ev) => {
+                const currentIdx = runningIdx++;
+                const isHighlighted = currentIdx === highlightedIdx;
+                return (
+                  <button
+                    key={ev.id}
+                    type="button"
+                    onClick={() => executeCommandItem({ kind: 'calendar', event: ev })}
+                    className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left transition-colors ${
+                      isHighlighted
+                        ? 'bg-indigo-50 text-indigo-950 dark:bg-indigo-950/60 dark:text-indigo-100'
+                        : 'hover:bg-slate-50 dark:hover:bg-slate-800/70'
+                    }`}
+                  >
+                    <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                      <Calendar className="h-4 w-4 shrink-0 text-indigo-600 dark:text-indigo-400" />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-xs font-semibold text-slate-900 dark:text-slate-100">
+                          {ev.title}
+                        </p>
+                        <p className="truncate text-[11px] text-slate-500 dark:text-slate-400">
+                          {ev.date} {ev.time} · {ev.type} · {ev.department}
+                        </p>
+                      </div>
+                    </div>
+                    <ArrowUpRight className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {matchedAnnouncements.length > 0 && (
+          <div className="p-2">
+            <p className="px-2 py-1 text-[10px] font-bold tracking-wider text-slate-400 dark:text-slate-500">
+              CIRCULARS &amp; NOTICES
+            </p>
+            <div className="mt-0.5 space-y-0.5">
+              {matchedAnnouncements.map((ann) => {
+                const currentIdx = runningIdx++;
+                const isHighlighted = currentIdx === highlightedIdx;
+                return (
+                  <button
+                    key={ann.id}
+                    type="button"
+                    onClick={() => executeCommandItem({ kind: 'announcement', announcement: ann })}
+                    className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left transition-colors ${
+                      isHighlighted
+                        ? 'bg-indigo-50 text-indigo-950 dark:bg-indigo-950/60 dark:text-indigo-100'
+                        : 'hover:bg-slate-50 dark:hover:bg-slate-800/70'
+                    }`}
+                  >
+                    <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                      <Megaphone className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-xs font-semibold text-slate-900 dark:text-slate-100">
+                          {ann.title}
+                        </p>
+                        <p className="truncate text-[11px] text-slate-500 dark:text-slate-400">
+                          [{ann.priorityTag}] · {ann.message}
+                        </p>
+                      </div>
+                    </div>
+                    <ArrowUpRight className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {(matchedLeaves.length > 0 || matchedAttendance.length > 0) && (
+          <div className="p-2">
+            <p className="px-2 py-1 text-[10px] font-bold tracking-wider text-slate-400 dark:text-slate-500">
+              ATTENDANCE &amp; LEAVES
+            </p>
+            <div className="mt-0.5 space-y-0.5">
+              {matchedLeaves.map((lve) => {
+                const currentIdx = runningIdx++;
+                const isHighlighted = currentIdx === highlightedIdx;
+                return (
+                  <button
+                    key={lve.id}
+                    type="button"
+                    onClick={() => executeCommandItem({ kind: 'leave', leave: lve })}
+                    className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left transition-colors ${
+                      isHighlighted
+                        ? 'bg-indigo-50 text-indigo-950 dark:bg-indigo-950/60 dark:text-indigo-100'
+                        : 'hover:bg-slate-50 dark:hover:bg-slate-800/70'
+                    }`}
+                  >
+                    <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                      <Clock className="h-4 w-4 shrink-0 text-indigo-600 dark:text-indigo-400" />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-xs font-semibold text-slate-900 dark:text-slate-100">
+                          {lve.code} · {lve.employeeName} ({lve.leaveType})
+                        </p>
+                        <p className="truncate text-[11px] text-slate-500 dark:text-slate-400">
+                          {lve.startDate} → {lve.endDate} · {lve.status}
+                        </p>
+                      </div>
+                    </div>
+                    <ArrowUpRight className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                  </button>
+                );
+              })}
+              {matchedAttendance.map((att) => {
+                const currentIdx = runningIdx++;
+                const isHighlighted = currentIdx === highlightedIdx;
+                return (
+                  <button
+                    key={att.id}
+                    type="button"
+                    onClick={() => executeCommandItem({ kind: 'attendance', log: att })}
+                    className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left transition-colors ${
+                      isHighlighted
+                        ? 'bg-indigo-50 text-indigo-950 dark:bg-indigo-950/60 dark:text-indigo-100'
+                        : 'hover:bg-slate-50 dark:hover:bg-slate-800/70'
+                    }`}
+                  >
+                    <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                      <Clock className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-xs font-semibold text-slate-900 dark:text-slate-100">
+                          {att.userName} · {att.attendanceDate}
+                        </p>
+                        <p className="truncate text-[11px] text-slate-500 dark:text-slate-400">
+                          {att.department} · {att.status}
+                          {typeof att.totalHours === 'number' ? ` · ${att.totalHours.toFixed(2)}h` : ''}
+                        </p>
+                      </div>
+                    </div>
+                    <ArrowUpRight className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {matchedDepartments.length > 0 && (
           <div className="p-2">
-            <p className="px-2 py-1 text-[11px] font-bold tracking-wider text-slate-400 dark:text-slate-500">
+            <p className="px-2 py-1 text-[10px] font-bold tracking-wider text-slate-400 dark:text-slate-500">
               DEPARTMENTS
             </p>
             <div className="mt-0.5 space-y-0.5">
@@ -635,13 +1229,13 @@ export function TopBar({
                         count: d.count,
                       })
                     }
-                    className={`flex w-full items-center justify-between gap-3 rounded-lg px-4 py-3 text-left transition-colors ${
+                    className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left transition-colors ${
                       isHighlighted
                         ? 'bg-indigo-50 text-indigo-950 dark:bg-indigo-950/60 dark:text-indigo-100'
                         : 'hover:bg-slate-50 dark:hover:bg-slate-800/70'
                     }`}
                   >
-                    <div className="flex min-w-0 flex-1 items-center gap-3">
+                    <div className="flex min-w-0 flex-1 items-center gap-2.5">
                       <Building2 className="h-4 w-4 shrink-0 text-slate-500 dark:text-slate-400" />
                       <span className="truncate text-xs font-semibold text-slate-900 dark:text-slate-100">
                         {d.department} Department
@@ -657,58 +1251,10 @@ export function TopBar({
           </div>
         )}
 
-        {matchedModules.length > 0 && onSelectSection && (
-          <div className="p-2">
-            <p className="px-2 py-1 text-[11px] font-bold tracking-wider text-slate-400 dark:text-slate-500">
-              MODULES
-            </p>
-            <div className="mt-0.5 space-y-0.5">
-              {matchedModules.map((mod) => {
-                const currentIdx = runningIdx++;
-                const isHighlighted = currentIdx === highlightedIdx;
-                return (
-                  <button
-                    key={mod.section}
-                    type="button"
-                    onClick={() =>
-                      executeCommandItem({
-                        kind: 'module',
-                        section: mod.section,
-                        title: mod.title,
-                        subtitle: mod.subtitle,
-                      })
-                    }
-                    className={`flex w-full items-center justify-between gap-3 rounded-lg px-4 py-3 text-left transition-colors ${
-                      isHighlighted
-                        ? 'bg-indigo-50 text-indigo-950 dark:bg-indigo-950/60 dark:text-indigo-100'
-                        : 'hover:bg-slate-50 dark:hover:bg-slate-800/70'
-                    }`}
-                  >
-                    <div className="flex min-w-0 flex-1 items-center gap-3">
-                      <LayoutGrid className="h-4 w-4 shrink-0 text-indigo-600 dark:text-indigo-400" />
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-xs font-semibold text-slate-900 dark:text-slate-100">
-                          {mod.title}
-                        </p>
-                        <p className="truncate text-[11px] text-slate-500 dark:text-slate-400">
-                          {mod.subtitle}
-                        </p>
-                      </div>
-                    </div>
-                    <span className="shrink-0 text-xs font-medium whitespace-nowrap text-indigo-600 dark:text-indigo-400">
-                      Open →
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
         {matchedUsers.length > 0 && (
           <div className="p-2">
-            <p className="px-2 py-1 text-[11px] font-bold tracking-wider text-slate-400 dark:text-slate-500">
-              USERS
+            <p className="px-2 py-1 text-[10px] font-bold tracking-wider text-slate-400 dark:text-slate-500">
+              TEAM DIRECTORY
             </p>
             <div className="mt-0.5 space-y-0.5">
               {matchedUsers.map((member) => {
@@ -719,13 +1265,13 @@ export function TopBar({
                     key={member.id}
                     type="button"
                     onClick={() => executeCommandItem({ kind: 'user', member })}
-                    className={`flex w-full items-center justify-between gap-3 rounded-lg px-4 py-3 text-left transition-colors ${
+                    className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left transition-colors ${
                       isHighlighted
                         ? 'bg-indigo-50 text-indigo-950 dark:bg-indigo-950/60 dark:text-indigo-100'
                         : 'hover:bg-slate-50 dark:hover:bg-slate-800/70'
                     }`}
                   >
-                    <div className="flex min-w-0 flex-1 items-center gap-3">
+                    <div className="flex min-w-0 flex-1 items-center gap-2.5">
                       <UserAvatar
                         name={member.name}
                         avatarUrl={member.avatarUrl}
@@ -763,7 +1309,7 @@ export function TopBar({
 
         {matchedAudits.length > 0 && (
           <div className="p-2">
-            <p className="px-2 py-1 text-[11px] font-bold tracking-wider text-slate-400 dark:text-slate-500">
+            <p className="px-2 py-1 text-[10px] font-bold tracking-wider text-slate-400 dark:text-slate-500">
               AUDIT LOGS
             </p>
             <div className="mt-0.5 space-y-0.5">
@@ -775,13 +1321,13 @@ export function TopBar({
                     key={audit.id}
                     type="button"
                     onClick={() => executeCommandItem({ kind: 'audit', audit })}
-                    className={`flex w-full items-center justify-between gap-3 rounded-lg px-4 py-3 text-left transition-colors ${
+                    className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left transition-colors ${
                       isHighlighted
                         ? 'bg-indigo-50 text-indigo-950 dark:bg-indigo-950/60 dark:text-indigo-100'
                         : 'hover:bg-slate-50 dark:hover:bg-slate-800/70'
                     }`}
                   >
-                    <div className="flex min-w-0 flex-1 items-center gap-3">
+                    <div className="flex min-w-0 flex-1 items-center gap-2.5">
                       <FileSpreadsheet className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
                       <div className="min-w-0 flex-1">
                         <div className="flex min-w-0 items-center gap-2">
@@ -837,21 +1383,65 @@ export function TopBar({
           </div>
         </div>
 
-        {/* Center: Clean Tablet/Desktop Search Trigger */}
-        <div className="hidden shrink-0 md:block md:w-36 lg:w-44 xl:w-48 2xl:w-56">
-          <button
-            id="global-request-search"
-            type="button"
-            onClick={openCommandPalette}
-            aria-label="Search workspace"
-            aria-expanded={commandOpen}
-            className="flex h-8 w-full min-w-0 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-left text-xs text-slate-500 transition-colors hover:border-slate-300 hover:bg-white focus-visible:border-indigo-500 focus-visible:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-400 dark:hover:border-slate-600 dark:hover:bg-slate-800"
-          >
+        {/* Center: Live Instant Jump Search (Tablet/Desktop) */}
+        <div
+          ref={desktopSearchRef}
+          className="relative hidden shrink-0 md:block md:w-44 lg:w-56 xl:w-64 2xl:w-72"
+        >
+          <div className="flex h-8 w-full min-w-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 focus-within:border-indigo-500 focus-within:bg-white dark:border-slate-700 dark:bg-slate-950 dark:focus-within:bg-slate-900">
             <Search className="h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-slate-500" aria-hidden="true" />
-            <span className="truncate text-xs">
-              {commandQuery.trim() ? commandQuery : 'Search workspace...'}
-            </span>
-          </button>
+            <input
+              ref={desktopInputRef}
+              id="global-request-search"
+              type="search"
+              value={commandQuery}
+              onFocus={() => {
+                setNotifOpen(false);
+                setProfileOpen(false);
+                setWorkspaceMenuOpen(false);
+                setCommandOpen(true);
+              }}
+              onChange={(e) => handleSearchInputChange(e.target.value)}
+              onKeyDown={handleSearchKeyDown}
+              placeholder="Search workspace..."
+              aria-label="Search workspace"
+              aria-expanded={commandOpen}
+              className="min-w-0 flex-1 bg-transparent text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none dark:text-slate-100 dark:placeholder:text-slate-500"
+            />
+            {commandQuery ? (
+              <button
+                type="button"
+                onClick={() => {
+                  handleSearchInputChange('');
+                  desktopInputRef.current?.focus();
+                }}
+                aria-label="Clear workspace search"
+                className="shrink-0 rounded p-0.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            ) : (
+              <span className="hidden shrink-0 rounded border border-slate-200 bg-white px-1 py-0.5 font-mono text-[9px] font-semibold text-slate-400 lg:inline dark:border-slate-700 dark:bg-slate-900 dark:text-slate-500">
+                Ctrl+K
+              </span>
+            )}
+          </div>
+
+          {commandOpen && (
+            <div
+              role="dialog"
+              aria-label="Instant Workspace Jump Search"
+              className="fixed top-[68px] right-3 z-50 w-[min(640px,calc(100vw-24px))] max-w-[calc(100vw-24px)] overflow-hidden rounded-2xl border border-slate-200 bg-white font-sans shadow-2xl md:absolute md:top-10 md:right-auto md:left-1/2 md:-translate-x-1/2 dark:border-slate-800 dark:bg-slate-900"
+            >
+              {renderCommandResultsBody()}
+              <div className="flex items-center justify-between gap-2 border-t border-slate-100 bg-slate-50/90 px-3.5 py-2 text-[11px] text-slate-500 dark:border-slate-800 dark:bg-slate-950/90 dark:text-slate-400">
+                <span className="truncate font-semibold text-slate-600 dark:text-slate-300">
+                  Instant Jump Search · Modules, Records &amp; People
+                </span>
+                <span className="shrink-0 whitespace-nowrap">↑↓ · Enter · Esc</span>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Right: DB Connection Pill + Refresh, Mobile Search, Workspace, Role, New Request, Theme Toggle, Bell, Profile */}
@@ -1565,67 +2155,54 @@ export function TopBar({
           </div>
         </div>
       )}
-    </header>
 
-      {/* Centered Wide Command Search Palette Modal (Desktop & Mobile) */}
-      {commandOpen && (
+      {/* Mobile Compact Expandable Instant Jump Search (< md) */}
+      {mobileSearchOpen && (
         <div
-          onClick={(e) => {
-            if (e.target === e.currentTarget) closeCommandPalette();
-          }}
-          className="fixed inset-0 z-50 flex items-start justify-center bg-slate-900/40 px-2.5 pt-12 backdrop-blur-[2px] sm:px-4 sm:pt-24 dark:bg-slate-950/75"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Global Command Search"
+          ref={mobileSearchRef}
+          className="border-t border-slate-200 bg-white px-2.5 py-2 md:hidden dark:border-slate-800 dark:bg-slate-900"
         >
-          <div className="gpu-accelerated w-full max-w-[calc(100vw-20px)] overflow-hidden rounded-2xl border border-slate-200 bg-white font-sans shadow-2xl sm:max-w-2xl dark:border-slate-800 dark:bg-slate-900">
-            <div className="flex items-center gap-2.5 border-b border-slate-200 px-4 py-3 dark:border-slate-800">
-              <Search className="h-4 w-4 shrink-0 text-slate-400 dark:text-slate-500" aria-hidden="true" />
-              <input
-                ref={paletteInputRef}
-                type="search"
-                value={commandQuery}
-                onChange={(e) => handleSearchInputChange(e.target.value)}
-                onKeyDown={handleSearchKeyDown}
-                placeholder="Search requests, departments, modules, users..."
-                className="h-9 min-w-0 flex-1 bg-transparent text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none dark:text-slate-100 dark:placeholder:text-slate-500"
-              />
-              {commandQuery && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    handleSearchInputChange('');
-                    paletteInputRef.current?.focus();
-                  }}
-                  className="shrink-0 rounded-md px-2 py-1 text-xs font-semibold text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
-                >
-                  Clear
-                </button>
-              )}
+          <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 focus-within:border-indigo-500 focus-within:bg-white dark:border-slate-700 dark:bg-slate-950">
+            <Search className="h-4 w-4 shrink-0 text-slate-400 dark:text-slate-500" />
+            <input
+              ref={mobileInputRef}
+              type="search"
+              value={commandQuery}
+              onChange={(e) => handleSearchInputChange(e.target.value)}
+              onKeyDown={handleSearchKeyDown}
+              placeholder="Search workspace..."
+              aria-label="Mobile workspace search"
+              className="min-w-0 flex-1 bg-transparent text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none dark:text-slate-100 dark:placeholder:text-slate-500"
+            />
+            {commandQuery && (
               <button
                 type="button"
-                onClick={closeCommandPalette}
-                aria-label="Close search modal"
-                title="Close search"
-                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 dark:hover:text-white"
+                onClick={() => {
+                  handleSearchInputChange('');
+                  mobileInputRef.current?.focus();
+                }}
+                className="shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
               >
-                <X className="h-4 w-4" />
+                Clear
               </button>
-            </div>
-
-            {renderCommandResultsBody()}
-
-            <div className="flex items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/80 px-4 py-2.5 text-xs text-slate-500 dark:border-slate-800 dark:bg-slate-950/80 dark:text-slate-400">
-              <span className="truncate font-semibold text-slate-600 dark:text-slate-300">
-                Instant Workspace Search
-              </span>
-              <span className="shrink-0 whitespace-nowrap">
-                ↑↓ Navigate · Enter Open
-              </span>
-            </div>
+            )}
+            <button
+              type="button"
+              onClick={closeCommandPalette}
+              aria-label="Close mobile search"
+              className="shrink-0 rounded p-1 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
           </div>
+          {commandOpen && (
+            <div className="mt-2 max-h-[70dvh] w-full max-w-[calc(100vw-20px)] overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-900">
+              {renderCommandResultsBody()}
+            </div>
+          )}
         </div>
       )}
+    </header>
     </>
   );
 }

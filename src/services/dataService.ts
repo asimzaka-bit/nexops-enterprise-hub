@@ -321,6 +321,7 @@ import {
   TaskSubtask,
   TeamChatMessage,
   TeamMember,
+  WorkflowApprovalStatus,
   WorkspaceDocToolType,
   WorkspaceEmailLog,
   WorkspaceSavedLink,
@@ -784,6 +785,10 @@ export type RequestExtendedMeta = {
   delegatedFromReviewer?: string;
   stage1Approval?: ApprovalStageSignOff | null;
   stage2Approval?: ApprovalStageSignOff | null;
+  revisionReason?: string | null;
+  rejectionReason?: string | null;
+  reviewedBy?: string | null;
+  reviewedAt?: string | null;
 };
 
 function readRequestMetaMap(): Record<string, RequestExtendedMeta> {
@@ -1463,6 +1468,11 @@ function mapDbLeave(row: NexOpsLeaveDbRow): LeaveRequest {
     backupDelegateName: row.backup_delegate_name ?? undefined,
     reviewerName: row.reviewer_name ?? undefined,
     reviewerNotes: row.reviewer_notes ?? undefined,
+    rejectionReason: row.status === 'Rejected' ? (row.reviewer_notes ?? undefined) : undefined,
+    reviewedAt:
+      row.status === 'Approved' || row.status === 'Rejected' || row.status === 'Under Review'
+        ? row.updated_at
+        : undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -1831,6 +1841,23 @@ function mapDbRequest(
     }
   }
 
+  let rejectionReasonFromAudit: string | undefined;
+  let reviewedByFromAudit: string | undefined;
+  let reviewedAtFromAudit: string | undefined;
+  if (row.status === 'Rejected') {
+    const latestRejectEvent = [...requestAudits]
+      .reverse()
+      .find((a) => a.actionType === 'Status Changed' && a.details.includes('Rejected'));
+    if (latestRejectEvent) {
+      reviewedByFromAudit = latestRejectEvent.actorName;
+      reviewedAtFromAudit = latestRejectEvent.timestamp;
+      const idx = latestRejectEvent.details.indexOf('Remarks:');
+      if (idx !== -1) {
+        rejectionReasonFromAudit = latestRejectEvent.details.slice(idx + 'Remarks:'.length).trim();
+      }
+    }
+  }
+
   const submitterMatch = teamMembers.find(
     (m) => m.name.toLowerCase() === (row.created_by ?? '').toLowerCase(),
   );
@@ -1962,7 +1989,22 @@ function mapDbRequest(
     stage1Approval,
     stage2Approval,
     checklist: Array.isArray(storedMeta?.checklist) ? storedMeta.checklist : [],
-    revisionReason,
+    revisionReason:
+      storedMeta?.revisionReason === null
+        ? undefined
+        : storedMeta?.revisionReason ?? revisionReason,
+    rejectionReason:
+      storedMeta?.rejectionReason === null
+        ? undefined
+        : storedMeta?.rejectionReason ?? rejectionReasonFromAudit,
+    reviewedBy:
+      storedMeta?.reviewedBy === null
+        ? undefined
+        : storedMeta?.reviewedBy ?? reviewedByFromAudit,
+    reviewedAt:
+      storedMeta?.reviewedAt === null
+        ? undefined
+        : storedMeta?.reviewedAt ?? reviewedAtFromAudit,
     auditTrail: requestAudits,
   };
 }
@@ -2968,12 +3010,26 @@ export const dataService = {
     const sopMetaRow = sysMap.get(SYSTEM_STATE_KEYS.SOP_METADATA);
     const sopMetaMap: Record<
       string,
-      { versions?: DocumentVersionEntry[]; approvalStamp?: DigitalApprovalStamp }
+      {
+        versions?: DocumentVersionEntry[];
+        approvalStamp?: DigitalApprovalStamp;
+        workflowStatus?: WorkflowApprovalStatus;
+        rejectionReason?: string;
+        reviewedBy?: string;
+        reviewedAt?: string;
+      }
     > =
       sopMetaRow && sopMetaRow.payload && typeof sopMetaRow.payload === 'object'
         ? (sopMetaRow.payload as Record<
             string,
-            { versions?: DocumentVersionEntry[]; approvalStamp?: DigitalApprovalStamp }
+            {
+              versions?: DocumentVersionEntry[];
+              approvalStamp?: DigitalApprovalStamp;
+              workflowStatus?: WorkflowApprovalStatus;
+              rejectionReason?: string;
+              reviewedBy?: string;
+              reviewedAt?: string;
+            }
           >)
         : {};
     const localSopById = new Map(localSnapshot.sops.map((s) => [s.id, s]));
@@ -2987,6 +3043,10 @@ export const dataService = {
             ...mapped,
             versions: meta?.versions ?? localSop?.versions,
             approvalStamp: meta?.approvalStamp ?? localSop?.approvalStamp,
+            workflowStatus: meta?.workflowStatus ?? localSop?.workflowStatus,
+            rejectionReason: meta?.rejectionReason ?? localSop?.rejectionReason,
+            reviewedBy: meta?.reviewedBy ?? localSop?.reviewedBy,
+            reviewedAt: meta?.reviewedAt ?? localSop?.reviewedAt,
           };
         })
       : localSnapshot.sops;
@@ -3100,6 +3160,10 @@ export const dataService = {
               currentVersion: meta.currentVersion ?? mapped.currentVersion,
               versions: meta.versions ?? mapped.versions,
               approvalStamp: meta.approvalStamp ?? mapped.approvalStamp,
+              workflowStatus: meta.workflowStatus ?? mapped.workflowStatus,
+              rejectionReason: meta.rejectionReason ?? mapped.rejectionReason,
+              reviewedBy: meta.reviewedBy ?? mapped.reviewedBy,
+              reviewedAt: meta.reviewedAt ?? mapped.reviewedAt,
               expiryDate: meta.expiryDate ?? mapped.expiryDate,
               signOffRequests: meta.signOffRequests ?? mapped.signOffRequests,
             }
@@ -4957,12 +5021,33 @@ export const dataService = {
     async updateStatus(
       requestId: string,
       nextStatus: RequestStatus,
-      _revisionReason: string | undefined,
+      reasonOrComment: string | undefined,
       updatedAt: string,
       auditEntry: AuditEvent,
       _notification: AppNotification,
     ): Promise<void> {
-      saveRequestMeta(requestId, { updatedAt });
+      const metaPatch: RequestExtendedMeta = {
+        updatedAt,
+        ...(nextStatus === 'Revision Required'
+          ? { revisionReason: reasonOrComment ?? null, rejectionReason: null }
+          : nextStatus === 'Rejected'
+            ? {
+                rejectionReason: reasonOrComment ?? null,
+                reviewedBy: auditEntry.actorName,
+                reviewedAt: updatedAt,
+              }
+            : nextStatus === 'Approved'
+              ? {
+                  revisionReason: null,
+                  rejectionReason: null,
+                  reviewedBy: auditEntry.actorName,
+                  reviewedAt: updatedAt,
+                }
+              : nextStatus === 'Submitted'
+                ? { revisionReason: null, rejectionReason: null }
+                : {}),
+      };
+      saveRequestMeta(requestId, metaPatch);
       if (!supabase) {
         return;
       }
@@ -5231,16 +5316,40 @@ export const dataService = {
         .from('nexops_sops')
         .upsert(toSopDbRow(sop), { onConflict: 'id' });
       if (error) throw error;
-      if (allSops || sop.versions || sop.approvalStamp) {
+      if (
+        allSops ||
+        sop.versions ||
+        sop.approvalStamp ||
+        sop.workflowStatus ||
+        sop.rejectionReason ||
+        sop.reviewedBy
+      ) {
         const metaBundle: Record<
           string,
-          { versions?: DocumentVersionEntry[]; approvalStamp?: DigitalApprovalStamp }
+          {
+            versions?: DocumentVersionEntry[];
+            approvalStamp?: DigitalApprovalStamp;
+            workflowStatus?: WorkflowApprovalStatus;
+            rejectionReason?: string;
+            reviewedBy?: string;
+            reviewedAt?: string;
+          }
         > = {};
         for (const item of allSops ?? [sop]) {
-          if (item.versions?.length || item.approvalStamp) {
+          if (
+            item.versions?.length ||
+            item.approvalStamp ||
+            item.workflowStatus ||
+            item.rejectionReason ||
+            item.reviewedBy
+          ) {
             metaBundle[item.id] = {
               versions: item.versions,
               approvalStamp: item.approvalStamp,
+              workflowStatus: item.workflowStatus,
+              rejectionReason: item.rejectionReason,
+              reviewedBy: item.reviewedBy,
+              reviewedAt: item.reviewedAt,
             };
           }
         }

@@ -16,6 +16,7 @@ import {
   DocumentVaultItem,
   FontStyleOption,
   LeaveRequest,
+  LeaveStatus,
   MeetingActionItem,
   MeetingActionStatus,
   MeetingMinute,
@@ -1136,6 +1137,40 @@ export function normalizePermissionMatrix(raw: unknown): PermissionMatrix {
   return base;
 }
 
+const EDITOR_BLOCKED_PERMISSIONS = new Set<PermissionKey>([
+  'approve_requests',
+  'approve_leaves',
+  'publish_announcements',
+  'manage_admin_settings',
+]);
+
+export function hasWorkspacePermission(
+  role: Role,
+  email: string | null | undefined,
+  matrix: PermissionMatrix | undefined,
+  key: PermissionKey,
+): boolean {
+  if (role === 'Viewer') return false;
+  if (role === 'Admin') {
+    if (key === 'manage_admin_settings') {
+      return isSuperAdminEmail(email);
+    }
+    if (isSuperAdminEmail(email)) return true;
+    const safeMatrix = matrix ?? DEFAULT_PERMISSION_MATRIX;
+    return Boolean(safeMatrix.Admin?.[key] ?? true);
+  }
+  if (role === 'Editor') {
+    if (EDITOR_BLOCKED_PERMISSIONS.has(key)) return false;
+    const safeMatrix = matrix ?? DEFAULT_PERMISSION_MATRIX;
+    return Boolean(safeMatrix.Editor?.[key] ?? DEFAULT_PERMISSION_MATRIX.Editor[key]);
+  }
+  return false;
+}
+
+export function isLeavePendingStatus(status: LeaveStatus): boolean {
+  return status === 'Submitted' || status === 'Pending' || status === 'Under Review';
+}
+
 export function parseSystemBackupJson(rawText: string): NexOpsState {
   let parsed: unknown;
   try {
@@ -1854,7 +1889,7 @@ export function isPrivateCommsAuditEvent(ev?: Partial<AuditEvent> | null): boole
 // ---------------------------------------------------------------------------
 
 export function isLeavePendingOver24h(leave: LeaveRequest, nowMs: number = Date.now()): boolean {
-  if (leave.status !== 'Pending') return false;
+  if (!isLeavePendingStatus(leave.status)) return false;
   const createdMs = new Date(leave.createdAt).getTime();
   if (Number.isNaN(createdMs)) return false;
   return nowMs - createdMs >= 24 * 60 * 60 * 1000;
@@ -2483,3 +2518,225 @@ export function saveQuickBookmarks(
   }
 }
 
+// ---------------------------------------------------------------------------
+// 7. Automated Shift & Attendance Summary Report Builders
+// ---------------------------------------------------------------------------
+
+export interface AttendanceSummaryRow {
+  key: string;
+  employeeId: string;
+  name: string;
+  email: string;
+  department: string;
+  presentDays: number;
+  totalHours: number;
+  lateCount: number;
+  earlyOutCount: number;
+  onTimeCount: number;
+  punctualityScore: number;
+  leaveStatus: 'On Leave' | 'Pending Leave' | 'Available';
+}
+
+export function buildAttendanceSummaryRows(params: {
+  attendanceLogs: AttendanceLog[];
+  leaves: LeaveRequest[];
+  teamMembers: TeamMember[];
+  shiftRosters?: Record<string, DepartmentShiftConfig>;
+  startDate: string;
+  endDate: string;
+  department: string;
+}): AttendanceSummaryRow[] {
+  const {
+    attendanceLogs,
+    leaves,
+    teamMembers,
+    shiftRosters,
+    startDate,
+    endDate,
+    department,
+  } = params;
+  const today = getTodayDateString();
+  const cleanStart = startDate.trim() || '0000-01-01';
+  const cleanEnd = endDate.trim() || '9999-12-31';
+
+  const rosterMembers = teamMembers.filter(
+    (m) =>
+      m.active !== false &&
+      (m.approvalStatus ?? 'approved') === 'approved' &&
+      (department === 'All' || m.department === department),
+  );
+
+  type Bucket = {
+    key: string;
+    employeeId: string;
+    name: string;
+    email: string;
+    department: string;
+    logs: AttendanceLog[];
+  };
+
+  const buckets = new Map<string, Bucket>();
+
+  for (const m of rosterMembers) {
+    const emailKey = (m.email || m.id).trim().toLowerCase();
+    buckets.set(emailKey, {
+      key: emailKey,
+      employeeId: m.employeeId,
+      name: m.name,
+      email: m.email,
+      department: m.department,
+      logs: [],
+    });
+  }
+
+  for (const log of attendanceLogs) {
+    const logDate = (log.attendanceDate || '').slice(0, 10);
+    if (logDate < cleanStart || logDate > cleanEnd) continue;
+    if (department !== 'All' && log.department !== department) continue;
+
+    const emailKey = (log.userEmail || log.userId || log.userName).trim().toLowerCase();
+    const existing = buckets.get(emailKey);
+    if (existing) {
+      existing.logs.push(log);
+    } else {
+      buckets.set(emailKey, {
+        key: emailKey,
+        employeeId: log.employeeId,
+        name: log.userName,
+        email: log.userEmail,
+        department: log.department,
+        logs: [log],
+      });
+    }
+  }
+
+  const rows: AttendanceSummaryRow[] = [];
+  buckets.forEach((bucket) => {
+    const stats = calculatePunctualityStats(bucket.logs, shiftRosters);
+    const distinctDates = new Set(
+      bucket.logs.map((l) => (l.attendanceDate || '').slice(0, 10)).filter(Boolean),
+    );
+    const totalHours = Number(
+      bucket.logs
+        .reduce((sum, l) => {
+          if (typeof l.totalHours === 'number' && Number.isFinite(l.totalHours)) {
+            return sum + l.totalHours;
+          }
+          if (l.checkInTime && l.checkOutTime) {
+            const diff =
+              (new Date(l.checkOutTime).getTime() - new Date(l.checkInTime).getTime()) /
+              3600000;
+            return sum + Math.max(0, Number.isFinite(diff) ? diff : 0);
+          }
+          return sum;
+        }, 0)
+        .toFixed(2),
+    );
+
+    const matchingLeaves = leaves.filter((lv) => {
+      const emailMatch =
+        lv.employeeEmail &&
+        bucket.email &&
+        lv.employeeEmail.trim().toLowerCase() === bucket.email.trim().toLowerCase();
+      const idMatch = lv.employeeId && lv.employeeId === bucket.employeeId;
+      const nameMatch = lv.employeeName.trim().toLowerCase() === bucket.name.trim().toLowerCase();
+      return Boolean(emailMatch || idMatch || nameMatch);
+    });
+
+    const isOnLeaveToday = matchingLeaves.some(
+      (lv) => lv.status === 'Approved' && lv.startDate <= today && lv.endDate >= today,
+    );
+    const isOnLeaveInWindow = matchingLeaves.some(
+      (lv) => lv.status === 'Approved' && lv.startDate <= cleanEnd && lv.endDate >= cleanStart,
+    );
+    const hasPendingLeave = matchingLeaves.some(
+      (lv) => isLeavePendingStatus(lv.status) && lv.startDate <= cleanEnd && lv.endDate >= cleanStart,
+    );
+
+    const leaveStatus: AttendanceSummaryRow['leaveStatus'] =
+      isOnLeaveToday || isOnLeaveInWindow
+        ? 'On Leave'
+        : hasPendingLeave
+          ? 'Pending Leave'
+          : 'Available';
+
+    rows.push({
+      key: bucket.key,
+      employeeId: bucket.employeeId,
+      name: bucket.name,
+      email: bucket.email,
+      department: bucket.department,
+      presentDays: distinctDates.size,
+      totalHours,
+      lateCount: stats.lateCount,
+      earlyOutCount: stats.earlyOutCount,
+      onTimeCount: stats.onTimeCount,
+      punctualityScore: bucket.logs.length > 0 ? stats.score : 100,
+      leaveStatus,
+    });
+  });
+
+  return rows.sort((a, b) => {
+    if (b.presentDays !== a.presentDays) return b.presentDays - a.presentDays;
+    return a.name.localeCompare(b.name);
+  });
+}
+
+export function exportAttendanceSummaryCsv(params: {
+  companyName: string;
+  startDate: string;
+  endDate: string;
+  department: string;
+  preparedBy: string;
+  rows: AttendanceSummaryRow[];
+}): void {
+  const lines: string[] = [
+    [
+      escapeCsvCell(`${params.companyName} - Shift & Attendance Summary Report`),
+      escapeCsvCell(`Window: ${params.startDate} to ${params.endDate}`),
+      escapeCsvCell(`Department: ${params.department}`),
+      escapeCsvCell(`Prepared By: ${params.preparedBy}`),
+    ].join(','),
+    '',
+    [
+      'Employee ID',
+      'Employee Name',
+      'Email',
+      'Department',
+      'Present Days',
+      'Total Working Hours',
+      'On-Time Check-Ins',
+      'Late Check-Ins',
+      'Early Outs',
+      'Punctuality Score (%)',
+      'Leave Status',
+    ].join(','),
+    ...params.rows.map((r) =>
+      [
+        escapeCsvCell(r.employeeId),
+        escapeCsvCell(r.name),
+        escapeCsvCell(r.email),
+        escapeCsvCell(r.department),
+        escapeCsvCell(String(r.presentDays)),
+        escapeCsvCell(r.totalHours.toFixed(2)),
+        escapeCsvCell(String(r.onTimeCount)),
+        escapeCsvCell(String(r.lateCount)),
+        escapeCsvCell(String(r.earlyOutCount)),
+        escapeCsvCell(`${r.punctualityScore}%`),
+        escapeCsvCell(r.leaveStatus),
+      ].join(','),
+    ),
+  ];
+
+  const csvContent = lines.join('\r\n');
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  const dateStamp = getTodayDateString();
+  link.href = url;
+  link.setAttribute('download', `nexops-attendance-summary-${dateStamp}.csv`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}

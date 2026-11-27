@@ -766,48 +766,56 @@ export function TeamSettingsView({
                       )}
                     </div>
 
-                    {/* Optional Reject Reason Bar */}
+                    {/* Mandatory Reject Reason Bar */}
                     {chg.status === 'pending' && isRejecting && onRejectEditorChange && (
-                      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-rose-200 bg-rose-50/70 p-3 dark:border-rose-900/60 dark:bg-rose-950/30">
-                        <input
-                          type="text"
-                          value={rejectionReasonDraft}
-                          onChange={(e) => setRejectionReasonDraft(e.target.value)}
-                          placeholder="Optional rejection reason for the Editor..."
-                          className="h-8 w-full min-w-0 flex-1 rounded-lg border border-rose-200 bg-white px-3 text-xs text-slate-900 focus:border-rose-500 focus:outline-none sm:min-w-[220px] dark:border-rose-800 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
-                        />
-                        <button
-                          type="button"
-                          disabled={isBusy}
-                          onClick={async () => {
-                            setEditorChangeBusyId(chg.id);
-                            try {
-                              await onRejectEditorChange(
-                                chg.id,
-                                rejectionReasonDraft.trim() || undefined,
-                              );
+                      <div className="space-y-2 rounded-lg border border-rose-200 bg-rose-50/70 p-3 dark:border-rose-900/60 dark:bg-rose-950/30">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <input
+                            type="text"
+                            required
+                            value={rejectionReasonDraft}
+                            onChange={(e) => setRejectionReasonDraft(e.target.value)}
+                            placeholder="Mandatory rejection reason for the Editor (min 3 characters)..."
+                            className="h-8 w-full min-w-0 flex-1 rounded-lg border border-rose-200 bg-white px-3 text-xs text-slate-900 focus:border-rose-500 focus:outline-none sm:min-w-[220px] dark:border-rose-800 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
+                          />
+                          <button
+                            type="button"
+                            disabled={isBusy || rejectionReasonDraft.trim().length < 3}
+                            onClick={async () => {
+                              const trimmed = rejectionReasonDraft.trim();
+                              if (trimmed.length < 3) return;
+                              setEditorChangeBusyId(chg.id);
+                              try {
+                                await onRejectEditorChange(chg.id, trimmed);
+                                setRejectingChangeId(null);
+                                setRejectionReasonDraft('');
+                              } finally {
+                                setEditorChangeBusyId(null);
+                              }
+                            }}
+                            className="inline-flex h-8 items-center gap-1 rounded-lg bg-rose-600 px-3 text-xs font-semibold text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                            <span>Confirm Reject</span>
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isBusy}
+                            onClick={() => {
                               setRejectingChangeId(null);
                               setRejectionReasonDraft('');
-                            } finally {
-                              setEditorChangeBusyId(null);
-                            }
-                          }}
-                          className="inline-flex h-8 items-center gap-1 rounded-lg bg-rose-600 px-3 text-xs font-semibold text-white hover:bg-rose-700 disabled:opacity-60"
-                        >
-                          <X className="h-3.5 w-3.5" />
-                          <span>Confirm Reject</span>
-                        </button>
-                        <button
-                          type="button"
-                          disabled={isBusy}
-                          onClick={() => {
-                            setRejectingChangeId(null);
-                            setRejectionReasonDraft('');
-                          }}
-                          className="h-8 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
-                        >
-                          Cancel
-                        </button>
+                            }}
+                            className="h-8 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                        {rejectionReasonDraft.trim().length > 0 &&
+                          rejectionReasonDraft.trim().length < 3 && (
+                            <p className="text-[11px] font-medium text-rose-700 dark:text-rose-300">
+                              Please enter at least 3 characters explaining why this proposal is rejected.
+                            </p>
+                          )}
                       </div>
                     )}
 

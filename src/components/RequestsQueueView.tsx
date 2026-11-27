@@ -92,6 +92,7 @@ const BOARD_COLUMNS: {
   { status: 'Under QA Review', accentDot: 'bg-amber-500', headerBg: 'bg-amber-50/60 dark:bg-amber-950/40' },
   { status: 'Revision Required', accentDot: 'bg-rose-600', headerBg: 'bg-rose-50/60 dark:bg-rose-950/40' },
   { status: 'Approved', accentDot: 'bg-emerald-600', headerBg: 'bg-emerald-50/60 dark:bg-emerald-950/40' },
+  { status: 'Rejected', accentDot: 'bg-rose-700', headerBg: 'bg-rose-100/70 dark:bg-rose-950/60' },
 ];
 
 const PRIORITIES: (Priority | 'All')[] = ['All', 'Urgent', 'High', 'Medium', 'Low'];
@@ -721,6 +722,13 @@ export function RequestsQueueView({
                             </div>
                           )}
 
+                          {req.status === 'Rejected' && req.rejectionReason && (
+                            <div className="mt-2 rounded-lg border border-rose-200 bg-rose-50/90 px-2.5 py-1.5 text-[11px] text-rose-800 dark:border-rose-900/60 dark:bg-rose-950/50 dark:text-rose-200">
+                              <span className="font-bold">Rejected: </span>
+                              <span className="line-clamp-2">{req.rejectionReason}</span>
+                            </div>
+                          )}
+
                           <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-2.5 text-[11px] text-slate-500 dark:border-slate-800 dark:text-slate-400">
                             <span className="truncate font-medium text-slate-700 dark:text-slate-300">
                               {req.department}
@@ -896,6 +904,11 @@ export function RequestsQueueView({
                             )}
                           {overdue && <OverdueBadge days={overdueDays} />}
                         </div>
+                        {req.status === 'Rejected' && req.rejectionReason && (
+                          <p className="mt-1 max-w-[230px] truncate text-[11px] font-medium text-rose-700 dark:text-rose-300" title={req.rejectionReason}>
+                            Reason: {req.rejectionReason}
+                          </p>
+                        )}
                       </td>
                       <td className="px-3 py-3.5 font-mono text-xs text-slate-600 tabular-nums whitespace-nowrap dark:text-slate-400">
                         {doneChecks}/{totalChecks}
